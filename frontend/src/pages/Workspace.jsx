@@ -16,6 +16,11 @@ export default function Workspace() {
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
+  const [models, setModels] = useState([]);
+  const [reco, setReco] = useState(null);
+  const [chosen, setChosen] = useState("");
+
+  useEffect(() => { api.get("/models").then((r) => setModels(r.data.models)).catch(() => {}); }, []);
 
   const load = () => {
     const params = [];
@@ -32,7 +37,20 @@ export default function Workspace() {
   const delegate = async () => {
     if (!goal.trim()) return;
     setBusy(true);
-    try { const r = await api.post("/tasks", { goal }); setGoal(""); toast.success("Aivora mulai mengerjakan..."); nav(`/workspace/${r.data.id}`); }
+    try {
+      const rc = await api.post("/tasks/recommend", { goal });
+      if (rc.data.needs_choice && rc.data.recommendation) {
+        setReco(rc.data);
+        setChosen(rc.data.recommendation.executable ? rc.data.recommendation.id : rc.data.default);
+        setBusy(false);
+        return;
+      }
+      await runTask(null);
+    } catch (e) { await runTask(null); }
+  };
+  const runTask = async (model) => {
+    setBusy(true);
+    try { const r = await api.post("/tasks", { goal, model }); setGoal(""); setReco(null); toast.success("Tim agen mulai mengerjakan..."); nav(`/workspace/${r.data.id}`); }
     catch (e) { toast.error("Gagal"); } finally { setBusy(false); }
   };
   const del = async (id, e) => { e.stopPropagation(); await api.delete(`/tasks/${id}`); load(); };
@@ -45,8 +63,21 @@ export default function Workspace() {
       <div className="mt-6 aivora-card p-5" style={{ background: "linear-gradient(135deg, rgba(0,209,255,.08), rgba(124,58,237,.1))" }}>
         <textarea className="input-dark min-h-[90px]" placeholder={t("work.delegate")} value={goal} onChange={(e) => setGoal(e.target.value)} data-testid="goal-input" />
         <button onClick={delegate} disabled={busy} className="btn-grad mt-3 flex items-center gap-2 rounded-xl px-6 py-3 text-sm" data-testid="delegate-btn">
-          <Sparkles size={16} /> {busy ? "..." : "Delegasikan ke Aivora"}
+          <Sparkles size={16} /> {busy ? "..." : "Delegasikan ke Tim"}
         </button>
+        {reco && (
+          <div className="mt-4 rounded-2xl border border-[#2F6BFF]/30 bg-[#EEF3FF] p-4" data-testid="reco-panel">
+            <p className="text-sm font-semibold text-slate-900">💡 Rekomendasi model untuk tugas ini</p>
+            <p className="mt-1 text-xs text-slate-600"><b>{reco.recommendation.label}</b> — {reco.recommendation.reason}.{!reco.recommendation.executable && " (Model khusus ini belum dapat dieksekusi di sini; tugas akan dijalankan dengan model teks terbaik yang tersedia.)"}</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <select className="input-dark w-56 py-2" value={chosen} onChange={(e) => setChosen(e.target.value)} data-testid="reco-model-select">
+                {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+              <button onClick={() => runTask(chosen)} disabled={busy} className="btn-grad rounded-xl px-5 py-2 text-sm" data-testid="reco-run-btn">Jalankan</button>
+              <button onClick={() => runTask(null)} disabled={busy} className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-600">Pakai default</button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-8 flex flex-wrap items-center gap-2">

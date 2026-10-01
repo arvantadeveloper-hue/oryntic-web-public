@@ -5,6 +5,8 @@ import math
 from typing import Optional
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpeech
+import io
 
 from db import db, now_iso, new_id
 
@@ -42,6 +44,9 @@ def model_label(model_key: str | None) -> str:
 TEXT_CREDITS_PER_1K_CHARS = 2.0   # applied on input+output chars
 IMAGE_CREDITS = 25
 PROFILE_CREDITS = 8
+STT_CREDITS = 5
+TTS_CREDITS = 4
+VISION_CREDITS = 6
 MIN_CREDITS = 1
 
 
@@ -125,3 +130,26 @@ async def generate_image(prompt: str, reference_b64: Optional[str] = None) -> Op
         mime = img.get("mime_type", "image/png")
         return f"data:{mime};base64,{img['data']}"
     return None
+
+
+async def transcribe_audio(data: bytes, filename: str = "audio.webm") -> str:
+    stt = OpenAISpeechToText(api_key=EMERGENT_LLM_KEY)
+    f = io.BytesIO(data)
+    f.name = filename
+    resp = await stt.transcribe(file=f, model="whisper-1", response_format="json")
+    return (getattr(resp, "text", None) or "").strip()
+
+
+async def synthesize_speech(text: str, voice: str = "alloy") -> bytes:
+    tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
+    return await tts.generate_speech(text=text[:4096], model="tts-1", voice=voice)
+
+
+async def describe_image(b64: str) -> str:
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=new_id(),
+                   system_message="You describe images factually for use as chat context.").with_model("gemini", "gemini-3.1-pro-preview")
+    try:
+        resp = await chat.send_message(UserMessage(text="Describe this image in detail (objects, text, context).", file_contents=[ImageContent(b64)]))
+        return _extract_text(resp).strip()
+    except Exception:
+        return ""

@@ -1,5 +1,7 @@
 import json
 import asyncio
+import base64
+import io
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -7,9 +9,36 @@ from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
 from auth import current_user
-from llm import llm_text, record_usage, text_credits
+from llm import llm_text, record_usage, text_credits, describe_image, VISION_CREDITS
 
 router = APIRouter(prefix="/api", tags=["chat"])
+
+
+async def _process_attachments(attachments, user_id):
+    """Return (context_text, light_meta_list). Extracts text from pdf/text, vision-describes images."""
+    ctx, meta = [], []
+    for a in (attachments or [])[:5]:
+        atype = a.get("type", "text")
+        name = a.get("name", "file")
+        data = a.get("data", "")
+        meta.append({"type": atype, "name": name})
+        try:
+            if atype == "image":
+                desc = await describe_image(data.split(",")[-1])
+                if desc:
+                    await record_usage(user_id, "vision", VISION_CREDITS, {"name": name})
+                    ctx.append(f"[Gambar '{name}']: {desc}")
+            elif atype == "pdf":
+                from pypdf import PdfReader
+                raw = base64.b64decode(data.split(",")[-1])
+                reader = PdfReader(io.BytesIO(raw))
+                txt = "".join((p.extract_text() or "") + "\n" for p in reader.pages[:20])
+                ctx.append(f"[PDF '{name}']:\n{txt[:6000]}")
+            else:
+                ctx.append(f"[Berkas '{name}']:\n{str(data)[:6000]}")
+        except Exception:
+            ctx.append(f"[Lampiran '{name}' tidak dapat diproses]")
+    return ("\n\n".join(ctx), meta)
 
 
 class ConvIn(BaseModel):
@@ -43,14 +72,20 @@ async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
     personas = await _get_personas(x.persona_ids)
     if not personas:
         raise HTTPException(400, "Pilih minimal satu persona untuk memulai percakapan")
-    is_group = x.type == "group" and len(personas) > 1
+    multi = len(personas) > 1 and x.type in ("group", "meeting")
+    ctype = x.type if multi else "private"
     title = x.title
     if not title:
-        title = "Grup: " + ", ".join(p["name"] for p in personas) if is_group else f"Chat dengan {personas[0]['name']}"
+        if ctype == "meeting":
+            title = "Meeting: " + ", ".join(p["name"] for p in personas)
+        elif ctype == "group":
+            title = "Grup: " + ", ".join(p["name"] for p in personas)
+        else:
+            title = f"Chat dengan {personas[0]['name']}"
     cid = new_id()
     doc = {
         "id": cid, "user_id": u["id"],
-        "type": "group" if is_group else "private",
+        "type": ctype,
         "persona_ids": [p["id"] for p in personas],
         "persona_id": personas[0]["id"],
         "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait")} for p in personas],
@@ -121,22 +156,34 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     if not personas:
         raise HTTPException(400, "Percakapan ini tidak memiliki persona")
 
+    attach_text, attach_meta = await _process_attachments(x.attachments, u["id"])
     user_msg = {"id": new_id(), "conversation_id": cid, "role": "user", "content": x.content,
-                "attachments": x.attachments, "created_at": now_iso()}
+                "attachments": attach_meta, "created_at": now_iso()}
     await db.messages.insert_one(dict(user_msg))
+
+    # @mention routing: if the user names specific personas, only they respond
+    lower = x.content.lower()
+    mentioned = [p for p in personas if ("@" + p["name"].lower().replace(" ", "")) in lower.replace(" ", "")
+                 or ("@" + p["name"].lower()) in lower]
+    responders = mentioned if mentioned else personas
     roster = [p["name"] for p in personas]
+    ctype = conv.get("type", "private")
 
     async def stream():
         total = 0
-        for persona in personas:
+        for persona in responders:
+            meta = {"persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait")}
+            yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
             system = await _persona_system(persona, u, roster if len(personas) > 1 else None)
             history = await _history_text(cid)
-            prompt = f"{history}\n{persona['name']}:"
+            prompt = history
+            if attach_text:
+                prompt += f"\n\n[Lampiran dari user]:\n{attach_text}"
+            prompt += f"\n{persona['name']}:"
             try:
                 full = await llm_text(system, prompt, persona.get("model"))
             except Exception:
                 full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
-            meta = {"persona_id": persona["id"], "persona_name": persona["name"]}
             words = full.split(" ")
             for i, w in enumerate(words):
                 chunk = w if i == 0 else " " + w
@@ -149,7 +196,28 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
                       "persona_id": persona["id"], "persona_name": persona["name"],
                       "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso()}
             await db.messages.insert_one(dict(ai_msg))
-            yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full, 'portrait': persona.get('portrait')})}\n\n"
+            yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full})}\n\n"
+
+        # meeting moderator summary
+        if ctype == "meeting" and len(responders) > 1:
+            mod_meta = {"persona_id": "__moderator__", "persona_name": "Moderator", "portrait": None, "is_moderator": True}
+            yield f"data: {json.dumps({**mod_meta, 'start': True})}\n\n"
+            history = await _history_text(cid, limit=20)
+            sys = ("You are the meeting Moderator. Summarize the discussion so far into: key points, agreements, "
+                   "disagreements, and clear action items. Be concise and neutral. Use markdown.")
+            summary = await llm_text(sys, f"Topik: {x.content}\n\nDiskusi:\n{history}\n\nModerator summary:")
+            words = summary.split(" ")
+            for i, w in enumerate(words):
+                yield f"data: {json.dumps({**mod_meta, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
+                await asyncio.sleep(0.008)
+            used = text_credits(history, summary)
+            total += used
+            await record_usage(u["id"], "meeting_summary", used, {"conversation_id": cid})
+            msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": summary,
+                   "persona_id": "__moderator__", "persona_name": "Moderator", "is_moderator": True,
+                   "portrait": None, "credits": used, "created_at": now_iso()}
+            await db.messages.insert_one(dict(msg))
+            yield f"data: {json.dumps({**mod_meta, 'final': True, 'message_id': msg['id'], 'content': summary})}\n\n"
 
         bal = (await db.users.find_one({"id": u["id"]}))["credits"]
         await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso(), "last_message": x.content[:120]}})
