@@ -120,9 +120,21 @@ async def del_conv(cid: str, u: dict = Depends(current_user)):
     return {"ok": True}
 
 
+LANG_NAMES = {"id": "Bahasa Indonesia", "en": "English", "es": "Spanish", "fr": "French",
+              "de": "German", "pt": "Portuguese", "ar": "Arabic", "ja": "Japanese",
+              "ko": "Korean", "zh": "Chinese", "hi": "Hindi", "ru": "Russian", "it": "Italian"}
+
+
+def _lang_name(user) -> str:
+    code = ((user.get("settings", {}) or {}).get("conversation_language") or "id").lower()
+    return LANG_NAMES.get(code, LANG_NAMES.get(code.split("-")[0], "Bahasa Indonesia"))
+
+
 async def _persona_system(persona, user, roster=None):
     prof = persona.get("profile", {})
-    parts = [f"You are '{persona['name']}', an AI persona. {prof.get('system_instructions','')}"]
+    lang_name = _lang_name(user)
+    parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in. Never switch to another language unless the user themselves writes in a different language."]
+    parts.append(f"You are '{persona['name']}', an AI persona. {prof.get('system_instructions','')}")
     pers = prof.get("personality", {})
     parts.append(f"Communication style: {pers.get('communication_style','')}. Formality: {pers.get('formality','')}. Attitude: {pers.get('attitude','')}.")
     parts.append("You are an AI and must not claim to have real human feelings or needs. Be warm but honest.")
@@ -134,8 +146,7 @@ async def _persona_system(persona, user, roster=None):
         if others:
             parts.append(f"You are in a group conversation with the user and other AI assistants: {', '.join(others)}. "
                          f"Respond only as {persona['name']}, keep it concise, build on what others said without repeating them, and do not speak for the others.")
-    lang = user.get("settings", {}).get("conversation_language", "id")
-    parts.append(f"Default conversation language: {lang} (follow the user's language if they switch).")
+    parts.append(f"Reminder: reply in {lang_name}.")
     return "\n".join(parts)
 
 
@@ -204,7 +215,7 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
             mod_meta = {"persona_id": "__moderator__", "persona_name": "Moderator", "portrait": None, "is_moderator": True}
             yield f"data: {json.dumps({**mod_meta, 'start': True})}\n\n"
             history = await _history_text(cid, limit=20)
-            sys = ("You are the meeting Moderator. Summarize the discussion so far into: key points, agreements, "
+            sys = (f"You are the meeting Moderator. You MUST write entirely in {_lang_name(u)}. Summarize the discussion so far into: key points, agreements, "
                    "disagreements, and clear action items. Be concise and neutral. Use markdown.")
             summary = await llm_text(sys, f"Topik: {x.content}\n\nDiskusi:\n{history}\n\nModerator summary:")
             words = summary.split(" ")
@@ -233,10 +244,10 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
                 mod_meta = {"persona_id": "__moderator__", "persona_name": "Moderator", "portrait": None, "is_moderator": True, "moderator_kind": "interject", "voice": "onyx"}
                 yield f"data: {json.dumps({**mod_meta, 'start': True})}\n\n"
                 history = await _history_text(cid, limit=12)
-                sys = ("You are the meeting Moderator facilitating a LIVE discussion. In 1-2 short sentences only, gently "
-                       "steer the conversation: acknowledge a key point, ask one sharp follow-up question, or invite a "
-                       "specific participant to respond by name. Warm, concise, natural. Do NOT summarize everything. "
-                       "Reply in the user's language (Indonesian by default).")
+                sys = (f"You are the meeting Moderator facilitating a LIVE discussion. You MUST write entirely in {_lang_name(u)}. "
+                       "In 1-2 short sentences only, gently steer the conversation: acknowledge a key point, ask one sharp "
+                       "follow-up question, or invite a specific participant to respond by name. Warm, concise, natural. "
+                       "Do NOT summarize everything.")
                 inter = await llm_text(sys, f"Peserta: {', '.join(roster)}\n\nDiskusi terakhir:\n{history}\n\nModerator (singkat):")
                 for i, w in enumerate(inter.split(" ")):
                     yield f"data: {json.dumps({**mod_meta, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
@@ -270,9 +281,8 @@ async def meeting_summary(cid: str, u: dict = Depends(current_user)):
     history = await _history_text(cid, limit=40)
     if not history.strip():
         raise HTTPException(400, "Belum ada diskusi untuk diringkas")
-    sys = ("You are the meeting Moderator. Summarize the whole discussion into: key points, agreements, "
-           "disagreements, and clear action items. Be concise, warm and neutral. Use markdown. "
-           f"Write in the user's conversation language ({u.get('settings',{}).get('conversation_language','id')}).")
+    sys = (f"You are the meeting Moderator. You MUST write entirely in {_lang_name(u)}. Summarize the whole discussion into: key points, agreements, "
+           "disagreements, and clear action items. Be concise, warm and neutral. Use markdown.")
     summary = await llm_text(sys, f"Diskusi rapat:\n{history}\n\nRingkasan moderator:")
     used = text_credits(history, summary)
     await record_usage(u["id"], "meeting_summary", used, {"conversation_id": cid})
