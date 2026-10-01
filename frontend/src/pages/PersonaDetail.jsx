@@ -1,9 +1,16 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, MessageSquare, RefreshCw, Wand2, Copy, Trash2, Brain, Plus } from "lucide-react";
+import { ArrowLeft, MessageSquare, RefreshCw, Wand2, Copy, Trash2, Brain, Plus, Volume2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../lib/api";
+import { api, API_BASE, getToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+
+const VOICE_LABELS = {
+  alloy: "Netral & seimbang", nova: "Hangat & ramah", shimmer: "Lembut & cerah",
+  echo: "Tenang & jernih", fable: "Ekspresif & bercerita", onyx: "Dalam & berwibawa",
+  coral: "Ceria & bersahabat", sage: "Bijak & menenangkan", ash: "Mantap & percaya diri",
+};
+const VOICE_SAMPLE = "Halo, senang berkenalan dengan Anda. Saya siap membantu kapan saja.";
 
 export default function PersonaDetail() {
   const { id } = useParams();
@@ -17,11 +24,26 @@ export default function PersonaDetail() {
   const [newMem, setNewMem] = useState("");
   const [models, setModels] = useState([]);
   const [voices, setVoices] = useState([]);
+  const [previewing, setPreviewing] = useState(null);
+  const previewAudioRef = useRef(null);
 
   useEffect(() => { api.get("/models").then((r) => setModels(r.data.models)).catch(() => {}); api.get("/voice/voices").then((r) => setVoices(r.data.voices)).catch(() => {}); }, []);
+  useEffect(() => () => { try { previewAudioRef.current?.pause(); } catch (e) {} }, []);
   const modelLabel = (key) => (models.find((m) => m.id === key) || {}).label || key;
   const changeModel = async (key) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, model: key }); setP(r.data); toast.success("Model diperbarui"); };
   const changeVoice = async (v) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, voice: v }); setP(r.data); toast.success("Suara diperbarui"); };
+  const previewVoice = async (v) => {
+    try { previewAudioRef.current?.pause(); } catch (e) {}
+    setPreviewing(v);
+    try {
+      const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: VOICE_SAMPLE, voice: v }) });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const a = new Audio(URL.createObjectURL(blob)); previewAudioRef.current = a;
+      a.onended = () => setPreviewing(null); a.onerror = () => setPreviewing(null);
+      await a.play(); refreshUser();
+    } catch (e) { setPreviewing(null); toast.error("Gagal memutar contoh suara"); }
+  };
 
   const load = () => api.get(`/personas/${id}`).then((r) => setP(r.data)).catch(() => toast.error("Tidak ditemukan"));
   const loadMem = () => api.get(`/memory?persona_id=${id}`).then((r) => setMems(r.data)).catch(() => {});
@@ -82,10 +104,33 @@ export default function PersonaDetail() {
             </select>
           </div>
           <div className="mt-3">
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Suara (TTS)</label>
-            <select className="input-dark py-2.5" value={p.voice || "alloy"} onChange={(e) => changeVoice(e.target.value)} data-testid="persona-voice-select">
-              {voices.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Suara (TTS)</label>
+              <button onClick={() => previewVoice(p.voice || "alloy")} data-testid="persona-voice-preview-current" className="flex items-center gap-1 text-xs font-semibold text-[#2F6BFF]" title="Dengar suara saat ini">
+                {previewing === (p.voice || "alloy") ? <Loader2 size={13} className="animate-spin" /> : <Volume2 size={13} />} Dengar
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {voices.map((v) => {
+                const on = (p.voice || "alloy") === v;
+                return (
+                  <div key={v} data-testid={`persona-voice-${v}`}
+                    className={`flex items-center gap-2 rounded-xl border p-2.5 transition ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3] hover:bg-slate-50"}`}>
+                    <button type="button" onClick={() => changeVoice(v)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${on ? "btn-grad border-transparent" : "border-slate-300"}`}>{on && <span className="h-1.5 w-1.5 rounded-full bg-white" />}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-bold capitalize text-slate-900">{v}</span>
+                        <span className="block truncate text-xs text-slate-400">{VOICE_LABELS[v] || "Suara"}</span>
+                      </span>
+                    </button>
+                    <button type="button" onClick={() => previewVoice(v)} data-testid={`persona-voice-preview-${v}`}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#E7ECF3] text-[#2F6BFF] hover:bg-[#EEF3FF]" title="Dengar contoh">
+                      {previewing === v ? <Loader2 size={15} className="animate-spin" /> : <Volume2 size={15} />}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
           <div className="mt-3 space-y-2">
             <button onClick={startChat} data-testid="persona-start-chat" className="btn-grad flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm"><MessageSquare size={16} /> Mulai Chat</button>
