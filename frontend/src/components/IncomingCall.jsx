@@ -4,9 +4,12 @@ import { api, API_BASE, getToken } from "../lib/api";
 import { Mark } from "./Logo";
 import { useAuth } from "../context/AuthContext";
 import { VideoRoom } from "./VideoRoom";
+import { RealtimeCall } from "./RealtimeCall";
+import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
 
 export function IncomingCall() {
   const { user, refreshUser } = useAuth();
+  const rt = useRealtimeStatus();
   const [call, setCall] = useState(null);
   const [answered, setAnswered] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -31,7 +34,9 @@ export function IncomingCall() {
   }, [user, answered, inCall]);
 
   if (inCall) {
-    return <VideoRoom conv={inCall.conv} cid={inCall.cid} isPrivate onClose={() => { setInCall(null); setAnswered(null); setCall(null); }} onRefresh={() => refreshUser()} />;
+    const close = () => { setInCall(null); setAnswered(null); setCall(null); };
+    if (inCall.realtime) return <RealtimeCall conv={inCall.conv} cid={inCall.cid} opening={inCall.opening} onClose={close} onRefresh={() => refreshUser()} />;
+    return <VideoRoom conv={inCall.conv} cid={inCall.cid} isPrivate onClose={close} onRefresh={() => refreshUser()} />;
   }
   if (!call) return null;
   const persona = call.persona;
@@ -64,10 +69,15 @@ export function IncomingCall() {
   const accept = async () => {
     setBusy(true);
     try {
-      const r = await api.post(`/reminders/${call.id}/respond`, { action: "accept" });
+      const r = await api.post(`/reminders/${call.id}/respond`, { action: "accept", realtime: !!rt.enabled });
       dismissed.current.add(call.id);
-      setAnswered({ ...r.data, name });
       refreshUser();
+      if (rt.enabled && r.data.conversation) {
+        // the assistant opens the realtime call by speaking the reminder itself
+        setInCall({ conv: r.data.conversation, cid: r.data.conversation.id, realtime: true, opening: r.data.opening });
+        return;
+      }
+      setAnswered({ ...r.data, name });
       speakAndContinue(r.data);
     } catch (e) {} finally { setBusy(false); }
   };

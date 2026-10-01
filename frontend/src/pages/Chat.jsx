@@ -7,6 +7,8 @@ import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
+import { RealtimeCall } from "../components/RealtimeCall";
+import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
 
 function Avatar({ name, portrait, size = 32, moderator }) {
   if (moderator) return <span className="flex items-center justify-center rounded-full bg-[#0B132B] text-white" style={{ width: size, height: size }}><Gavel size={size * 0.5} /></span>;
@@ -28,6 +30,7 @@ export default function Chat() {
   const { refreshUser, user } = useAuth();
   const { t } = useI18n();
   const isAdmin = user?.role === "admin";
+  const rt = useRealtimeStatus();
   const [convs, setConvs] = useState([]);
   const [q, setQ] = useState("");
   const [conv, setConv] = useState(null);
@@ -240,7 +243,7 @@ export default function Chat() {
           ) : <p className="truncate text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
           {conv && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              {conv.type === "private" && <button onClick={() => setVideoOpen(true)} title="Mode panggilan suara" data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil</span></button>}
+              {conv.type === "private" && <button onClick={() => setVideoOpen(true)} title={rt.enabled ? "Panggilan suara realtime" : "Mode panggilan suara"} data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil{rt.enabled ? " · Realtime" : ""}</span></button>}
               {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Masuk ruang meeting" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#2F6BFF] px-2.5 text-xs font-semibold text-white sm:px-3"><Video size={15} /> <span className="hidden sm:inline">Masuk Meeting</span></button>}
               {conv.type !== "private" && <button onClick={saveNotes} disabled={savingNotes} title="Buat & simpan notulen ke Ruang Kerja" data-testid="save-notes-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#E6EAF2] bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:px-3">{savingNotes ? <RefreshCw size={15} className="animate-spin" /> : <FileText size={15} />} <span className="hidden sm:inline">Notulen</span></button>}
               {conv.type === "meeting" && isAdmin && <button onClick={openInvite} title="Undang pengguna" data-testid="invite-user-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2F6BFF]/40 px-2.5 text-xs font-semibold text-[#2F6BFF] sm:px-3"><UserPlus size={15} /> <span className="hidden sm:inline">Undang</span></button>}
@@ -327,7 +330,9 @@ export default function Chat() {
         )}
       </div>
 
-      {videoOpen && conv && <VideoRoom conv={conv} cid={id} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />}
+      {videoOpen && conv && (conv.type === "private" && rt.enabled
+        ? <RealtimeCall conv={conv} cid={id} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />
+        : <VideoRoom conv={conv} cid={id} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />)}
 
       {showInvite && conv && (
         <div className="fixed inset-0 z-[92] flex items-center justify-center p-4">

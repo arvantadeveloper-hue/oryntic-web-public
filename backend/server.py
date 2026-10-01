@@ -41,6 +41,8 @@ app.include_router(admin_router)
 app.include_router(models_router)
 app.include_router(voice_router)
 app.include_router(files_router)
+from realtime_voice import router as realtime_voice_router  # noqa: E402
+app.include_router(realtime_voice_router)
 
 
 @app.websocket("/api/ws/{cid}")
