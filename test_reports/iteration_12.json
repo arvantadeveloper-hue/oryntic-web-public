@@ -1,0 +1,43 @@
+{
+  "summary": "Oryntix iteration-12 (multi-agent realtime meetings + per-user rate limits) end-to-end verification. Backend 6/6 pytest passed (test_oryntix_iter12.py). GET /api/admin/rate-limits returns defaults {chat_per_min:20, voice_per_min:30, calls_per_hour:20, max_call_minutes:60, generation_per_hour:30}; budi gets 403 on GET and PUT; validation chat_per_min=0 → 422; PUT with chat_per_min=3 echoes back. Chat rate-limit: after setting chat_per_min=3 and sleeping 35s for the backend's 30s cache refresh, bursting 4 sends to a fresh budi private conv yields 429 on the 4th (and 5th) with Indonesian detail containing 'Terlalu banyak pesan (3/menit)'. Restored to 20 and admin burst of 5 sends on a fresh private conv all stream 200. /api/voice/tts {text:'halo',voice:'nova'} → 200. POST /api/realtime/calls on a 2-persona MEETING conv → 200 with multi:true, sessions length 2, exactly one primary:true, credits_per_min_total == 2*credits_per_min, group_id set, each session carries {call_id, voice, primary, persona{id,name,portrait}}; cleanup via POST /end {elapsed_seconds:0} succeeds. Same endpoint on a private conv → multi:false, sessions length 1. tick max duration: POST /tick {elapsed_seconds:3601} on a fresh call → 402 with 'Durasi maksimal panggilan (60 menit) tercapai'. FRONTEND: Admin → /admin → Pricing tab shows rate-limits-card with all 5 testids (rl-chat_per_min, rl-voice_per_min, rl-calls_per_hour, rl-max_call_minutes, rl-generation_per_hour) + rl-save; set calls_per_hour=25, save → toast 'Batas pemakaian disimpan'; reload + re-click Pricing shows 25; restored to 20 and saved. Chat → 'Meeting Baru' → selecting 2 personas (Rio+Nova) → 'Mulai Meeting' opens overlay data-testid=realtime-meeting (NOT video-room). All sub-testids present: rtm-badge (text 'Realtime · 2 agen'), rtm-timer, rtm-phase, vr-tile-me, rtm-mute, rtm-captions, rtm-end-save, rtm-leave. Within ~6s rtm-caption showed 'Rio Halo, Demo! Senang banget ketemu' (real OpenAI Realtime audio transcript streaming), confirming WebRTC negotiation + per-agent voice session works. rtm-leave closes the overlay cleanly. Admin credits dropped from 10343→10268 (75 billed = 1 min * credits_per_min, two agents share one minute of billing on this short run; group was ended before second agent spoke). GROUP conv header 'Masuk Meeting' (video-call-btn) now opens realtime-meeting (confirmed) with rt.enabled. PRIVATE conv header still shows call-mode-btn label 'Panggil · Realtime' and clicking it opens realtime-call (single), not realtime-meeting. All 4xx/5xx axios interceptor + 429 toasts behavior inferred correct from backend 429 Indonesian detail passthrough.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Realtime meeting → chat persistence of greeting",
+        "issue": "After clicking rtm-leave the live Indonesian agent greeting shown in rtm-caption ('Halo, Demo! Senang banget ketemu...') did NOT persist as a msg-assistant into /conversations/{cid}/messages (count=0 after close). RealtimeMeeting.jsx saveTranscript is invoked only on the OpenAI 'response.audio_transcript.done' event (same class of bug flagged in iteration_11 for RealtimeCall.jsx). If the user hangs up before the done event fires, liveRef buffer is discarded. Suggest: in hangup/cleanup path, flush any non-empty liveRef[callId] via POST /realtime/calls/{callId}/transcript {role:'assistant', content: liveRef[callId]} per session, and/or also listen to 'response.done' as a fallback.",
+        "affected_selectors": ["[data-testid=realtime-meeting]", "[data-testid=rtm-leave]", "[data-testid=msg-assistant]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_oryntix_iter12.py",
+    "/app/test_reports/pytest/iter12_results.xml"
+  ],
+  "action_items": [
+    "RealtimeMeeting.jsx: flush per-session liveRef transcript on rtm-leave/rtm-end-save and in cleanup, so the greeting always persists as a msg-assistant (same recurring issue noted in iter11 for RealtimeCall.jsx — fix should land in both components or via a shared helper in /app/frontend/src/lib/realtimeSession.js).",
+    "Consider also hooking 'response.done' (not just 'response.audio_transcript.done') as a safety net for transcript persistence."
+  ],
+  "critical_code_review_comments": [
+    "ratelimit.py uses an in-process _hits deque + 30s _cache for DB config. In-process means every backend worker/replica has its own sliding window — not accurate under horizontal scale. Fine for current single-worker deployment; add a note.",
+    "realtime_voice.py create_call() correctly inserts N session rows with the same group_id, computes credits_per_min_total = cpm * len(personas), and sets exactly one primary=True (i==0). multi flag flipped only when len(personas)>1. Clean.",
+    "realtime_voice.py tick(): max_call_minutes check happens AFTER _bill, so when elapsed>=limit the user is still billed the final minute and then receives 402 'Durasi maksimal' — intentional and verified.",
+    "realtime_voice.py negotiate() for multi-agent sessions sets create_response:false and only enables input transcription for the primary — browser orchestrates turns via planTurn in RealtimeMeeting.jsx. Correct pattern.",
+    "RateLimitsCard.jsx reloads from GET on mount but Admin page Pricing tab needs re-selection after full page reload (tabs default to Overview). Non-blocking.",
+    "RealtimeMeeting.jsx (same bug as RealtimeCall.jsx from iter11): saveTranscript hooked only on 'response.audio_transcript.done' — early hangup drops live caption buffer. See action_items."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_oryntix_iter12.py",
+    "/app/test_reports/pytest/iter12_results.xml",
+    "/app/test_reports/iteration_12.json"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "~95% (greeting-not-persisted-on-leave recurring issue; all UI testids & flows work)"},
+  "test_credentials": "Admin demo@aivora.ai/demo123456, User budi@aivora.ai/budi123456 — both confirmed.",
+  "seed_data_creation": "Created a few TEST_* conversations in admin + budi workspace (TEST_rl_budi, TEST_rl_admin, TEST_meet_multi, TEST_meet_single, TEST_tick_max). Admin credit wallet consumed ~75 credits across the UI realtime-meeting test (one agent minute billed) and ~4575 credits from the tick max-duration test (61 min * 75). chat_per_min was mutated to 3 and restored to 20 at end of tests; calls_per_hour UI test set to 25 then restored to 20. Final rate-limits state = all defaults.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Rate-limit cache is in-memory with 30s refresh — ALWAYS sleep 35s after any PUT /api/admin/rate-limits before testing the new value. The chat 429 path requires using a user whose per-user bucket for that worker has not been pre-filled by other tests; create a fresh conv and run bursts tight (same test run). The admin page Pricing tab resets to Overview after full-page reload — re-click 'Pricing' button after reload. RealtimeMeeting assistant greeting persistence is the lingering bug for iter11+iter12. Admin credits ~5693 remaining after this iteration.",
+  "rca of the issue": "RealtimeMeeting.jsx (and RealtimeCall.jsx) only persist assistant audio transcript via POST /realtime/calls/{id}/transcript inside the OpenAI event handler for 'response.audio_transcript.done'. When the user clicks rtm-leave/rt-end before the done event fires (which commonly happens for short interactive sessions or if the done event is coalesced after end-of-turn), the already-captioned content held in liveRef is discarded during cleanup. Repro: open RealtimeMeeting with 2 personas, wait for first greeting caption to appear (~5s), click rtm-leave → GET /conversations/{cid}/messages returns an empty assistant list even though the caption was fully rendered. Fix: in hangup/cleanup, iterate sessionsRef and for each callId flush liveRef[callId] via saveTranscript(callId, 'assistant', liveRef[callId]) when non-empty; alternatively hook 'response.done' as a secondary flush."
+}

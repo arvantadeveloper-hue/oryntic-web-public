@@ -113,7 +113,13 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - (P3) Rate limiting endpoint LLM/TTS/STT; CORS pin untuk produksi.
 - (Backlog P1) Payment gateway nyata; (P2) kamera WebRTC antar-manusia (ditunda).
 
+## Update 2026-06 (k) — Realtime Meeting multi-agen, rate limiting, uji panggilan
+- **RealtimeMeeting** (`components/RealtimeMeeting.jsx`, `lib/realtimeSession.js`): meeting/grup dengan ≥2 agen kini memakai **satu sesi Realtime per agen** (suara berbeda tiap agen, `VOICE_MAP`). Backend `POST /api/realtime/calls` mengembalikan `sessions[]` (`multi`, `primary`, `credits_per_min_total` = N × tarif). Sesi non-primer: `create_response:false`, tanpa transkripsi (hemat); hanya sesi primer mentranskrip user. Orkestrasi di browser: setelah transkrip user selesai → urutan penjawab (agen yang disebut namanya duluan/satu-satunya; selain itu rotasi) → `response.create` bergiliran; ucapan agen disuntikkan ke sesi lain sebagai `[Nama]: ...`; giliran berikutnya dimulai saat `output_audio_buffer.stopped` (fallback 15 dtk). Menyela: `speech_started` di sesi primer → cancel agen aktif, kosongkan antrean. Akhiri & Simpan Notulen → `/summary`. Fallback VideoRoom bila Realtime nonaktif.
+- **Rate limiting per pengguna** (`backend/ratelimit.py`, sliding window in-process, cache 30 dtk): chat send/nudge 20/mnt, STT/TTS 30/mnt, buat panggilan realtime 20/jam, generate profil/potret 30/jam, durasi maks panggilan 60 mnt (tick → 402). Admin `GET/PUT /api/admin/rate-limits` + kartu "Batas Pemakaian per Pengguna" di Admin → Pricing. 429 → toast (axios interceptor + streamSSE `err.detail`).
+- Fix: transkrip agen di-flush saat keluar/hangup (RealtimeCall & RealtimeMeeting) + fallback `response.done`; fallback kembali ke "mendengarkan" bila VAD terpicu tanpa transkrip (7 dtk).
+- Tested: iteration_12 — backend 6/6, FE 100% (meeting 2 agen tersambung nyata, Rio menyapa dalam Bahasa Indonesia; billing 2 sesi). **Belum bisa diuji otomatis**: kualitas sela & giliran multi-agen dengan ucapan nyata (butuh mikrofon user).
+
 ## Next tasks
-- Uji manual Mode Realtime & panggilan pengingat dengan mikrofon nyata (user).
-- (P3) Rate limiting endpoint LLM/TTS/STT; CORS pin untuk produksi.
-- (Backlog P1) Payment gateway nyata; (P2) kamera WebRTC antar-manusia (ditunda); Realtime untuk meeting multi-asisten (butuh multi-voice).
+- Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
+- (P3) CORS pin untuk produksi; rate limit lintas-instance (Redis) bila dideploy multi-replica.
+- (Backlog P1) Payment gateway nyata; (P2) kamera WebRTC antar-manusia (ditunda); Moderator "buntu"/hening untuk RealtimeMeeting.

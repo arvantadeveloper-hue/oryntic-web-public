@@ -46,6 +46,15 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
     api.post(`/realtime/calls/${callId}/transcript`, { role, content }).then(() => onRefresh && onRefresh()).catch(() => {});
   };
 
+  const flushLive = () => {
+    sessionsRef.current.forEach((s) => {
+      const t = (liveRef.current[s.callId] || "").trim();
+      if (!t) return;
+      liveRef.current[s.callId] = "";
+      saveTranscript(s.callId, "assistant", t);
+    });
+  };
+
   // ---------- orchestration ----------
   const planTurn = (userText) => {
     const t = userText.toLowerCase();
@@ -131,6 +140,7 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
         break;
       }
       case "response.done":
+        if (liveRef.current[s.callId]) { const t = liveRef.current[s.callId]; liveRef.current[s.callId] = ""; saveTranscript(s.callId, "assistant", t); }
         // audio may still be playing; wait for the buffer to drain (fallback timer)
         if (activeRef.current === s.callId) { if (doneTimerRef.current) clearTimeout(doneTimerRef.current); doneTimerRef.current = setTimeout(() => finishedSpeaking(s.callId), 15000); }
         break;
@@ -194,7 +204,7 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
   const hangupAll = async (withSummary) => {
     if (endedRef.current) return;
     endedRef.current = true;
-    cleanup(); endSessions();
+    flushLive(); cleanup(); endSessions();
     if (withSummary && msgCountRef.current > 0) {
       setPhase("ending");
       try { await api.post(`/conversations/${cid}/summary`); toast.success("Notulen meeting tersimpan di Ruang Kerja"); }
@@ -209,7 +219,7 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
     const run = ++runIdRef.current;
     connect(run);
     const t = setInterval(() => setElapsed(secs()), 1000);
-    return () => { clearInterval(t); runIdRef.current++; if (!endedRef.current) { endedRef.current = true; cleanup(); endSessions(); } };
+    return () => { clearInterval(t); runIdRef.current++; if (!endedRef.current) { endedRef.current = true; flushLive(); cleanup(); endSessions(); } };
     // eslint-disable-next-line
   }, []);
 
