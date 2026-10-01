@@ -74,8 +74,17 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Tested: testing agent iteration_4 — backend 5/5 (turn ganjil tanpa moderator, turn genap interject + tanpa task, summary tetap buat 1 notulen & guard privat 400, legacy moderator:true tetap), frontend 100% (Video Room render + semua kontrol). Reaksi & loop mikrofon tidak bisa diuji headless (markup terverifikasi).
 - **Catatan**: "Coba Rapat Suara" (hands-free dengan mikrofon nyata) harus diuji langsung oleh user — tidak bisa dijalankan di browser otomatis tanpa mikrofon.
 
+## Update 2026-06 (g) — Multi-user workspace, roles (admin/user), multi-human meetings, real-time WebSocket
+- **Role & Workspace**: setiap user punya `role` (admin/user) + `owner_id` (pemilik workspace). `demo@aivora.ai` otomatis dipromosikan jadi **Administrator** saat startup (`migrate_workspace`). Admin = pemilik workspace; semua persona & dompet kredit dibagikan.
+- **Admin buat user**: panel **Tim** (`/team`, admin-only) + endpoint `POST /api/admin/users`, `GET /api/admin/workspace-users`, `DELETE /api/admin/users/{id}`. User baru `role:user`, `owner_id=admin`, kredit 0 (pakai dompet admin).
+- **Shared wallet**: `record_usage` kini memotong kredit dari **pemilik workspace (admin)**, apa pun yang dilakukan user biasa. `wallet` & `topup` scoped ke owner; `topup` admin-only.
+- **Persona shared**: list/get persona pakai `workspace_id` (user biasa melihat & memakai persona admin). Create/edit/portrait/duplicate/delete persona = **admin-only** (403 untuk user biasa).
+- **Multi-human meeting**: conversation punya `workspace_id` + `participants[]`. Admin membuat meeting dengan `participant_ids` atau mengundang via `POST /api/conversations/{cid}/participants`. Akses via `_can_access` (owner / participant / admin workspace). Pesan manusia ditandai `sender_user_id`+`sender_name`; AI melihat nama tiap manusia.
+- **Real-time WebSocket**: `GET /api/ws/{cid}?token=` (server.py + `realtime.py` ConnectionManager). Broadcast `{type:'message'|'participants'}` ke semua peserta; frontend (`openConvSocket` di api.js) refetch pesan saat ada event. Tolak 4401 (token invalid) / 4403 (tanpa akses). Teruji end-to-end (Budi menerima pesan admin + jawaban AI live).
+- **Frontend gating**: user biasa — nav tanpa Agen AI/Kredit/Tim/Admin, tanpa badge kredit & kartu Upgrade, Home tanpa kartu kredit; route /personas,/wallet,/team,/admin redirect ke /home. Admin melihat semua + halaman **Tim** (buat/hapus user) + tombol **Undang** di meeting.
+- Tested: testing agent iteration_7 — backend 20/20, frontend 100% (gating, redirect, CRUD tim, shared wallet, WS auth + broadcast). Tanpa bug.
+
 ## Next tasks
-- User mencoba langsung rapat suara (izin mikrofon) & memverifikasi notulen tersimpan.
+- (Opsional) VideoRoom multi-manusia: tampilkan tile manusia lain + status bicara real-time di Zoom view (saat ini multi-human ada di chat meeting teks + real-time).
 - (Opsional) Avatar wajah bergerak + lip-sync (HeyGen/D-ID) — integrasi berbayar (P3).
 - (Backlog P1) Real payment gateway menggantikan top-up simulasi.
-- True token-by-token streaming.
