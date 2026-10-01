@@ -1,26 +1,42 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageSquare, FileText, BarChart3, Calendar, Lightbulb, Settings2, Send, ArrowRight, FileCheck2, Clock, Bot, Users, Sparkles } from "lucide-react";
+import { MessageSquare, FileText, Bot, Users, Sparkles, Plus, ArrowRight, CheckCircle2, Clock, FolderKanban, Mic, Video, Bell, Search, MoreHorizontal, Zap } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { BRAND_HERO } from "../components/Logo";
 
-const QUICK = [
-  { icon: MessageSquare, title: "Chat dengan Tim", desc: "Mulai percakapan privat atau grup", to: "/chat", c: "#2F6BFF" },
-  { icon: FileText, title: "Buat Dokumen", desc: "Buat proposal, laporan, atau dokumen", to: "/workspace", c: "#7C3AED" },
-  { icon: BarChart3, title: "Analisis Data", desc: "Minta insight dari data Anda", to: "/workspace", c: "#22B8FF" },
-  { icon: Calendar, title: "Jadwalkan Meeting", desc: "Atur pengingat & notulen otomatis", to: "/reminders", c: "#F59E0B" },
-  { icon: Lightbulb, title: "Riset & Insight", desc: "Cari informasi & analisis mendalam", to: "/workspace", c: "#10B981" },
-  { icon: Settings2, title: "Otomatisasi Tugas", desc: "Delegasikan tugas ke agen AI", to: "/workspace", c: "#EC4899" },
-];
-const CAPS = ["Diskusi dengan berbagai agen AI", "Buat, analisis & ringkas dokumen", "Pengingat & jadwal otomatis", "Riset dan insight", "Otomatisasi tugas"]; // eslint-disable-line no-unused-vars
 const statusColor = { completed: "#10B981", running: "#7C3AED", queued: "#F59E0B", failed: "#EF4444", cancelled: "#94A3B8" };
+const ago = (iso) => {
+  const d = (Date.now() - new Date(iso).getTime()) / 60000;
+  if (d < 1) return "baru saja";
+  if (d < 60) return `${Math.round(d)} mnt lalu`;
+  if (d < 1440) return `${Math.round(d / 60)} jam lalu`;
+  return `${Math.round(d / 1440)} hari lalu`;
+};
 
-function progress(tk) {
-  if (tk.status === "completed") return 100;
-  if (tk.status === "failed" || tk.status === "cancelled") return 100;
-  const steps = tk.steps || [];
-  if (!steps.length) return 8;
-  return Math.max(12, Math.round((steps.filter((s) => s.status === "completed").length / steps.length) * 90));
+function Stat({ icon: Icon, label, value, tint, testId }) {
+  return (
+    <div className="aivora-card flex items-center gap-3 p-4" data-testid={testId}>
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ background: `${tint}14`, color: tint }}><Icon size={20} /></span>
+      <div className="min-w-0">
+        <p className="truncate text-xs font-medium text-slate-500">{label}</p>
+        <p className="text-2xl font-bold leading-tight text-slate-900">{value}</p>
+      </div>
+      <span className="ml-auto flex items-end gap-0.5">{[5, 8, 6, 10, 7, 12].map((h, i) => <span key={i} className="w-1 rounded-sm" style={{ height: h + 4, background: `${tint}${i === 5 ? "" : "66"}` }} />)}</span>
+    </div>
+  );
+}
+
+function SectionHead({ title, action, onAction, extra }) {
+  return (
+    <div className="mb-3 flex items-center justify-between">
+      <h2 className="text-base font-bold text-slate-900 md:text-lg">{title}</h2>
+      <div className="flex items-center gap-2">
+        {action && <button onClick={onAction} className="text-xs font-semibold text-[#2F6BFF] hover:underline">{action}</button>}
+        {extra}
+      </div>
+    </div>
+  );
 }
 
 export default function Home() {
@@ -29,177 +45,157 @@ export default function Home() {
   const [tasks, setTasks] = useState([]);
   const [reminders, setReminders] = useState([]);
   const [personas, setPersonas] = useState([]);
-  const [ask, setAsk] = useState("");
+  const [convs, setConvs] = useState([]);
+  const isAdmin = user?.role === "admin";
 
   useEffect(() => {
     api.get("/tasks").then((r) => setTasks(r.data)).catch(() => {});
     api.get("/reminders").then((r) => setReminders(r.data)).catch(() => {});
     api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {});
+    api.get("/conversations").then((r) => setConvs(r.data)).catch(() => {});
   }, []);
 
-  const projects = tasks.slice(0, 4);
-  const docs = tasks.filter((t) => t.status === "completed").slice(0, 4);
-  const upcoming = reminders.filter((r) => ["scheduled", "ringing"].includes(r.status)).slice(0, 5);
-
-  const submitAsk = async () => {
-    if (personas.length === 0) { nav("/personas/new"); return; }
-    if (ask.trim()) sessionStorage.setItem("aivora_prefill", ask);
-    const r = await api.post("/conversations", { persona_ids: [personas[0].id], type: "private" });
-    nav(`/chat/${r.data.id}`);
-  };
+  const completed = tasks.filter((t) => t.status === "completed");
+  const upcoming = reminders.filter((r) => ["scheduled", "ringing"].includes(r.status)).slice(0, 4);
+  const activity = [
+    ...tasks.map((t) => ({ id: "t" + t.id, icon: FolderKanban, tint: "#7C3AED", text: `Tugas "${t.goal}" ${t.status === "completed" ? "selesai" : t.status === "running" ? "sedang dikerjakan" : t.status}`, at: t.updated_at || t.created_at, to: `/workspace/${t.id}` })),
+    ...convs.map((c) => ({ id: "c" + c.id, icon: c.type === "meeting" ? Video : MessageSquare, tint: c.type === "meeting" ? "#10B981" : "#2F6BFF", text: c.type === "meeting" ? `Meeting "${c.title}"` : `Percakapan "${c.title}"`, at: c.updated_at || c.created_at, to: `/chat/${c.id}` })),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 5);
 
   const now = new Date();
-  const dateStr = now.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const dateStr = now.toLocaleDateString("id-ID", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  const first = (user?.name || "").split(" ")[0];
+  const QUICK = [
+    { icon: Bot, title: "Agen Baru", desc: "Buat & atur agen AI", to: isAdmin ? "/personas/new" : "/chat", tint: "#2F6BFF" },
+    { icon: Video, title: "Meeting", desc: "Rapat suara dengan agen", to: "/chat", tint: "#10B981" },
+    { icon: FolderKanban, title: "Tugas Baru", desc: "Delegasikan pekerjaan", to: "/workspace", tint: "#7C3AED" },
+    { icon: Bell, title: "Pengingat", desc: "Jadwal & panggilan", to: "/reminders", tint: "#F59E0B" },
+    { icon: Users, title: "Tim", desc: "Kelola anggota", to: isAdmin ? "/team" : "/profile", tint: "#EC4899" },
+  ];
+  const TOOLS = [
+    { icon: MessageSquare, label: "Chat", to: "/chat", tint: "#2F6BFF" }, { icon: FileText, label: "Dokumen", to: "/workspace", tint: "#10B981" },
+    { icon: Video, label: "Meeting", to: "/chat", tint: "#7C3AED" }, { icon: Search, label: "Riset", to: "/workspace", tint: "#F59E0B" },
+    { icon: Mic, label: "Suara", to: "/chat", tint: "#22B8FF" }, { icon: Zap, label: "Otomasi", to: "/workspace", tint: "#EC4899" },
+    { icon: Bell, label: "Pengingat", to: "/reminders", tint: "#F97316" }, { icon: MoreHorizontal, label: "Lainnya", to: "/profile", tint: "#64748B" },
+  ];
 
   return (
-    <div className="grid grid-cols-1 gap-6 p-5 sm:p-7 xl:grid-cols-[1fr_340px] fade-up" data-testid="home-page">
-      <div className="min-w-0 space-y-7">
+    <div className="grid grid-cols-1 gap-5 p-4 sm:p-6 xl:grid-cols-[1fr_320px] fade-up" data-testid="home-page">
+      <div className="min-w-0 space-y-5">
         {/* hero banner */}
-        <section className="relative overflow-hidden rounded-3xl p-7 sm:p-9" style={{ background: "linear-gradient(120deg,#EEF3FF 0%,#F3EEFF 60%,#EAF6FF 100%)" }}>
-          <div className="grid gap-6 md:grid-cols-[1fr_auto]">
-            <div className="max-w-md">
-              <h1 className="text-3xl font-extrabold text-slate-900 sm:text-4xl">Halo, {user?.name}! 👋</h1>
-              <p className="mt-2 text-slate-500">Ada yang bisa saya bantu hari ini?</p>
-              <div className="mt-5 flex items-center gap-2 rounded-2xl border border-white bg-white/90 p-2 shadow-sm backdrop-blur">
-                <Sparkles size={18} className="ml-2 text-[#2F6BFF]" />
-                <input value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitAsk()}
-                  placeholder="Tanyakan apa saja atau berikan tugas..." className="flex-1 bg-transparent px-1 text-sm outline-none" data-testid="home-ask" />
-                <button onClick={submitAsk} data-testid="home-ask-send" className="btn-grad flex h-9 w-9 items-center justify-center rounded-xl"><Send size={16} /></button>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {[["Buat dokumen", FileText, "/workspace"], ["Analisis data", BarChart3, "/workspace"], ["Jadwalkan meeting", Calendar, "/reminders"]].map(([l, Ic, to]) => (
-                  <button key={l} onClick={() => nav(to)} className="flex items-center gap-1.5 rounded-full border border-[#E7ECF3] bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:border-[#2F6BFF] hover:text-[#2F6BFF]">
-                    <Ic size={13} /> {l}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="hidden w-64 shrink-0 self-center rounded-2xl border border-white bg-white/80 p-4 backdrop-blur md:block">
-              <p className="text-xs font-bold text-slate-900">{personas.length ? "Tim Asisten Anda" : "Belum ada asisten"}</p>
-              {personas.length === 0 ? (
-                <>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-500">Buat asisten AI pertama Anda, lalu ajak satu untuk chat privat atau beberapa untuk diskusi grup.</p>
-                  <button onClick={() => nav("/personas/new")} data-testid="home-create-persona" className="btn-grad mt-3 w-full rounded-xl py-2 text-xs">+ Buat Asisten</button>
-                </>
-              ) : (
-                <>
-                  <div className="mt-3 space-y-1.5">
-                    {personas.slice(0, 4).map((p) => (
-                      <button key={p.id} onClick={() => nav(`/personas/${p.id}`)} className="flex w-full items-center gap-2 rounded-lg p-1.5 text-left hover:bg-slate-50" data-testid={`home-persona-${p.id}`}>
-                        {p.portrait ? <img src={p.portrait} alt="" className="h-7 w-7 rounded-full object-cover" /> : <span className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{p.name[0]}</span>}
-                        <span className="truncate text-xs font-semibold text-slate-700">{p.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <button onClick={() => nav("/chat")} data-testid="home-team-chat" className="btn-grad mt-3 w-full rounded-xl py-2 text-xs">Mulai Chat / Grup</button>
-                </>
-              )}
+        <section className="relative overflow-hidden rounded-3xl p-6 sm:p-8" style={{ background: "linear-gradient(110deg,#EAF0FF 0%,#F2F5FF 55%,#E6F4FF 100%)" }} data-testid="home-hero">
+          <div className="relative z-10 max-w-lg">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Welcome back, {first}</p>
+            <h1 className="mt-2 text-3xl font-bold leading-[1.1] tracking-tight text-[#0A1128] sm:text-4xl lg:text-[40px]">Turn your ideas into real results with AI.</h1>
+            <p className="mt-3 max-w-md text-sm text-slate-600 md:text-base">Orkestrasikan agen AI, otomatiskan alur kerja, dan percepat bisnis Anda bersama Oryntix.</p>
+            <div className="mt-5 flex flex-wrap gap-2.5">
+              <button onClick={() => nav(isAdmin ? "/personas/new" : "/chat")} data-testid="home-create-persona" className="btn-primary"><Plus size={16} /> {isAdmin ? "Create New Agent" : "Mulai Chat"}</button>
+              <button onClick={() => nav("/chat")} data-testid="home-team-chat" className="btn-soft">Mulai Meeting</button>
             </div>
           </div>
+          <img src={BRAND_HERO} alt="" className="hero-float pointer-events-none absolute -right-6 top-1/2 hidden w-72 -translate-y-1/2 drop-shadow-2xl md:block lg:w-80" />
         </section>
+
+        {/* stats */}
+        <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Stat icon={Bot} label="Active Agents" value={personas.length} tint="#2F6BFF" testId="stat-agents" />
+          <Stat icon={FolderKanban} label="Projects" value={tasks.length} tint="#7C3AED" testId="stat-projects" />
+          <Stat icon={CheckCircle2} label="Tasks Completed" value={completed.length} tint="#10B981" testId="stat-completed" />
+          <Stat icon={Clock} label="Meetings" value={convs.filter((c) => c.type === "meeting").length} tint="#F59E0B" testId="stat-meetings" />
+        </section>
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          {/* recent activity */}
+          <section className="aivora-card p-5" data-testid="home-activity">
+            <SectionHead title="Recent Activity" action="View All" onAction={() => nav("/workspace")} />
+            {activity.length === 0 ? (
+              <p className="py-6 text-center text-sm text-slate-400">Belum ada aktivitas. Mulai chat atau beri tugas pada agen Anda.</p>
+            ) : activity.map((a) => (
+              <button key={a.id} onClick={() => nav(a.to)} className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left transition hover:bg-slate-50">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: `${a.tint}14`, color: a.tint }}><a.icon size={16} /></span>
+                <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{a.text}</span>
+                <span className="shrink-0 text-xs text-slate-400">{ago(a.at)}</span>
+              </button>
+            ))}
+          </section>
+
+          {/* your AI agents */}
+          <section className="aivora-card p-5" data-testid="home-agents">
+            <SectionHead title="Your AI Agents" action="View All" onAction={() => nav(isAdmin ? "/personas" : "/chat")}
+              extra={isAdmin && <button onClick={() => nav("/personas/new")} className="flex h-6 w-6 items-center justify-center rounded-md bg-[#2F6BFF] text-white" data-testid="home-add-agent"><Plus size={14} /></button>} />
+            {personas.length === 0 ? (
+              <div className="py-5 text-center">
+                <p className="text-sm text-slate-400">Belum ada agen AI.</p>
+                {isAdmin && <button onClick={() => nav("/personas/new")} className="btn-primary mt-3">+ Buat Agen</button>}
+              </div>
+            ) : personas.slice(0, 5).map((p) => (
+              <button key={p.id} onClick={() => nav(isAdmin ? `/personas/${p.id}` : "/chat")} className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left transition hover:bg-slate-50" data-testid={`home-persona-${p.id}`}>
+                {p.portrait ? <img src={p.portrait} alt="" className="h-9 w-9 rounded-lg object-cover" /> : <span className="flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{p.name[0]}</span>}
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-900">{p.name}</span><span className="block truncate text-xs text-slate-400">{p.summary || p.model || "Agen AI"}</span></span>
+                <span className="flex items-center gap-1.5 text-xs text-slate-500"><span className="h-2 w-2 rounded-full bg-[#10B981]" /> Online</span>
+              </button>
+            ))}
+          </section>
+        </div>
 
         {/* quick actions */}
         <section>
-          <h2 className="mb-4 text-lg font-bold text-slate-900">Mulai dengan cepat</h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <SectionHead title="Quick Actions" />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             {QUICK.map((q) => (
-              <button key={q.title} onClick={() => nav(q.to)} data-testid={`qa-${q.title}`}
-                className="aivora-card aivora-card-hover flex flex-col items-center gap-3 p-5 text-center">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl" style={{ background: `${q.c}15`, color: q.c }}><q.icon size={22} /></span>
-                <span className="text-sm font-bold text-slate-900">{q.title}</span>
-                <span className="text-xs leading-tight text-slate-400">{q.desc}</span>
+              <button key={q.title} onClick={() => nav(q.to)} data-testid={`qa-${q.title}`} className="aivora-card aivora-card-hover flex items-center gap-3 p-3.5 text-left">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: `${q.tint}14`, color: q.tint }}><q.icon size={18} /></span>
+                <span className="min-w-0"><span className="block truncate text-sm font-semibold text-slate-900">{q.title}</span><span className="block truncate text-[11px] text-slate-400">{q.desc}</span></span>
               </button>
             ))}
           </div>
         </section>
-
-        {/* recent projects */}
-        <section>
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900">Proyek Terbaru</h2>
-            <button onClick={() => nav("/workspace")} className="flex items-center gap-1 text-sm font-semibold text-[#2F6BFF]">Lihat Semua <ArrowRight size={14} /></button>
-          </div>
-          {projects.length === 0 ? (
-            <button onClick={() => nav("/workspace")} data-testid="home-empty-task" className="aivora-card flex w-full flex-col items-center gap-2 p-8 text-center text-sm text-slate-400 hover:border-[#2F6BFF]">
-              <Bot size={28} className="text-[#2F6BFF]" /> Belum ada proyek. Beri Aivora sebuah tujuan untuk dikerjakan.
-            </button>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {projects.map((tk) => (
-                <button key={tk.id} onClick={() => nav(`/workspace/${tk.id}`)} data-testid={`home-task-${tk.id}`}
-                  className="aivora-card aivora-card-hover p-5 text-left">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#EEF3FF] text-[#2F6BFF]"><Bot size={20} /></span>
-                    <span className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize" style={{ background: `${statusColor[tk.status]}18`, color: statusColor[tk.status] }}>{tk.status}</span>
-                  </div>
-                  <p className="mt-3 line-clamp-2 text-sm font-bold text-slate-900">{tk.goal}</p>
-                  <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                    <div className="h-full rounded-full" style={{ width: `${progress(tk)}%`, background: "linear-gradient(90deg,#2F6BFF,#7C3AED)" }} />
-                  </div>
-                  <p className="mt-1.5 text-right text-xs font-semibold text-slate-400">{progress(tk)}%</p>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* recent documents */}
-        {docs.length > 0 && (
-          <section>
-            <h2 className="mb-4 text-lg font-bold text-slate-900">Dokumen Terbaru</h2>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {docs.map((tk) => (
-                <button key={tk.id} onClick={() => nav(`/workspace/${tk.id}`)} className="aivora-card aivora-card-hover flex items-center gap-3 p-4 text-left">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#10B981]/12 text-[#10B981]"><FileCheck2 size={18} /></span>
-                  <span className="min-w-0"><span className="block truncate text-sm font-semibold text-slate-900">{tk.goal}</span>
-                    <span className="block text-xs text-slate-400">{new Date(tk.created_at).toLocaleDateString("id-ID")}</span></span>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
       </div>
 
       {/* right rail */}
-      <aside className="space-y-6">
-        <div className="aivora-card p-5">
-          <p className="text-sm font-bold text-slate-900">{dateStr}</p>
-          <div className="mt-3 flex justify-between">
-            {["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"].map((d, i) => {
-              const day = new Date(now); day.setDate(now.getDate() - ((now.getDay() + 6) % 7) + i);
+      <aside className="space-y-5">
+        <div className="aivora-card p-4">
+          <div className="flex items-center justify-between"><p className="text-sm font-bold text-slate-900">{dateStr}</p><span className="text-xs text-slate-400">Today</span></div>
+          <div className="mt-3 grid grid-cols-7 gap-1">
+            {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"].map((d, i) => {
+              const day = new Date(now); day.setDate(now.getDate() - now.getDay() + i);
               const active = day.toDateString() === now.toDateString();
               return (
-                <div key={d} className={`flex h-14 w-9 flex-col items-center justify-center rounded-xl text-xs ${active ? "btn-grad" : "text-slate-500"}`}>
-                  <span className={active ? "text-white/80" : "text-slate-400"}>{d}</span>
-                  <span className={`text-sm font-bold ${active ? "text-white" : "text-slate-700"}`}>{day.getDate()}</span>
+                <div key={d} className="flex flex-col items-center gap-1">
+                  <span className="text-[10px] text-slate-400">{d}</span>
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm font-semibold ${active ? "bg-[#2F6BFF] text-white" : "text-slate-700"}`}>{day.getDate()}</span>
                 </div>
               );
             })}
           </div>
-        </div>
-
-        <div className="aivora-card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-900">Jadwal Saya</h3>
-            <button onClick={() => nav("/reminders")} className="text-xs font-semibold text-[#2F6BFF]">Lihat Semua</button>
-          </div>
-          {upcoming.length === 0 ? <p className="py-3 text-sm text-slate-400">Belum ada jadwal.</p> : upcoming.map((r) => (
-            <div key={r.id} className="mb-2 flex items-start gap-3 rounded-xl bg-slate-50 p-3" data-testid={`home-rem-${r.id}`}>
-              <Clock size={15} className="mt-0.5 text-[#F59E0B]" />
-              <div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{r.title}</p>
-                <p className="text-xs text-slate-400">{new Date(r.start_at).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</p></div>
+          <div className="mt-4 flex items-center justify-between"><p className="text-sm font-bold text-slate-900">Upcoming</p><button onClick={() => nav("/reminders")} className="text-xs font-semibold text-[#2F6BFF]">View All</button></div>
+          {upcoming.length === 0 ? <p className="py-3 text-xs text-slate-400">Belum ada jadwal.</p> : upcoming.map((r) => (
+            <div key={r.id} className="mt-2 flex items-start gap-3" data-testid={`home-rem-${r.id}`}>
+              <span className="w-10 shrink-0 text-xs text-slate-400">{new Date(r.start_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</span>
+              <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#2F6BFF]" />
+              <div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{r.title}</p><p className="text-xs text-slate-400">{new Date(r.start_at).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}</p></div>
             </div>
           ))}
         </div>
 
-        {user?.role === "admin" && (
-          <div className="aivora-card overflow-hidden p-5" style={{ background: "linear-gradient(135deg,#EEF3FF,#F3EEFF)" }}>
-            <p className="flex items-center gap-2 text-sm font-bold text-slate-900"><Sparkles size={16} className="text-[#2F6BFF]" /> Ringkasan Kredit</p>
-            <p className="mt-2 text-3xl font-extrabold grad-text">{user?.credits ?? 0}</p>
-            <p className="text-xs text-slate-500">kredit tersedia</p>
-            <button onClick={() => nav("/wallet")} data-testid="home-topup-btn" className="btn-grad mt-3 w-full rounded-xl py-2.5 text-sm">Isi Ulang</button>
+        <div className="rounded-2xl p-5 text-white" style={{ background: "linear-gradient(135deg,#2F6BFF 0%,#5B3DF5 100%)" }} data-testid="home-promo">
+          <Sparkles size={22} />
+          <p className="mt-2 text-sm font-bold">Boost your productivity with AI meetings</p>
+          <p className="mt-1 text-xs text-white/80">Ajak beberapa agen ke satu ruang meeting, bicara bebas, dan dapatkan notulen otomatis.</p>
+          <button onClick={() => nav("/chat")} className="mt-3 flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-2 text-xs font-bold text-[#2F6BFF]">Start Meeting <ArrowRight size={13} /></button>
+        </div>
+
+        <div className="aivora-card p-4">
+          <div className="flex items-center justify-between"><p className="text-sm font-bold text-slate-900">Popular Tools</p></div>
+          <div className="mt-3 grid grid-cols-4 gap-2">
+            {TOOLS.map((tl) => (
+              <button key={tl.label} onClick={() => nav(tl.to)} className="flex flex-col items-center gap-1.5 rounded-xl p-2 transition hover:bg-slate-50">
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: `${tl.tint}14`, color: tl.tint }}><tl.icon size={18} /></span>
+                <span className="text-[11px] font-medium text-slate-600">{tl.label}</span>
+              </button>
+            ))}
           </div>
-        )}
+        </div>
       </aside>
     </div>
   );

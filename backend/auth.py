@@ -195,7 +195,7 @@ async def seed_admin():
         uid = new_id()
         await db.users.insert_one({
             "id": uid, "email": email, "password_hash": pw_hash(os.environ["ADMIN_PASSWORD"]),
-            "name": "Aivora Admin", "role": "admin", "owner_id": uid, "onboarded": True, "verified": True,
+            "name": "Oryntix Admin", "role": "admin", "owner_id": uid, "onboarded": True, "verified": True,
             "credits": 100000,
             "settings": {"app_language": "en", "conversation_language": "en", "timezone": "Asia/Jakarta", "theme": "dark"},
             "created_at": now_iso(),

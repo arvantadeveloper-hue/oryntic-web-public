@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare, Video, UserPlus, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
@@ -24,6 +24,7 @@ const fileToData = (file) => new Promise((res) => {
 export default function Chat() {
   const { id } = useParams();
   const nav = useNavigate();
+  const location = useLocation();
   const { refreshUser, user } = useAuth();
   const { t } = useI18n();
   const isAdmin = user?.role === "admin";
@@ -35,10 +36,10 @@ export default function Chat() {
   const [streaming, setStreaming] = useState(false);
   const [liveMap, setLiveMap] = useState({});
   const [liveOrder, setLiveOrder] = useState([]);
-  const [personas, setPersonas] = useState([]);
+  const [personas, setPersonas] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [picked, setPicked] = useState([]);
-  const [mode, setMode] = useState("group");
+  const [mode, setMode] = useState("chat");
   const [attachments, setAttachments] = useState([]);
   const [recording, setRecording] = useState(false);
   const [speaker, setSpeaker] = useState(false);
@@ -57,8 +58,11 @@ export default function Chat() {
   const loadConvs = (query = "") => api.get(`/conversations${query ? `?q=${encodeURIComponent(query)}` : ""}`).then((r) => setConvs(r.data)).catch(() => {});
   useEffect(() => { loadConvs(); api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {}); }, [user?.id]);
   useEffect(() => {
-    if (id) api.get(`/conversations/${id}/messages`).then((r) => { setConv(r.data.conversation); setMessages(r.data.messages); }).catch(() => {});
-    else { setConv(null); setMessages([]); }
+    if (id) api.get(`/conversations/${id}/messages`).then((r) => {
+      setConv(r.data.conversation); setMessages(r.data.messages);
+      if (location.state?.openMeeting) { setVideoOpen(true); nav(location.pathname, { replace: true, state: {} }); }
+    }).catch(() => {});
+    else { setConv(null); setMessages([]); setVideoOpen(false); }
     const pre = sessionStorage.getItem("aivora_prefill");
     if (pre && id) { setInput(pre); sessionStorage.removeItem("aivora_prefill"); }
   }, [id]);
@@ -78,16 +82,18 @@ export default function Chat() {
     return () => { try { ws && ws.close(); } catch (e) {} };
   }, [id]);
 
-  const openModal = (m = "group") => {
-    if (personas.length === 0) { toast.message("Buat persona dulu untuk memulai percakapan"); nav("/personas/new"); return; }
+  const openModal = (m = "chat") => {
+    if (personas === null) return;
+    if (personas.length === 0) { toast.message(isAdmin ? "Buat agen AI dulu untuk memulai percakapan" : "Belum ada agen AI di workspace ini"); if (isAdmin) nav("/personas/new"); return; }
     setPicked([]); setMode(m); setShowModal(true);
   };
   const togglePick = (pid) => setPicked((p) => p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid]);
   const startConv = async () => {
     if (picked.length === 0) { toast.error("Pilih minimal satu persona"); return; }
-    const type = picked.length > 1 ? mode : "private";
+    const type = mode === "meeting" ? "meeting" : picked.length > 1 ? "group" : "private";
     const r = await api.post("/conversations", { persona_ids: picked, type });
-    setShowModal(false); loadConvs(); nav(`/chat/${r.data.id}`);
+    setShowModal(false); loadConvs();
+    nav(`/chat/${r.data.id}`, { state: { openMeeting: mode === "meeting" } });
   };
 
   const onFiles = async (e) => {
@@ -174,7 +180,7 @@ export default function Chat() {
   const convListInner = (mobile) => (
     <div className="flex h-full flex-col p-4">
       <button onClick={() => { openModal(); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-chat-btn-mobile" : "new-chat-btn"} className="btn-grad mb-2 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm"><Plus size={16} /> {t("chat.new")}</button>
-      <button onClick={() => { openModal("meeting"); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-meeting-btn-mobile" : "new-meeting-btn"} className="mb-4 flex items-center justify-center gap-2 rounded-xl border border-[#2F6BFF]/40 py-2.5 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Gavel size={16} /> Adakan Meeting</button>
+      <button onClick={() => { openModal("meeting"); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-meeting-btn-mobile" : "new-meeting-btn"} className="mb-4 flex items-center justify-center gap-2 rounded-xl border border-[#2F6BFF]/40 py-2.5 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Video size={16} /> Meeting Baru</button>
       <div className="relative mb-3">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input className="input-dark py-2 pl-9" placeholder={t("common.search")} value={q} onChange={(e) => { setQ(e.target.value); loadConvs(e.target.value); }} data-testid={mobile ? "chat-search-mobile" : "chat-search"} />
@@ -183,7 +189,7 @@ export default function Chat() {
         {convs.map((c) => (
           <div key={c.id} onClick={() => { nav(`/chat/${c.id}`); if (mobile) setShowConvList(false); }} data-testid={`${mobile ? "conv-m-" : "conv-"}${c.id}`}
             className={`group flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${c.id === id ? "bg-[#EEF3FF] text-[#2F6BFF]" : "text-slate-600 hover:bg-slate-50"}`}>
-            {c.type === "meeting" ? <Gavel size={15} className="shrink-0" /> : c.type === "group" ? <Users size={15} className="shrink-0" /> : <User size={15} className="shrink-0" />}
+            {c.type === "meeting" ? <Video size={15} className="shrink-0" /> : c.type === "group" ? <Users size={15} className="shrink-0" /> : <User size={15} className="shrink-0" />}
             <span className="flex-1 truncate">{c.title}</span>
             <button onClick={(e) => delConv(c, e)} className="text-slate-400 transition hover:text-[#EF4444] md:opacity-0 md:group-hover:opacity-100"><Trash2 size={13} /></button>
           </div>
@@ -217,13 +223,13 @@ export default function Chat() {
             <>
               <div className="flex -space-x-2">{(conv.members || []).slice(0, 4).map((m) => <div key={m.id} className="rounded-full ring-2 ring-white"><Avatar name={m.name} portrait={m.portrait} size={32} /></div>)}</div>
               <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{conv.title}</p>
-                <p className="truncate text-xs text-slate-400">{conv.type === "meeting" ? `Meeting · ${conv.members?.length} asisten + Moderator` : conv.type === "group" ? `Grup · ${conv.members?.length} asisten` : "Chat privat"}</p></div>
+                <p className="truncate text-xs text-slate-400">{conv.type === "meeting" ? `Meeting · ${conv.members?.length} asisten${(conv.members?.length || 0) > 1 ? " + Moderator" : ""}` : conv.type === "group" ? `Chat grup · ${conv.members?.length} asisten` : "Chat privat"}</p></div>
             </>
           ) : <p className="truncate text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
           {conv && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {conv.type === "private" && <button onClick={() => setVideoOpen(true)} title="Mode panggilan suara" data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil</span></button>}
-              {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Ruang video call" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-white sm:px-3" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}><Video size={15} /> <span className="hidden sm:inline">Video Call</span></button>}
+              {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Masuk ruang meeting" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#2F6BFF] px-2.5 text-xs font-semibold text-white sm:px-3"><Video size={15} /> <span className="hidden sm:inline">Masuk Meeting</span></button>}
               {conv.type === "meeting" && isAdmin && <button onClick={openInvite} title="Undang pengguna" data-testid="invite-user-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2F6BFF]/40 px-2.5 text-xs font-semibold text-[#2F6BFF] sm:px-3"><UserPlus size={15} /> <span className="hidden sm:inline">Undang</span></button>}
               <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
             </div>
@@ -235,10 +241,10 @@ export default function Chat() {
             <div className="flex h-full flex-col items-center justify-center text-center">
               <Bot size={44} className="mb-4 text-[#2F6BFF]" />
               <h3 className="text-lg font-bold text-slate-900">Mulai percakapan dengan tim Anda</h3>
-              <p className="mt-1 max-w-sm text-sm text-slate-500">Pilih satu asisten untuk chat privat, beberapa untuk grup, atau adakan meeting.</p>
+              <p className="mt-1 max-w-sm text-sm text-slate-500">Pilih satu atau beberapa asisten untuk chat teks, atau langsung masuk ruang meeting suara.</p>
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                 <button onClick={() => openModal()} data-testid="empty-new-chat-btn" className="btn-grad rounded-xl px-6 py-3 text-sm">+ Mulai Chat</button>
-                <button onClick={() => openModal("meeting")} data-testid="empty-new-meeting-btn" className="flex items-center gap-2 rounded-xl border border-[#2F6BFF]/40 px-6 py-3 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Gavel size={16} /> Adakan Meeting</button>
+                <button onClick={() => openModal("meeting")} data-testid="empty-new-meeting-btn" className="flex items-center gap-2 rounded-xl border border-[#2F6BFF]/40 px-6 py-3 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Video size={16} /> Meeting Baru</button>
               </div>
             </div>
           )}
@@ -341,10 +347,10 @@ export default function Chat() {
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowModal(false)} />
           <div className="relative w-full max-w-md rounded-3xl border border-[#E7ECF3] bg-white p-6 shadow-2xl fade-up" data-testid="new-chat-modal">
             <button onClick={() => setShowModal(false)} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
-            <h3 className="text-lg font-bold text-slate-900">{mode === "meeting" ? "Adakan Meeting" : "Mulai Percakapan"}</h3>
-            <p className="mt-1 text-sm text-slate-500">{mode === "meeting" ? "Pilih minimal 2 asisten untuk rapat dengan Moderator." : "Pilih 1 asisten untuk privat, atau beberapa untuk grup/meeting."}</p>
+            <h3 className="text-lg font-bold text-slate-900">{mode === "meeting" ? "Meeting Baru" : "Chat Baru"}</h3>
+            <p className="mt-1 text-sm text-slate-500">{mode === "meeting" ? "Pilih satu atau lebih asisten. Ruang meeting langsung terbuka setelah Anda menekan Mulai." : "Pilih satu atau lebih asisten untuk diajak chat."}</p>
             <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
-              {personas.map((p) => {
+              {(personas || []).map((p) => {
                 const on = picked.includes(p.id);
                 return (
                   <button key={p.id} onClick={() => togglePick(p.id)} data-testid={`pick-${p.id}`} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3] hover:bg-slate-50"}`}>
@@ -355,16 +361,9 @@ export default function Chat() {
                 );
               })}
             </div>
-            {picked.length > 1 && (
-              <div className="mt-3 flex gap-2">
-                {[["group", "Grup", Users], ["meeting", "Meeting", Gavel]].map(([v, l, Ic]) => (
-                  <button key={v} onClick={() => setMode(v)} data-testid={`mode-${v}`} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border py-2 text-xs font-semibold ${mode === v ? "border-[#2F6BFF] bg-[#EEF3FF] text-[#2F6BFF]" : "border-[#E7ECF3] text-slate-500"}`}><Ic size={14} /> {l}</button>
-                ))}
-              </div>
-            )}
             <div className="mt-4 flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500">{picked.length > 1 ? `${mode === "meeting" ? "Meeting" : "Grup"} · ${picked.length} asisten` : picked.length === 1 ? "Chat privat" : "Belum dipilih"}</span>
-              <button onClick={startConv} className="btn-grad rounded-xl px-6 py-2.5 text-sm" data-testid="start-conv-btn">Mulai</button>
+              <span className="text-xs font-semibold text-slate-500">{picked.length === 0 ? "Belum dipilih" : mode === "meeting" ? `Meeting · ${picked.length} asisten` : picked.length > 1 ? `Chat grup · ${picked.length} asisten` : "Chat privat"}</span>
+              <button onClick={startConv} className="btn-grad flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm" data-testid="start-conv-btn">{mode === "meeting" && <Video size={15} />} {mode === "meeting" ? "Mulai Meeting" : "Mulai"}</button>
             </div>
           </div>
         </div>

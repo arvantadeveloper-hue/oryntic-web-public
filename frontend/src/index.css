@@ -4,24 +4,43 @@
 @tailwind utilities;
 
 :root {
-  --bg: #F5F7FB;
+  --bg: #F4F6FB;
   --card: #FFFFFF;
   --blue: #2F6BFF;
   --cyan: #22B8FF;
   --purple: #7C3AED;
-  --ink: #1E293B;
+  --navy: #0A1128;
+  --navy-2: #111B3A;
+  --ink: #0F172A;
   --muted: #64748B;
-  --line: #E7ECF3;
+  --line: #E6EAF2;
 }
 
 * { -webkit-font-smoothing: antialiased; }
+
+html { font-size: 15px; }
+@media (min-width: 768px) { html { font-size: 14px; } }
 
 body {
   margin: 0;
   font-family: 'Plus Jakarta Sans', sans-serif;
   background: var(--bg);
   color: var(--ink);
+  letter-spacing: -0.005em;
 }
+
+.sidebar-dark {
+  background: var(--navy);
+  background-image:
+    radial-gradient(60% 30% at 50% 0%, rgba(47, 107, 255, 0.18) 0%, transparent 70%),
+    radial-gradient(40% 25% at 100% 100%, rgba(124, 58, 237, 0.14) 0%, transparent 70%);
+}
+.nav-item { color: #A3AFC9; transition: background-color .18s ease, color .18s ease; }
+.nav-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
+.nav-item.active { background: rgba(255,255,255,0.10); color: #fff; }
+.nav-item.active .nav-ico { color: #fff; }
+.nav-ico { color: #7F8CB0; }
+.nav-item:hover .nav-ico { color: #fff; }
 
 code, pre { font-family: 'JetBrains Mono', monospace; }
 
@@ -34,8 +53,22 @@ code, pre { font-family: 'JetBrains Mono', monospace; }
   .aivora-card {
     @apply rounded-2xl border bg-white;
     border-color: var(--line);
-    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.04);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03), 0 6px 20px rgba(16, 24, 40, 0.035);
   }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white;
+    background: var(--blue);
+    transition: background-color .18s ease, transform .15s ease, box-shadow .2s ease;
+  }
+  .btn-primary:hover { background: #2458E0; box-shadow: 0 8px 20px rgba(47, 107, 255, 0.28); }
+  .btn-primary:active { transform: scale(0.98); }
+  .btn-primary:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+  .btn-soft {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold;
+    background: #fff; border-color: var(--line); color: var(--ink);
+    transition: background-color .18s ease, border-color .18s ease;
+  }
+  .btn-soft:hover { background: #F6F8FC; border-color: #CBD5E1; }
   .aivora-card-hover { transition: box-shadow .25s ease, transform .25s ease, border-color .25s ease; }
   .aivora-card-hover:hover {
     transform: translateY(-3px);
@@ -88,12 +121,12 @@ code, pre { font-family: 'JetBrains Mono', monospace; }
 @keyframes vrreact { 0% { opacity:0; transform:translate(-50%,10px) scale(.5); } 18% { opacity:1; transform:translate(-50%,0) scale(1.1); } 35% { transform:translate(-50%,0) scale(1); } 80% { opacity:1; } 100% { opacity:0; transform:translate(-50%,-34px) scale(1); } }
 .vr-reaction { animation: vrreact 2.6s ease-out forwards; }
 
-.mesh-bg {
-  background:
-    radial-gradient(50% 40% at 15% 0%, rgba(47, 107, 255, 0.05) 0%, transparent 60%),
-    radial-gradient(45% 45% at 95% 5%, rgba(124, 58, 237, 0.06) 0%, transparent 60%),
-    var(--bg);
-}
+.mesh-bg { background: var(--bg); }
+
+@keyframes vrbarge { 0% { opacity: 0; transform: translateY(6px); } 100% { opacity: 1; transform: translateY(0); } }
+.vr-barge { animation: vrbarge .25s ease both; }
+@keyframes floaty { 0%,100% { transform: translateY(0) rotate(-6deg); } 50% { transform: translateY(-10px) rotate(-4deg); } }
+.hero-float { animation: floaty 6s ease-in-out infinite; }
 
 .md-body h1,.md-body h2,.md-body h3 { font-weight:700; margin: .8em 0 .4em; color:#0f172a; }
 .md-body h1{font-size:1.4rem}.md-body h2{font-size:1.2rem}.md-body h3{font-size:1.05rem}

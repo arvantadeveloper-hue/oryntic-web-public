@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, PhoneOff, Gavel, Loader2, Captions, Radio, Send } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Gavel, Loader2, Captions, Radio, Send, Hand } from "lucide-react";
 import { toast } from "sonner";
-import { api, API_BASE, getToken, streamChatWithAtt } from "../lib/api";
+import { api, API_BASE, getToken, streamChatWithAtt, streamSSE } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 
 const ME = "__me__";
 const MOD = "__moderator__";
@@ -32,7 +33,6 @@ function Waveform({ active, color = "#10B981" }) {
 function Tile({ name, portrait, status, isMe, isMod, micLevel = 0, reaction }) {
   const speaking = status === "speaking";
   const thinking = status === "thinking";
-  const ring = isMe ? 1 + micLevel * 0.08 : 1;
   return (
     <div data-testid={`vr-tile-${isMe ? "me" : isMod ? "mod" : name}`}
       className={`relative flex items-center justify-center overflow-hidden rounded-2xl border-2 transition-all duration-200 ${speaking ? "border-emerald-400 vr-speaking" : thinking ? "border-amber-300/70" : "border-white/10"}`}
@@ -44,11 +44,10 @@ function Tile({ name, portrait, status, isMe, isMod, micLevel = 0, reaction }) {
           {isMod ? <Gavel className="text-white/90" size={40} /> : <span className="text-4xl font-extrabold text-white/95">{(name || "?")[0].toUpperCase()}</span>}
         </div>
       )}
-      {/* darken for label legibility */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />
       <div className="absolute inset-x-0 bottom-0 flex items-center justify-between px-3 py-2">
         <span className="flex items-center gap-1.5 truncate text-xs font-semibold text-white">
-          {isMe ? (micLevel > 0.06 ? <Mic size={13} className="text-emerald-400" /> : <Mic size={13} className="text-white/70" />) : isMod ? <Gavel size={13} className="text-amber-300" /> : null}
+          {isMe ? <Mic size={13} className={micLevel > 0.06 ? "text-emerald-400" : "text-white/70"} /> : isMod ? <Gavel size={13} className="text-amber-300" /> : null}
           <span className="truncate">{isMe ? "Anda" : (name || "Asisten")}</span>
         </span>
         {speaking && <Waveform active color={isMod ? "#FBBF24" : "#10B981"} />}
@@ -60,40 +59,58 @@ function Tile({ name, portrait, status, isMe, isMod, micLevel = 0, reaction }) {
   );
 }
 
+const VOICE_THRESHOLD = 0.045;      // user starts speaking (listening phase)
+const BARGE_THRESHOLD = 0.09;       // louder & sustained → interrupt the assistant
+const BARGE_TICKS = 3;              // ~300ms sustained voice
+const SILENCE_AFTER_SPEECH_MS = 1400;
+const NUDGE_AFTER_MS = 20000;       // quiet for 20s → gentle check-in (moderator / persona)
+
 export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) {
+  const { user } = useAuth();
   const members = conv.members || [];
+  const hasModerator = !isPrivate && members.length > 1;
   const [statusMap, setStatusMap] = useState({});
   const [reactionMap, setReactionMap] = useState({});
-  const [caption, setCaption] = useState(null); // {name, text}
+  const [caption, setCaption] = useState(null);
   const [showCaption, setShowCaption] = useState(true);
   const [muted, setMuted] = useState(false);
   const [phase, setPhase] = useState("connecting"); // connecting|listening|thinking|speaking|ending
   const [micLevel, setMicLevel] = useState(0);
+  const [barged, setBarged] = useState(false);
 
   const openRef = useRef(true);
   const mutedRef = useRef(false);
-  const recRef = useRef(null);
+  const phaseRef = useRef("connecting");
   const streamRef = useRef(null);
   const acRef = useRef(null);
   const monitorRef = useRef(null);
+  const recRef = useRef(null);
+  const recMetaRef = useRef({ speechStarted: false, lastVoiceAt: 0, discard: false, since: 0 });
+  const bargeTicksRef = useRef(0);
+  const nudgedRef = useRef(false);
+  const interruptedRef = useRef(false);
+  const turnRef = useRef(0);
+  const abortRef = useRef(null);
   const audioRef = useRef(null);
   const queueRef = useRef([]);
   const playingRef = useRef(false);
   const streamDoneRef = useRef(true);
 
-  const VOICE_THRESHOLD = 0.045;
-  const SILENCE_AFTER_SPEECH_MS = 1400;
-
   const setStatus = (id, s) => setStatusMap((m) => ({ ...m, [id]: s }));
   const clearStatuses = () => setStatusMap({});
+  const goPhase = (p) => { phaseRef.current = p; setPhase(p); };
   const fireReaction = (id, text) => {
     const e = reactionFor(text);
     setReactionMap((m) => ({ ...m, [id]: { e, k: Date.now() } }));
     setTimeout(() => setReactionMap((m) => { const n = { ...m }; delete n[id]; return n; }), 2600);
   };
 
-  const cleanupMic = () => {
+  // ---------- mic (persistent for the whole session) ----------
+  const stopAll = () => {
     if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
+    recMetaRef.current.discard = true;
+    try { recRef.current?.state !== "inactive" && recRef.current?.stop(); } catch (e) {}
+    recRef.current = null;
     try { acRef.current?.close(); } catch (e) {}
     acRef.current = null;
     try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch (e) {}
@@ -101,86 +118,142 @@ export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) 
     setMicLevel(0);
   };
 
-  useEffect(() => {
-    openRef.current = true;
-    const t = setTimeout(() => { if (openRef.current) startListening(); }, 600);
-    return () => {
-      clearTimeout(t);
-      openRef.current = false;
-      try { recRef.current?.stop(); } catch (e) {}
-      try { audioRef.current?.pause(); } catch (e) {}
-      cleanupMic();
-    };
-    // eslint-disable-next-line
-  }, []);
+  const stopSpeech = () => {
+    try { abortRef.current?.abort(); } catch (e) {}
+    abortRef.current = null;
+    try { if (audioRef.current) { audioRef.current.onended = null; audioRef.current.onerror = null; audioRef.current.pause(); } } catch (e) {}
+    audioRef.current = null;
+    queueRef.current = [];
+    playingRef.current = false;
+    streamDoneRef.current = true;
+  };
 
-  const startListening = async () => {
-    if (!openRef.current || mutedRef.current || playingRef.current) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const mr = new MediaRecorder(stream); recRef.current = mr; const chunks = [];
-      mr.ondataavailable = (ev) => chunks.push(ev.data);
-      mr.onstop = async () => {
-        if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
-        try { acRef.current?.close(); } catch (e) {}
-        acRef.current = null;
-        stream.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-        setMicLevel(0); setStatus(ME, "");
-        if (!openRef.current || mutedRef.current) return;
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        const reader = new FileReader();
-        reader.onload = async () => {
-          try {
-            const tr = await api.post("/voice/transcribe", { audio_b64: reader.result, filename: "audio.webm" });
-            const text = (tr.data.text || "").trim();
-            if (!text) { if (openRef.current && !mutedRef.current) startListening(); return; }
-            await runTurn(text);
-          } catch (e) { if (openRef.current && !mutedRef.current) startListening(); }
-        };
-        reader.readAsDataURL(blob);
+  const restartRecorder = () => {
+    const stream = streamRef.current;
+    if (!stream || !openRef.current || mutedRef.current) return;
+    recMetaRef.current.discard = true;
+    try { recRef.current?.state !== "inactive" && recRef.current?.stop(); } catch (e) {}
+    const chunks = [];
+    const mr = new MediaRecorder(stream);
+    const meta = { speechStarted: false, lastVoiceAt: 0, discard: false, since: Date.now() };
+    recMetaRef.current = meta;
+    mr.ondataavailable = (ev) => chunks.push(ev.data);
+    mr.onstop = () => {
+      if (meta.discard || !openRef.current || mutedRef.current) return;
+      const wasInterrupted = interruptedRef.current; interruptedRef.current = false;
+      const blob = new Blob(chunks, { type: "audio/webm" });
+      restartRecorder(); // keep listening so the user can interrupt while we think
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const myTurn = ++turnRef.current;
+        goPhase("thinking"); setStatus(ME, "");
+        try {
+          const tr = await api.post("/voice/transcribe", { audio_b64: reader.result, filename: "audio.webm" });
+          const text = (tr.data.text || "").trim();
+          if (myTurn !== turnRef.current) return;
+          if (!text) { backToListening(); return; }
+          setCaption({ name: "Anda", text });
+          await runTurn(text, wasInterrupted, myTurn);
+        } catch (e) { if (myTurn === turnRef.current) backToListening(); }
       };
-      mr.start(); setPhase("listening"); setStatus(ME, "listening");
+      reader.readAsDataURL(blob);
+    };
+    mr.start(); recRef.current = mr;
+  };
 
+  const backToListening = () => {
+    if (!openRef.current || phaseRef.current === "ending") return;
+    clearStatuses(); setBarged(false);
+    goPhase("listening"); setStatus(ME, "listening");
+    nudgedRef.current = false;
+    restartRecorder();
+  };
+
+  const initMic = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      if (!openRef.current) { stream.getTracks().forEach((t) => t.stop()); return; }
+      streamRef.current = stream;
       const AC = window.AudioContext || window.webkitAudioContext;
       const ac = new AC(); acRef.current = ac;
-      const src = ac.createMediaStreamSource(stream);
       const analyser = ac.createAnalyser(); analyser.fftSize = 1024;
-      src.connect(analyser);
+      ac.createMediaStreamSource(stream).connect(analyser);
       const buf = new Uint8Array(analyser.fftSize);
-      let speechStarted = false; let lastVoiceAt = Date.now();
       monitorRef.current = setInterval(() => {
-        if (!openRef.current) return;
+        if (!openRef.current || mutedRef.current) return;
         analyser.getByteTimeDomainData(buf);
         let sum = 0;
         for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
         const rms = Math.sqrt(sum / buf.length);
         setMicLevel(Math.min(1, rms * 6));
         const now = Date.now();
-        if (rms > VOICE_THRESHOLD) { speechStarted = true; lastVoiceAt = now; }
-        if (speechStarted && now - lastVoiceAt > SILENCE_AFTER_SPEECH_MS) {
-          if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
-          try { mr.state !== "inactive" && mr.stop(); } catch (e) {}
+        const ph = phaseRef.current;
+        const meta = recMetaRef.current;
+        if (ph === "speaking" || ph === "thinking") {
+          // barge-in: sustained loud voice while the assistant talks/thinks
+          bargeTicksRef.current = rms > BARGE_THRESHOLD ? bargeTicksRef.current + 1 : 0;
+          if (bargeTicksRef.current >= BARGE_TICKS) { bargeTicksRef.current = 0; bargeIn(now); }
+          return;
         }
-      }, 120);
-    } catch (e) { setPhase("listening"); }
+        if (ph !== "listening") return;
+        if (rms > VOICE_THRESHOLD) { meta.speechStarted = true; meta.lastVoiceAt = now; }
+        if (meta.speechStarted && now - meta.lastVoiceAt > SILENCE_AFTER_SPEECH_MS) { sendNow(); return; }
+        if (!meta.speechStarted && !nudgedRef.current && now - meta.since > NUDGE_AFTER_MS) { nudgedRef.current = true; nudge(); }
+      }, 100);
+      backToListening();
+    } catch (e) { goPhase("listening"); toast.error("Mikrofon tidak tersedia"); }
   };
 
-  const sendNow = () => { if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; } try { recRef.current?.state !== "inactive" && recRef.current?.stop(); } catch (e) {} };
+  const bargeIn = (now) => {
+    turnRef.current += 1; // invalidate in-flight turn
+    stopSpeech();
+    clearStatuses(); setBarged(true);
+    interruptedRef.current = true;
+    goPhase("listening"); setStatus(ME, "listening");
+    if (!recRef.current || recRef.current.state === "inactive") restartRecorder();
+    const meta = recMetaRef.current; meta.speechStarted = true; meta.lastVoiceAt = now; meta.since = now;
+  };
 
-  const runTurn = async (text) => {
-    setPhase("thinking"); clearStatuses();
+  const sendNow = () => { try { recRef.current?.state !== "inactive" && recRef.current?.stop(); } catch (e) {} };
+
+  useEffect(() => {
+    openRef.current = true;
+    const t = setTimeout(() => { if (openRef.current) initMic(); }, 500);
+    return () => { clearTimeout(t); openRef.current = false; stopSpeech(); stopAll(); };
+    // eslint-disable-next-line
+  }, []);
+
+  // ---------- turns ----------
+  const consume = (ev, myTurn) => {
+    if (myTurn !== turnRef.current) return;
+    if (ev.persona_id && ev.start) setStatus(ev.persona_id, "thinking");
+    if (ev.persona_id && ev.final && ev.content) {
+      queueRef.current.push({ id: ev.persona_id, name: ev.persona_name, voice: ev.voice || (ev.is_moderator ? "onyx" : "nova"), content: ev.content, turn: myTurn });
+      drainQueue();
+    }
+  };
+
+  const runTurn = async (text, interrupted, myTurn) => {
+    goPhase("thinking"); clearStatuses();
     streamDoneRef.current = false;
+    const ctrl = new AbortController(); abortRef.current = ctrl;
     try {
-      await streamChatWithAtt(cid, text, [], (ev) => {
-        if (ev.persona_id && ev.start) setStatus(ev.persona_id, "thinking");
-        if (ev.persona_id && ev.final && ev.content) {
-          queueRef.current.push({ id: ev.persona_id, name: ev.persona_name, voice: ev.voice || (ev.is_moderator ? "onyx" : "nova"), content: ev.content, isMod: !!ev.is_moderator });
-          drainQueue();
-        }
-      }, { moderator: false });
+      await streamChatWithAtt(cid, text, [], (ev) => consume(ev, myTurn), { moderator: false, voice_mode: true, interrupted }, ctrl.signal);
     } catch (e) {}
+    if (myTurn !== turnRef.current) return;
+    streamDoneRef.current = true;
+    onRefresh && onRefresh();
+    drainQueue();
+  };
+
+  const nudge = async () => {
+    const myTurn = ++turnRef.current;
+    goPhase("thinking");
+    streamDoneRef.current = false;
+    const ctrl = new AbortController(); abortRef.current = ctrl;
+    restartRecorder();
+    try { await streamSSE(`/conversations/${cid}/nudge`, {}, (ev) => consume(ev, myTurn), ctrl.signal); } catch (e) {}
+    if (myTurn !== turnRef.current) return;
     streamDoneRef.current = true;
     onRefresh && onRefresh();
     drainQueue();
@@ -189,63 +262,55 @@ export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) 
   const drainQueue = async () => {
     if (playingRef.current) return;
     if (queueRef.current.length === 0) {
-      if (streamDoneRef.current && openRef.current && !mutedRef.current && phaseNotEnding()) {
-        clearStatuses(); startListening();
-      }
+      if (streamDoneRef.current && openRef.current && phaseRef.current !== "ending") backToListening();
       return;
     }
     playingRef.current = true;
     const item = queueRef.current.shift();
-    clearStatuses(); setStatus(item.id, "speaking"); setPhase("speaking");
+    const myTurn = item.turn;
+    clearStatuses(); setStatus(item.id, "speaking"); goPhase("speaking"); setBarged(false);
     fireReaction(item.id, item.content);
     setCaption({ name: item.name, text: item.content });
+    restartRecorder(); // only capture what the user says over this utterance
+    const finish = () => { if (myTurn !== turnRef.current) return; setStatus(item.id, ""); playingRef.current = false; drainQueue(); };
     try {
-      const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: item.content.slice(0, 1500), voice: item.voice }) });
+      const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: item.content.slice(0, 1500), voice: item.voice }), signal: abortRef.current?.signal });
+      if (myTurn !== turnRef.current) return;
       const ab = await res.blob();
       const a = new Audio(URL.createObjectURL(ab)); audioRef.current = a;
-      a.onended = () => { setStatus(item.id, ""); playingRef.current = false; drainQueue(); };
-      a.onerror = () => { setStatus(item.id, ""); playingRef.current = false; drainQueue(); };
+      a.onended = finish; a.onerror = finish;
       await a.play();
-    } catch (e) { setStatus(item.id, ""); playingRef.current = false; drainQueue(); }
+    } catch (e) { finish(); }
   };
-
-  const phaseRef = useRef("connecting");
-  useEffect(() => { phaseRef.current = phase; }, [phase]);
-  const phaseNotEnding = () => phaseRef.current !== "ending";
 
   const toggleMute = () => {
     const nv = !muted; setMuted(nv); mutedRef.current = nv;
-    if (nv) { try { recRef.current?.stop(); } catch (e) {} cleanupMic(); setStatus(ME, ""); }
-    else if (!playingRef.current) startListening();
+    if (nv) { recMetaRef.current.discard = true; try { recRef.current?.stop(); } catch (e) {} setStatus(ME, ""); setMicLevel(0); }
+    else if (phaseRef.current === "listening") backToListening();
+    else restartRecorder();
   };
 
   const endMeeting = async () => {
     if (isPrivate) {
-      openRef.current = false;
-      try { recRef.current?.stop(); } catch (e) {}
-      try { audioRef.current?.pause(); } catch (e) {}
-      cleanupMic();
+      openRef.current = false; stopSpeech(); stopAll();
       toast.message("Panggilan diakhiri");
       onClose();
       return;
     }
-    setPhase("ending");
-    try { recRef.current?.stop(); } catch (e) {}
-    try { audioRef.current?.pause(); } catch (e) {}
-    cleanupMic(); queueRef.current = []; playingRef.current = false;
+    goPhase("ending");
+    stopSpeech(); stopAll();
     setStatus(MOD, "speaking");
     try {
       const r = await api.post(`/conversations/${cid}/summary`);
       const summary = r.data.summary || "";
       onRefresh && onRefresh();
-      toast.success("Notulen rapat tersimpan di Ruang Kerja");
+      toast.success("Notulen meeting tersimpan di Ruang Kerja");
       if (summary) {
         setCaption({ name: "Moderator", text: summary });
         try {
           const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: summary.slice(0, 1500), voice: "onyx" }) });
           const ab = await res.blob();
           const a = new Audio(URL.createObjectURL(ab)); audioRef.current = a;
-          // Let the moderator speak, but never block the close for more than 25s
           await Promise.race([
             new Promise((resolve) => { a.onended = resolve; a.onerror = resolve; a.play().catch(resolve); }),
             new Promise((resolve) => setTimeout(resolve, 25000)),
@@ -253,41 +318,46 @@ export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) 
         } catch (e) {}
       }
     } catch (e) {
-      const msg = e?.response?.data?.detail || "Rapat diakhiri";
-      toast.message(msg);
+      toast.message(e?.response?.data?.detail || "Meeting diakhiri");
     }
-    finishClose();
+    openRef.current = false; onClose();
   };
 
-  // helper: keep openRef true during summary so audio plays; listening is blocked via phase 'ending'
-  const finishClose = () => { openRef.current = false; cleanupMic(); onClose(); };
+  const leaveNoSummary = () => { openRef.current = false; stopSpeech(); stopAll(); onClose(); };
 
-  const leaveNoSummary = () => { openRef.current = false; try { recRef.current?.stop(); } catch (e) {} try { audioRef.current?.pause(); } catch (e) {} cleanupMic(); onClose(); };
-
-  const tiles = [{ id: ME, isMe: true }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait })), ...(isPrivate ? [] : [{ id: MOD, isMod: true, name: "Moderator" }])];
-  const phaseLabel = { connecting: "Menyambungkan...", listening: "Mendengarkan Anda — bicara, otomatis terkirim saat berhenti", thinking: "Asisten sedang berpikir...", speaking: "Sedang berbicara...", ending: "Moderator merangkum rapat..." }[phase];
+  const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait })), ...(hasModerator ? [{ id: MOD, isMod: true, name: "Moderator" }] : [])];
+  const phaseLabel = {
+    connecting: "Menyambungkan...",
+    listening: barged ? "Anda menyela — silakan lanjutkan, saya mendengarkan" : "Mendengarkan Anda — bicara saja, otomatis terkirim saat berhenti",
+    thinking: "Asisten sedang berpikir... (bicara kapan saja untuk menyela)",
+    speaking: "Sedang berbicara — Anda bisa menyela kapan saja",
+    ending: "Moderator merangkum meeting...",
+  }[phase];
 
   return (
     <div className="fixed inset-0 z-[96] flex flex-col" style={{ background: "radial-gradient(1200px 500px at 50% -10%, #16213e 0%, #0a0f1f 60%)" }} data-testid="video-room">
-      {/* header */}
       <div className="flex items-center gap-3 px-4 py-3 text-white sm:px-6">
         <span className="flex h-9 items-center gap-2 rounded-full bg-white/10 px-3 text-sm font-semibold backdrop-blur">
           <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /> {conv.title}
         </span>
-        <span className="hidden text-xs text-white/60 sm:block">{isPrivate ? "Panggilan suara" : `${members.length} asisten + Moderator`}</span>
-        <span className="ml-auto truncate text-xs text-white/70">{phaseLabel}</span>
+        <span className="hidden text-xs text-white/60 sm:block">{isPrivate ? "Panggilan suara" : `Meeting · ${members.length} asisten${hasModerator ? " + Moderator" : ""}`}</span>
+        <span className="ml-auto truncate text-xs text-white/70" data-testid="vr-phase">{phaseLabel}</span>
       </div>
 
-      {/* tiles grid */}
-      <div className="flex-1 overflow-y-auto px-4 pb-2 sm:px-6">
-        <div className="mx-auto grid max-w-5xl gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+      <div className="flex flex-1 items-center overflow-y-auto px-4 pb-2 sm:px-6">
+        <div className="mx-auto grid w-full max-w-6xl gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
           {tiles.map((tl) => (
             <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? micLevel : 0} reaction={reactionMap[tl.id]} />
           ))}
         </div>
       </div>
 
-      {/* caption */}
+      {barged && (
+        <div className="px-4 pb-2 text-center sm:px-6">
+          <span className="vr-barge inline-flex items-center gap-1.5 rounded-full bg-amber-400/90 px-3 py-1 text-xs font-bold text-slate-900" data-testid="vr-barge-pill"><Hand size={12} /> Anda menyela</span>
+        </div>
+      )}
+
       {showCaption && caption && (
         <div className="px-4 pb-2 sm:px-6" data-testid="vr-caption">
           <div className="mx-auto max-w-3xl rounded-2xl bg-black/50 px-4 py-3 text-center backdrop-blur">
@@ -297,7 +367,6 @@ export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) 
         </div>
       )}
 
-      {/* controls */}
       <div className="flex items-center justify-center gap-3 px-4 py-5 sm:gap-4">
         <button onClick={toggleMute} data-testid="vr-mute" title={muted ? "Nyalakan mic" : "Matikan mic"}
           className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>

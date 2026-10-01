@@ -55,7 +55,7 @@ def store_remote_video(url: str, user_id: str, task_id: str) -> str | None:
     """Download a temporary remote video and persist it to object storage.
     Returns the permanent storage path, or None on failure."""
     try:
-        r = requests.get(url, timeout=180, headers={"User-Agent": "Mozilla/5.0 (Aivora)"})
+        r = requests.get(url, timeout=180, headers={"User-Agent": "Mozilla/5.0 (Oryntix)"})
         r.raise_for_status()
         ext = "mp4"
         ct = r.headers.get("Content-Type", "video/mp4")

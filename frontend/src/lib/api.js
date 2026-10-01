@@ -31,12 +31,13 @@ export function openConvSocket(cid, onEvent) {
   return ws;
 }
 
-// Streaming chat with attachments + optional extra body fields (e.g. {moderator:false}).
-export async function streamChatWithAtt(cid, content, attachments, onEvent, extra = {}) {
-  const res = await fetch(`${API_BASE}/conversations/${cid}/send`, {
+// Generic SSE POST stream. `signal` (AbortSignal) lets the caller cancel mid-stream (barge-in).
+export async function streamSSE(path, body, onEvent, signal) {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-    body: JSON.stringify({ content, attachments, ...extra }),
+    body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok || !res.body) throw new Error("stream failed");
   const reader = res.body.getReader();
@@ -56,4 +57,9 @@ export async function streamChatWithAtt(cid, content, attachments, onEvent, extr
       try { onEvent(JSON.parse(data)); } catch (e) {}
     }
   }
+}
+
+// Streaming chat with attachments + optional extra body fields (e.g. {moderator:false}).
+export function streamChatWithAtt(cid, content, attachments, onEvent, extra = {}, signal) {
+  return streamSSE(`/conversations/${cid}/send`, { content, attachments, ...extra }, onEvent, signal);
 }

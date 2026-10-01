@@ -23,12 +23,12 @@ from realtime import manager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("aivora")
 
-app = FastAPI(title="Aivora API")
+app = FastAPI(title="Oryntix API")
 
 
 @app.get("/api/")
 async def root():
-    return {"message": "Aivora API", "status": "ok"}
+    return {"message": "Oryntix API", "status": "ok"}
 
 
 app.include_router(auth_router)
@@ -96,7 +96,7 @@ async def startup():
         logger.error(f"Object storage init failed: {e}")
     global _scheduler_task
     _scheduler_task = asyncio.create_task(_scheduler_loop())
-    logger.info("Aivora API started")
+    logger.info("Oryntix API started")
 
 
 @app.on_event("shutdown")

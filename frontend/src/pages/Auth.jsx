@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { toast } from "sonner";
 import { Mail, Lock, Eye, EyeOff, ArrowRight, Globe, Play, BarChart3, FileText, Users, Sparkles, MessageSquare, Video } from "lucide-react";
-import { Logo, AIVORA_HERO } from "../components/Logo";
+import { Logo, BRAND_HERO, TAGLINE } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 import { useNavigate } from "react-router-dom";
@@ -44,23 +44,21 @@ export default function Auth() {
   return (
     <div className="flex min-h-screen bg-white">
       {/* left hero */}
-      <div className="relative hidden flex-1 overflow-hidden lg:block" style={{ background: "#0B1220" }}>
-        <img src={AIVORA_HERO} alt="" className="absolute inset-0 h-full w-full object-cover opacity-90" />
-        <div className="absolute inset-0" style={{ background: "linear-gradient(100deg, rgba(8,14,30,.92) 0%, rgba(8,14,30,.55) 45%, rgba(8,14,30,.25) 100%)" }} />
+      <div className="relative hidden flex-1 overflow-hidden lg:block sidebar-dark">
+        <img src={BRAND_HERO} alt="" className="hero-float pointer-events-none absolute -right-24 top-1/2 w-[520px] -translate-y-1/2 opacity-90 drop-shadow-2xl xl:w-[600px]" />
+        <div className="absolute inset-0" style={{ background: "linear-gradient(100deg, rgba(10,17,40,.96) 0%, rgba(10,17,40,.75) 45%, rgba(10,17,40,.15) 100%)" }} />
         <div className="relative z-10 flex h-full flex-col justify-between p-10 xl:p-14">
           <div className="flex items-center justify-between">
-            <Logo size={38} light />
-            <nav className="hidden gap-7 text-sm font-medium text-white/80 xl:flex">
-              <span>Fitur</span><span>Solusi</span><span>Harga</span><span>Tentang</span>
-            </nav>
+            <Logo size={36} light />
+            <span className="hidden text-sm font-medium tracking-wide text-white/60 xl:block">{TAGLINE}</span>
           </div>
 
           <div className="max-w-xl">
-            <h1 className="text-4xl font-extrabold leading-tight text-white xl:text-5xl">
-              Kerja Lebih Mudah dengan <span className="grad-text">AI Assistant</span> untuk Tim Anda
+            <h1 className="text-4xl font-bold leading-tight tracking-tight text-white xl:text-5xl">
+              Intelligence, <span className="grad-text">Orchestrated.</span>
             </h1>
             <p className="mt-4 max-w-md text-base text-white/75">
-              Aivora membantu Anda berdiskusi, menganalisis, membuat dokumen, hingga menyelesaikan pekerjaan bersama tim agen AI.
+              Oryntix membantu Anda berdiskusi, menganalisis, membuat dokumen, hingga menyelesaikan pekerjaan bersama tim agen AI — lewat chat maupun meeting suara.
             </p>
             <div className="mt-6 flex items-center gap-3">
               <button className="flex items-center gap-2 rounded-full bg-white/10 px-5 py-3 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20">
@@ -100,8 +98,8 @@ export default function Auth() {
             </button>
           </div>
 
-          <h2 className="text-3xl font-extrabold text-slate-900">Selamat Datang</h2>
-          <p className="mt-1.5 text-sm text-slate-500">Masuk ke workspace Aivora Anda</p>
+          <h2 className="text-3xl font-bold tracking-tight text-slate-900">Selamat Datang</h2>
+          <p className="mt-1.5 text-sm text-slate-500">Masuk ke workspace Oryntix Anda · {TAGLINE}</p>
 
           <form onSubmit={submit} className="mt-7 space-y-4">
             {mode === "register" && (

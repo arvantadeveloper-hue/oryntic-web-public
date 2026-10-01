@@ -41,7 +41,7 @@ export default function JoinMeeting() {
   return (
     <div className="flex min-h-screen items-center justify-center mesh-bg p-4" data-testid="join-page">
       <div className="w-full max-w-md rounded-3xl border border-[#E7ECF3] bg-white p-8 shadow-2xl fade-up">
-        <div className="mb-4 flex items-center gap-2"><Mark size={30} /><span className="text-lg font-bold text-slate-900">Aivora</span></div>
+        <div className="mb-4 flex items-center gap-2"><Mark size={30} /><span className="text-lg font-bold text-slate-900">Oryntix</span></div>
         {err ? (
           <p className="text-sm text-[#EF4444]">{err}</p>
         ) : !info ? (

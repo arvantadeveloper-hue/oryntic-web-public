@@ -34,7 +34,7 @@ export default function Reminders() {
   return (
     <div className="mx-auto max-w-4xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="reminders-page">
       <h1 className="flex items-center gap-2 text-3xl font-extrabold text-slate-900"><Bell className="text-[#F59E0B]" /> {t("nav.reminders")}</h1>
-      <p className="text-sm text-slate-500">Aivora akan "menelepon" Anda di dalam aplikasi saat waktunya tiba.</p>
+      <p className="text-sm text-slate-500">Oryntix akan "menelepon" Anda di dalam aplikasi saat waktunya tiba.</p>
 
       <div className="mt-6 aivora-card p-5">
         <h2 className="mb-4 text-sm font-semibold text-slate-900">{t("reminders.new")}</h2>
@@ -55,7 +55,7 @@ export default function Reminders() {
             <div>
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Persona</label>
               <select className="input-dark" value={personaId} onChange={(e) => setPersonaId(e.target.value)} data-testid="rem-persona">
-                <option value="">Aivora</option>
+                <option value="">Oryntix</option>
                 {personas.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>

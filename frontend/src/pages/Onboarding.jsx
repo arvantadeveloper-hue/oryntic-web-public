@@ -82,7 +82,7 @@ export default function Onboarding() {
           </div>
 
           <button onClick={finish} disabled={busy} className="btn-grad mt-7 w-full rounded-xl py-3.5 text-sm" data-testid="onboard-finish">
-            {busy ? "..." : "Mulai menggunakan Aivora"}
+            {busy ? "..." : "Mulai menggunakan Oryntix"}
           </button>
           <button onClick={() => { logout(); nav("/"); }} className="mt-3 w-full text-center text-xs text-slate-500">Keluar</button>
         </div>

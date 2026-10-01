@@ -55,7 +55,7 @@ export default function TaskDetail() {
       <h2 className="mt-8 mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Agent & Subtugas</h2>
       <div className="space-y-3">
         {(task.steps || []).length === 0 && ["queued", "running"].includes(task.status) && (
-          <div className="aivora-card flex items-center gap-3 p-5 text-sm text-slate-500"><Loader2 size={16} className="animate-spin text-[#8B5CF6]" /> Aivora sedang menyusun rencana...</div>
+          <div className="aivora-card flex items-center gap-3 p-5 text-sm text-slate-500"><Loader2 size={16} className="animate-spin text-[#8B5CF6]" /> Oryntix sedang menyusun rencana...</div>
         )}
         {(task.steps || []).map((s, i) => (
           <div key={s.id || i} className="aivora-card p-5" data-testid={`step-${i}`}>

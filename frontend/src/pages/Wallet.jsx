@@ -29,7 +29,7 @@ export default function Wallet() {
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="wallet-page">
       <h1 className="text-3xl font-extrabold text-slate-900">{t("nav.wallet")}</h1>
-      <p className="text-sm text-slate-500">Kredit adalah satuan penggunaan layanan Aivora (bukan nilai uang langsung).</p>
+      <p className="text-sm text-slate-500">Kredit adalah satuan penggunaan layanan Oryntix (bukan nilai uang langsung).</p>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <div className="aivora-card overflow-hidden p-6" style={{ background: "linear-gradient(135deg, rgba(0,209,255,.14), rgba(124,58,237,.16))" }}>

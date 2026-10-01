@@ -58,7 +58,7 @@ export default function Workspace() {
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="workspace-page">
       <h1 className="text-3xl font-extrabold text-slate-900">{t("nav.workspace")}</h1>
-      <p className="text-sm text-slate-500">Beri Aivora sebuah tujuan — tim agent akan mengerjakannya.</p>
+      <p className="text-sm text-slate-500">Beri Oryntix sebuah tujuan — tim agent akan mengerjakannya.</p>
 
       <div className="mt-6 aivora-card p-5" style={{ background: "linear-gradient(135deg, rgba(0,209,255,.08), rgba(124,58,237,.1))" }}>
         <textarea className="input-dark min-h-[90px]" placeholder={t("work.delegate")} value={goal} onChange={(e) => setGoal(e.target.value)} data-testid="goal-input" />
