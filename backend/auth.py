@@ -136,7 +136,7 @@ async def register(x: RegisterIn):
         "email": email,
         "password_hash": pw_hash(x.password),
         "name": x.name or email.split("@")[0],
-        "role": "user",
+        "role": "admin",  # self-registered accounts own their workspace; invited members get role "user"
         "owner_id": uid,
         "onboarded": False,
         "verified": True,
@@ -210,3 +210,5 @@ async def migrate_workspace():
         await db.users.update_one({"id": demo["id"]}, {"$set": {"role": "admin", "owner_id": demo["id"]}})
     # any user without an owner_id becomes the owner of their own workspace
     await db.users.update_many({"owner_id": {"$exists": False}}, [{"$set": {"owner_id": "$id"}}])
+    # workspace owners (owner_id == own id) are admins of their workspace
+    await db.users.update_many({"role": {"$ne": "admin"}, "$expr": {"$eq": ["$owner_id", "$id"]}}, {"$set": {"role": "admin"}})

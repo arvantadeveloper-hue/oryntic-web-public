@@ -131,6 +131,11 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Temuan `is None` adalah idiom Python yang benar (false positive) — tidak diubah.
 - Regresi: pytest iter10 + iter13 (21 passed) + curl send/nudge/moderate/realtime/usage-report OK.
 
+## Update 2026-06 (n) — Pendaftar mandiri = admin workspace-nya sendiri
+- `POST /api/auth/register` kini membuat akun dengan `role:"admin"`, `owner_id = id` (pemilik workspace sendiri, 500 kredit awal). Anggota yang dibuat admin (Team) atau lewat tautan undangan tetap `role:"user"`.
+- `migrate_workspace()` saat startup: semua akun dengan `owner_id == id` dipromosikan ke admin (idempoten; berlaku juga di produksi).
+- Verified via curl: register → role admin, akses /api/admin/workspace-users 200; budi tetap user.
+
 ## Next tasks
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
 - (P3) CORS pin untuk produksi; rate limit lintas-instance (Redis) bila dideploy multi-replica.
