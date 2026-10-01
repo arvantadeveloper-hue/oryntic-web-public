@@ -361,7 +361,7 @@ async def _persona_reply(cid: str, u: dict, persona: dict, roster, prompt: str, 
 
 
 async def _finish_stream(cid: str, u: dict, total: int, last_message: str):
-    bal = (await db.users.find_one({"id": u["id"]}))["credits"]
+    bal = ((await db.users.find_one({"id": workspace_id(u)}, {"_id": 0, "credits": 1})) or {}).get("credits", 0)
     await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso(), "last_message": last_message[:120]}})
     return f"data: {json.dumps({'done': True, 'credits_used': total, 'credits': bal})}\n\ndata: [DONE]\n\n"
 

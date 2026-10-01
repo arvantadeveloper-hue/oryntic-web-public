@@ -117,8 +117,8 @@ async def users(_: dict = Depends(require_platform_admin)):
 
 
 @router.get("/personas")
-async def personas(_: dict = Depends(require_admin)):
-    return await db.personas.find({"deleted": {"$ne": True}}, {"_id": 0, "portrait": 0, "reference_photo": 0}).sort("updated_at", -1).to_list(500)
+async def personas(admin: dict = Depends(require_admin)):
+    return await db.personas.find({"user_id": workspace_id(admin), "deleted": {"$ne": True}}, {"_id": 0, "portrait": 0, "reference_photo": 0}).sort("updated_at", -1).to_list(500)
 
 
 @router.get("/tasks")

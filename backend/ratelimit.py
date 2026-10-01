@@ -23,8 +23,20 @@ async def set_limits(doc: dict) -> dict:
     return await get_limits()
 
 
+_last_prune = {"at": 0.0}
+
+
+def _prune(now: float):
+    if now - _last_prune["at"] < 300:
+        return
+    _last_prune["at"] = now
+    for k in [k for k, q in _hits.items() if not q or q[-1] < now - 3600]:
+        _hits.pop(k, None)
+
+
 def _allow(key: str, limit: int, window: float) -> bool:
     now = time.time()
+    _prune(now)
     q = _hits.setdefault(key, deque())
     while q and q[0] < now - window:
         q.popleft()
@@ -32,6 +44,11 @@ def _allow(key: str, limit: int, window: float) -> bool:
         return False
     q.append(now)
     return True
+
+
+def login_allowed(ip: str, email: str) -> bool:
+    """Brute-force guard: 10 attempts / 5 min per IP and per account."""
+    return _allow(f"login:ip:{ip}", 10, 300) and _allow(f"login:acct:{email}", 10, 300)
 
 
 async def rate_limit(user: dict, bucket: str):

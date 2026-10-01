@@ -106,12 +106,11 @@ def quota_message(over: dict) -> str:
 
 async def quota_exceeded(user: dict):
     """Return {used, limit} if the user is over their daily credit quota (members, and owners on a trial plan), else None."""
-    if user.get("role") == "admin":
-        if user.get("plan") != "trial":
-            return None
-        ends = user.get("trial_ends_at") or ""
-        if ends and ends < now_iso():
-            return {"used": 0, "limit": 0, "trial_expired": True}
+    owner = user if user.get("role") == "admin" else (await db.users.find_one({"id": user.get("owner_id")}, {"_id": 0, "plan": 1, "trial_ends_at": 1}) or {})
+    if owner.get("plan") == "trial" and (owner.get("trial_ends_at") or "") < now_iso() and owner.get("trial_ends_at"):
+        return {"used": 0, "limit": 0, "trial_expired": True}
+    if user.get("role") == "admin" and user.get("plan") != "trial":
+        return None
     limit = int(user.get("daily_credit_limit") or 0)
     if limit <= 0:
         return None

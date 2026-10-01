@@ -4,11 +4,12 @@ from typing import Annotated, Optional
 
 import bcrypt
 import jwt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
 
 from pricing import get_trial
+from ratelimit import login_allowed
 from db import db, now_iso, new_id
 
 JWT_SECRET = os.environ["JWT_SECRET"]
@@ -178,8 +179,12 @@ async def register(x: RegisterIn):
 
 
 @router.post("/login")
-async def login(x: LoginIn):
-    u = await db.users.find_one({"email": str(x.email).lower()})
+async def login(x: LoginIn, request: Request):
+    email = str(x.email).lower()
+    ip = (request.headers.get("x-forwarded-for") or request.client.host or "?").split(",")[0].strip()
+    if not login_allowed(ip, email):
+        raise HTTPException(429, "Terlalu banyak percobaan login. Coba lagi dalam 5 menit.")
+    u = await db.users.find_one({"email": email})
     if not u or not pw_ok(x.password, u["password_hash"]):
         raise HTTPException(401, "Incorrect email or password")
     return {"access_token": make_token(u["id"], u.get("role", "user")), "user": public_user(u)}
