@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel } from "lucide-react";
+import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff } from "lucide-react";
 import { toast } from "sonner";
 import { api, streamChat, API_BASE, getToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -40,6 +40,7 @@ export default function Chat() {
   const [attachments, setAttachments] = useState([]);
   const [recording, setRecording] = useState(false);
   const [speaker, setSpeaker] = useState(false);
+  const [callOpen, setCallOpen] = useState(false);
   const endRef = useRef(null);
   const fileRef = useRef(null);
   const recRef = useRef(null);
@@ -78,15 +79,16 @@ export default function Chat() {
     e.target.value = "";
   };
 
-  const playTTS = async (text) => {
+  const playTTS = async (text, voice = "nova") => {
     try {
-      const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: text.slice(0, 1500), voice: "nova" }) });
+      const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: text.slice(0, 1500), voice: voice || "nova" }) });
       if (!res.ok) return;
       const blob = await res.blob();
       if (audioRef.current) { audioRef.current.pause(); }
       const a = new Audio(URL.createObjectURL(blob)); audioRef.current = a; a.play();
     } catch (e) {}
   };
+  const voiceFor = (pid) => (conv?.members || []).find((m) => m.id === pid)?.voice || "nova";
 
   const toggleRecord = async () => {
     if (recording) { recRef.current?.stop(); return; }
@@ -126,7 +128,7 @@ export default function Chat() {
         if (pid && ev.delta !== undefined) {
           setLiveMap((prev) => { const cur = prev[pid] || { name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" }; return { ...prev, [pid]: { ...cur, text: cur.text + ev.delta } }; });
         }
-        if (pid && ev.final && speaker && ev.content) playTTS(ev.content);
+        if (pid && ev.final && speaker && ev.content) playTTS(ev.content, ev.voice);
         if (ev.done) refreshUser();
       });
       const r = await api.get(`/conversations/${id}/messages`);
@@ -170,7 +172,12 @@ export default function Chat() {
                 <p className="text-xs text-slate-400">{conv.type === "meeting" ? `Meeting · ${conv.members?.length} asisten + Moderator` : conv.type === "group" ? `Grup · ${conv.members?.length} asisten` : "Chat privat"}</p></div>
             </>
           ) : <p className="text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
-          {conv && <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`ml-auto flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>}
+          {conv && (
+            <div className="ml-auto flex items-center gap-2">
+              {conv.type === "private" && <button onClick={() => setCallOpen(true)} title="Mode panggilan suara" data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-3 text-xs font-semibold text-white"><Phone size={15} /> Panggil</button>}
+              <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
@@ -198,7 +205,7 @@ export default function Chat() {
                   <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm ${m.is_moderator ? "border border-[#2F6BFF]/30 bg-[#EEF3FF] text-slate-700" : "aivora-card text-slate-700"}`} data-testid="msg-assistant"><Markdown content={m.content} /></div>
                   <div className="mt-1.5 flex gap-3 opacity-0 transition group-hover:opacity-100">
                     <button onClick={() => copy(m.content)} className="text-slate-400 hover:text-slate-700"><Copy size={13} /></button>
-                    <button onClick={() => playTTS(m.content)} className="text-slate-400 hover:text-slate-700"><Volume2 size={13} /></button>
+                    <button onClick={() => playTTS(m.content, voiceFor(m.persona_id))} className="text-slate-400 hover:text-slate-700"><Volume2 size={13} /></button>
                     {!m.is_moderator && <button onClick={() => saveMem(m)} className="text-slate-400 hover:text-slate-700"><Bookmark size={13} /></button>}
                     {!m.is_moderator && <button onClick={() => regen(m.id)} className="text-slate-400 hover:text-slate-700"><RefreshCw size={13} /></button>}
                   </div>
@@ -246,6 +253,8 @@ export default function Chat() {
           </div>
         )}
       </div>
+
+      {callOpen && conv && <CallMode conv={conv} cid={id} onClose={() => setCallOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />}
 
       {showModal && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
@@ -306,4 +315,70 @@ async function streamChatWithAtt(cid, content, attachments, onEvent) {
       try { onEvent(JSON.parse(d)); } catch (e) {}
     }
   }
+}
+
+function CallMode({ conv, cid, onClose, onRefresh }) {
+  const member = (conv.members || [])[0] || {};
+  const [status, setStatus] = useState("idle"); // idle | listening | thinking | speaking
+  const recRef = useRef(null);
+  const audioRef = useRef(null);
+  const openRef = useRef(true);
+
+  useEffect(() => { openRef.current = true; return () => { openRef.current = false; try { recRef.current?.stop(); } catch (e) {} try { audioRef.current?.pause(); } catch (e) {} }; }, []);
+
+  const startListening = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream); recRef.current = mr; const chunks = [];
+      mr.ondataavailable = (ev) => chunks.push(ev.data);
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setStatus("thinking");
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const tr = await api.post("/voice/transcribe", { audio_b64: reader.result, filename: "audio.webm" });
+            const text = (tr.data.text || "").trim();
+            if (!text) { if (openRef.current) startListening(); return; }
+            let reply = "";
+            await streamChatWithAtt(cid, text, [], (ev) => { if (ev.final && ev.content) reply = ev.content; });
+            onRefresh && onRefresh();
+            if (!reply) { if (openRef.current) startListening(); return; }
+            setStatus("speaking");
+            const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: reply.slice(0, 1500), voice: member.voice || "nova" }) });
+            const ab = await res.blob();
+            const a = new Audio(URL.createObjectURL(ab)); audioRef.current = a;
+            a.onended = () => { if (openRef.current) startListening(); };
+            a.play();
+          } catch (e) { if (openRef.current) startListening(); }
+        };
+        reader.readAsDataURL(blob);
+      };
+      mr.start(); setStatus("listening");
+    } catch (e) { setStatus("idle"); }
+  };
+
+  useEffect(() => { startListening(); /* auto start */ /* eslint-disable-next-line */ }, []);
+
+  const stopTurn = () => { try { recRef.current?.stop(); } catch (e) {} };
+  const label = { idle: "Menyiapkan...", listening: "Mendengarkan — bicara lalu tekan Kirim", thinking: "Memproses...", speaking: "Berbicara..." }[status];
+
+  return (
+    <div className="fixed inset-0 z-[95] flex items-center justify-center p-4" data-testid="call-mode-overlay">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+      <div className="relative w-full max-w-sm rounded-3xl border border-[#E7ECF3] bg-white p-8 text-center shadow-2xl fade-up">
+        <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-[#10B981]">Panggilan suara</p>
+        <div className={`mx-auto mb-5 h-28 w-28 overflow-hidden rounded-full ${status === "listening" ? "glow-ring" : ""}`} style={{ border: "3px solid #10B981" }}>
+          {member.portrait ? <img src={member.portrait} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-3xl font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(member.name || "?")[0]}</span>}
+        </div>
+        <h2 className="text-2xl font-bold text-slate-900">{member.name}</h2>
+        <p className="mt-2 text-sm text-slate-500">{label}</p>
+        <div className="mt-8 flex items-center justify-center gap-6">
+          <button onClick={stopTurn} disabled={status !== "listening"} data-testid="call-send-turn" className="flex h-14 w-14 items-center justify-center rounded-full bg-[#2F6BFF] text-white disabled:opacity-40"><Send size={22} /></button>
+          <button onClick={onClose} data-testid="call-hangup" className="flex h-16 w-16 items-center justify-center rounded-full bg-[#EF4444] text-white"><PhoneOff size={26} /></button>
+        </div>
+      </div>
+    </div>
+  );
 }

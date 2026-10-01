@@ -16,10 +16,12 @@ export default function PersonaDetail() {
   const [mems, setMems] = useState([]);
   const [newMem, setNewMem] = useState("");
   const [models, setModels] = useState([]);
+  const [voices, setVoices] = useState([]);
 
-  useEffect(() => { api.get("/models").then((r) => setModels(r.data.models)).catch(() => {}); }, []);
+  useEffect(() => { api.get("/models").then((r) => setModels(r.data.models)).catch(() => {}); api.get("/voice/voices").then((r) => setVoices(r.data.voices)).catch(() => {}); }, []);
   const modelLabel = (key) => (models.find((m) => m.id === key) || {}).label || key;
   const changeModel = async (key) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, model: key }); setP(r.data); toast.success("Model diperbarui"); };
+  const changeVoice = async (v) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, voice: v }); setP(r.data); toast.success("Suara diperbarui"); };
 
   const load = () => api.get(`/personas/${id}`).then((r) => setP(r.data)).catch(() => toast.error("Tidak ditemukan"));
   const loadMem = () => api.get(`/memory?persona_id=${id}`).then((r) => setMems(r.data)).catch(() => {});
@@ -77,6 +79,12 @@ export default function PersonaDetail() {
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Otak Persona (Model AI)</label>
             <select className="input-dark py-2.5" value={p.model} onChange={(e) => changeModel(e.target.value)} data-testid="persona-model-select">
               {models.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.tagline}</option>)}
+            </select>
+          </div>
+          <div className="mt-3">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Suara (TTS)</label>
+            <select className="input-dark py-2.5" value={p.voice || "alloy"} onChange={(e) => changeVoice(e.target.value)} data-testid="persona-voice-select">
+              {voices.map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div className="mt-3 space-y-2">

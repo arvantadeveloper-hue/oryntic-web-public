@@ -88,7 +88,7 @@ async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
         "type": ctype,
         "persona_ids": [p["id"] for p in personas],
         "persona_id": personas[0]["id"],
-        "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait")} for p in personas],
+        "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")} for p in personas],
         "title": title, "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
     }
     await db.conversations.insert_one(dict(doc))
@@ -172,7 +172,7 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     async def stream():
         total = 0
         for persona in responders:
-            meta = {"persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait")}
+            meta = {"persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}
             yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
             system = await _persona_system(persona, u, roster if len(personas) > 1 else None)
             history = await _history_text(cid)
@@ -217,6 +217,12 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
                    "persona_id": "__moderator__", "persona_name": "Moderator", "is_moderator": True,
                    "portrait": None, "credits": used, "created_at": now_iso()}
             await db.messages.insert_one(dict(msg))
+            await db.tasks.insert_one({
+                "id": new_id(), "user_id": u["id"], "goal": f"Notulen meeting: {conv['title']}",
+                "type": "meeting_notes", "status": "completed", "steps": [], "summary": "Ringkasan & action items meeting",
+                "model": None, "final_output": summary, "credits_used": used, "video_url": None,
+                "created_at": now_iso(), "updated_at": now_iso(),
+            })
             yield f"data: {json.dumps({**mod_meta, 'final': True, 'message_id': msg['id'], 'content': summary})}\n\n"
 
         bal = (await db.users.find_one({"id": u["id"]}))["credits"]

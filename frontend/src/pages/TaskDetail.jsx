@@ -79,6 +79,9 @@ export default function TaskDetail() {
               <button onClick={exportMd} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600" data-testid="export-output"><Download size={13} /> Ekspor .md</button>
             </div>
           </div>
+          {task.video_url && (
+            <video src={task.video_url} controls className="mb-3 w-full rounded-2xl border border-[#E7ECF3]" data-testid="task-video" />
+          )}
           <div className="aivora-card p-6" data-testid="final-output"><Markdown content={task.final_output} /></div>
           <p className="mt-3 text-right text-xs text-slate-500">Total: {task.credits_used} kredit</p>
         </div>

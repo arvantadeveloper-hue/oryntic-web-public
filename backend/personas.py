@@ -23,6 +23,7 @@ class GenerateProfileIn(BaseModel):
 class PersonaIn(BaseModel):
     profile: dict
     model: str = DEFAULT_MODEL_KEY
+    voice: str = "alloy"
     reference_photo: Optional[str] = None
 
 
@@ -82,6 +83,7 @@ async def create_persona(x: PersonaIn, u: dict = Depends(current_user)):
         "summary": ident.get("summary", ""),
         "profile": x.profile,
         "model": _valid_model(x.model),
+        "voice": x.voice or "alloy",
         "portrait": None,
         "reference_photo": x.reference_photo,
         "version": 1,
@@ -148,6 +150,7 @@ async def update_persona(pid: str, body: dict, u: dict = Depends(current_user)):
         "name": ident.get("name", p["name"]),
         "summary": ident.get("summary", p.get("summary", "")),
         "model": _valid_model(body.get("model", p.get("model"))),
+        "voice": body.get("voice", p.get("voice", "alloy")),
         "version": p.get("version", 1) + 1,
         "versions": versions[-10:],
         "updated_at": now_iso(),

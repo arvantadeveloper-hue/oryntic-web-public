@@ -47,7 +47,13 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **Attachments**: upload image/PDF/text in chat; backend extracts PDF text (pypdf), vision-describes images (gemini), and injects as context. Shown as chips.
 - **Task model recommendation**: `/api/tasks/recommend` classifies the goal and suggests the best model only when it differs from default (DB: video→Seedance 2.5 [not executable here], code/writing→Claude Sonnet, research/image→Gemini Pro, data→GPT Astra). Workspace surfaces a picker only when a better model is recommended; otherwise runs on default. Tasks run with the chosen model.
 
+## Update 2026-06 (c) — Call mode, Seedance video, meeting notes, per-persona voice
+- **Mode Panggilan Suara**: overlay panggilan di chat privat — loop dengar (mic) → tekan Kirim → transkrip (Whisper) → balas persona → TTS suara persona → otomatis dengar lagi. Hands-light.
+- **Eksekusi Video (Seedance)**: tugas kategori video di Ruang Kerja memanggil Seedance via fal.ai Universal Key (queue submit→poll per playbook, `video_gen.py`, endpoint via env `SEEDANCE_ENDPOINT`); hasil video_url tampil sebagai player di TaskDetail. Jika gagal/tak didukung, tugas tetap selesai dengan rencana + catatan jujur.
+- **Notulen Meeting Tersimpan**: ringkasan Moderator meeting otomatis dibuat jadi dokumen `meeting_notes` di Ruang Kerja.
+- **Suara Persona**: tiap persona punya voice TTS sendiri (field `voice`, selektor di detail persona); dipakai di auto-read, tombol play, dan mode panggilan.
+
 ## Next tasks
-- True token-by-token streaming (currently server generates then chunk-streams).
-- Executable media generation (video/image) when those providers are wired.
-- Voice "call mode" (continuous listen→speak loop).
+- Konfirmasi endpoint id Seedance via satu run video nyata, lalu salin output ke object storage.
+- VAD auto-stop agar mode panggilan benar-benar hands-free tanpa tekan Kirim.
+- True token-by-token streaming.

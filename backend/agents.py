@@ -113,10 +113,26 @@ async def _orchestrate(task_id: str, user_id: str, goal: str, model_key: str = N
         final = await llm_text(merge_sys, merge_prompt, model_key)
         credits_total += text_credits(merge_prompt, final)
 
+        # Execute video generation for video tasks (Seedance via fal.ai Universal Key)
+        video_url = None
+        if _classify(goal) == "video":
+            await db.tasks.update_one({"id": task_id}, {"$set": {"status": "running", "summary": "Membuat video dengan Seedance...", "updated_at": now_iso()}})
+            try:
+                from video_gen import generate_seedance_video
+                video_url = await asyncio.to_thread(generate_seedance_video, goal)
+                if video_url:
+                    credits_total += 80
+                    await record_usage(user_id, "video_generation", 80, {"task_id": task_id})
+                    final += f"\n\n## Video\nVideo berhasil dibuat dengan Seedance."
+                else:
+                    final += "\n\n> Catatan: eksekusi video tidak mengembalikan hasil."
+            except Exception as ve:
+                final += f"\n\n> Catatan: eksekusi video gagal ({str(ve)[:120]}). Rencana di atas tetap tersedia."
+
         await record_usage(user_id, "multi_agent_task", credits_total, {"task_id": task_id})
         await db.tasks.update_one({"id": task_id}, {"$set": {
             "status": "completed", "final_output": final, "credits_used": credits_total,
-            "updated_at": now_iso()}})
+            "video_url": video_url, "updated_at": now_iso()}})
     except Exception as e:
         await db.tasks.update_one({"id": task_id}, {"$set": {
             "status": "failed", "error": str(e)[:200], "updated_at": now_iso()}})
