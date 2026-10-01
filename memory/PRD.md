@@ -68,8 +68,14 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - `streamChatWithAtt` dipindah ke `lib/api.js` (mendukung extra body) untuk dipakai Chat + VideoRoom tanpa circular import.
 - Tested: testing agent iteration_3 — backend 4/4 (summary membuat meeting_notes, flag moderator true/false, 400 privat), frontend 100% (tombol, overlay, semua tile + kontrol, caption toggle, end+save → task notulen muncul di Ruang Kerja). Fix pasca-tes: timeout 25s pada pemutaran TTS akhir + guard privat + label tile fallback.
 
+## Update 2026-06 (f) — Moderator Aktif + Reaksi Hidup di Video Room
+- **Moderator Aktif** (`chat.py`): di alur Video Room (`send` dengan `moderator:false`) pada percakapan **meeting**, Moderator kini **menengahi di tengah rapat** setiap giliran genap (turn 2,4,...) dengan 1-2 kalimat singkat (mengakui poin, bertanya lanjutan, atau mengundang peserta). Di-stream sebagai event `is_moderator:true` + `moderator_kind:"interject"`, suara `onyx`. **Tidak** membuat task notulen (hanya ringkasan akhir yang menyimpan notulen). Perilaku meeting teks lama (`moderator:true`) tetap.
+- **Reaksi Hidup** (`VideoRoom.jsx`): tile asisten/moderator memunculkan **emoji mengambang** saat mulai bicara (👍/💡/😂/🤔/🎉/🙏 berdasarkan kata kunci isi jawaban, fallback acak), animasi `vr-reaction` naik & memudar. VideoRoom kini juga memutar interjeksi Moderator di antrean suara (Moderator ikut "bicara" di tengah rapat). Label tile kosong → fallback "Asisten".
+- Tested: testing agent iteration_4 — backend 5/5 (turn ganjil tanpa moderator, turn genap interject + tanpa task, summary tetap buat 1 notulen & guard privat 400, legacy moderator:true tetap), frontend 100% (Video Room render + semua kontrol). Reaksi & loop mikrofon tidak bisa diuji headless (markup terverifikasi).
+- **Catatan**: "Coba Rapat Suara" (hands-free dengan mikrofon nyata) harus diuji langsung oleh user — tidak bisa dijalankan di browser otomatis tanpa mikrofon.
+
 ## Next tasks
-- (Opsional) Avatar wajah bergerak + lip-sync (HeyGen/D-ID) — butuh integrasi berbayar (P3 backlog).
-- Konfirmasi endpoint Seedance via satu run video nyata end-to-end.
-- True token-by-token streaming.
+- User mencoba langsung rapat suara (izin mikrofon) & memverifikasi notulen tersimpan.
+- (Opsional) Avatar wajah bergerak + lip-sync (HeyGen/D-ID) — integrasi berbayar (P3).
 - (Backlog P1) Real payment gateway menggantikan top-up simulasi.
+- True token-by-token streaming.
