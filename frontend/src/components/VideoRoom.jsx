@@ -30,7 +30,7 @@ function Waveform({ active, color = "#10B981" }) {
   );
 }
 
-function Tile({ name, portrait, status, isMe, isMod, micLevel = 0, reaction }) {
+export function Tile({ name, portrait, status, isMe, isMod, micLevel = 0, reaction }) {
   const speaking = status === "speaking";
   const thinking = status === "thinking";
   return (

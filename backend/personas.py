@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from db import db, now_iso, new_id, clean
 from auth import current_user, require_admin, workspace_id
 from llm import llm_json, generate_image, record_usage, text_credits, PROFILE_CREDITS, IMAGE_CREDITS, MODEL_CATALOG, DEFAULT_MODEL_KEY
+from ratelimit import rate_limit
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
 _MODEL_IDS = {m["id"] for m in MODEL_CATALOG}
@@ -56,6 +57,7 @@ PROFILE_SYS = (
 
 @router.post("/generate-profile")
 async def generate_profile(x: GenerateProfileIn, u: dict = Depends(require_admin)):
+    await rate_limit(u, "generation")
     prompt = f"Create method: {x.method}\nUser request:\n{x.description}"
     if x.photo_b64:
         prompt += "\n\n(The user uploaded a reference photo. Describe only neutral visual appearance cues.)"
@@ -105,6 +107,7 @@ async def get_persona(pid: str, u: dict = Depends(current_user)):
 
 @router.post("/{pid}/portrait")
 async def gen_portrait(pid: str, x: PortraitIn, u: dict = Depends(require_admin)):
+    await rate_limit(u, "generation")
     p = await db.personas.find_one({"id": pid, "user_id": u["id"]})
     if not p:
         raise HTTPException(404, "Persona not found")

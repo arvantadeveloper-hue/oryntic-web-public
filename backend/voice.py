@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from auth import current_user
 from llm import transcribe_audio, synthesize_speech, record_usage, STT_CREDITS, TTS_CREDITS
+from ratelimit import rate_limit
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
@@ -29,6 +30,7 @@ async def voices():
 
 @router.post("/transcribe")
 async def transcribe(x: TranscribeIn, u: dict = Depends(current_user)):
+    await rate_limit(u, "voice")
     lang = x.language or (u.get("settings", {}) or {}).get("conversation_language") or "id"
     try:
         data = base64.b64decode(x.audio_b64.split(",")[-1])
@@ -41,6 +43,7 @@ async def transcribe(x: TranscribeIn, u: dict = Depends(current_user)):
 
 @router.post("/tts")
 async def tts(x: TTSIn, u: dict = Depends(current_user)):
+    await rate_limit(u, "voice")
     if not x.text.strip():
         raise HTTPException(400, "Empty text")
     voice = x.voice if x.voice in VOICES else "alloy"

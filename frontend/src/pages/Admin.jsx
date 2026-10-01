@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Users, Briefcase, MessageSquare, Sparkles, Bell, Server } from "lucide-react";
 import { api } from "../lib/api";
 import { RealtimePricingCard } from "../components/RealtimePricingCard";
+import { RateLimitsCard } from "../components/RateLimitsCard";
 
 export default function Admin() {
   const [tab, setTab] = useState("overview");
@@ -113,6 +114,10 @@ export default function Admin() {
           <div>
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Realtime Voice Tariff</h3>
             <RealtimePricingCard />
+          </div>
+          <div>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Rate Limits</h3>
+            <RateLimitsCard />
           </div>
         </div>
       )}

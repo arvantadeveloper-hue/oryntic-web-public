@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import axios from "axios";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -39,7 +40,11 @@ export async function streamSSE(path, body, onEvent, signal) {
     body: JSON.stringify(body),
     signal,
   });
-  if (!res.ok || !res.body) { const err = new Error("stream failed"); err.status = res.status; throw err; }
+  if (!res.ok || !res.body) {
+    const err = new Error("stream failed"); err.status = res.status;
+    try { err.detail = (await res.json()).detail; } catch (e) {}
+    throw err;
+  }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -63,3 +68,8 @@ export async function streamSSE(path, body, onEvent, signal) {
 export function streamChatWithAtt(cid, content, attachments, onEvent, extra = {}, signal) {
   return streamSSE(`/conversations/${cid}/send`, { content, attachments, ...extra }, onEvent, signal);
 }
+
+api.interceptors.response.use((r) => r, (err) => {
+  if (err?.response?.status === 429) toast.error(err.response.data?.detail || "Terlalu banyak permintaan, coba lagi sebentar.");
+  return Promise.reject(err);
+});

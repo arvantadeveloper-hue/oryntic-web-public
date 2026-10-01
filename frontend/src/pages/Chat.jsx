@@ -8,6 +8,7 @@ import { useI18n } from "../i18n";
 import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
 import { RealtimeCall } from "../components/RealtimeCall";
+import { RealtimeMeeting } from "../components/RealtimeMeeting";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
 
 function Avatar({ name, portrait, size = 32, moderator }) {
@@ -166,7 +167,7 @@ export default function Chat() {
       });
       const r = await api.get(`/conversations/${id}/messages`);
       setMessages(r.data.messages); setLiveMap({}); setLiveOrder([]); loadConvs();
-    } catch (e) { toast.error("Gagal mengirim pesan"); } finally { setStreaming(false); }
+    } catch (e) { toast.error(e?.detail || (e?.status === 429 ? "Terlalu banyak pesan, tunggu sebentar." : e?.status === 402 ? "Kuota kredit harian habis." : "Gagal mengirim pesan")); } finally { setStreaming(false); }
   };
 
   const delConv = async (c, e) => { e.stopPropagation(); await api.delete(`/conversations/${c.id}`); loadConvs(); if (c.id === id) nav("/chat"); };
@@ -332,6 +333,8 @@ export default function Chat() {
 
       {videoOpen && conv && (conv.type === "private" && rt.enabled
         ? <RealtimeCall conv={conv} cid={id} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />
+        : conv.type !== "private" && rt.enabled
+        ? <RealtimeMeeting conv={conv} cid={id} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />
         : <VideoRoom conv={conv} cid={id} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />)}
 
       {showInvite && conv && (

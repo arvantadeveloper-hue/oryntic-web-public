@@ -11,6 +11,7 @@ from db import db, now_iso, new_id, clean
 from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, public_user
 from llm import llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded
 from realtime import notify
+from ratelimit import rate_limit
 import secrets
 from datetime import datetime, timezone, timedelta
 
@@ -316,6 +317,7 @@ async def _history_text(cid: str, limit=14) -> str:
 
 @router.post("/conversations/{cid}/send")
 async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
+    await rate_limit(u, "chat")
     conv = await db.conversations.find_one({"id": cid})
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
@@ -444,6 +446,7 @@ async def _moderator_interject(cid: str, u: dict, roster: list, reason: str):
 @router.post("/conversations/{cid}/nudge")
 async def nudge(cid: str, u: dict = Depends(current_user)):
     """Silence in a live meeting/call: Moderator (meeting) or the persona (private) gently checks in. Streams SSE."""
+    await rate_limit(u, "chat")
     conv = await db.conversations.find_one({"id": cid})
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")

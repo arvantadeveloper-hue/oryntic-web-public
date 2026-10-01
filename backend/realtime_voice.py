@@ -13,6 +13,7 @@ from auth import current_user, require_admin, workspace_id
 from llm import record_usage, quota_exceeded
 from chat import _can_access, _persona_system, _history_text
 from realtime import notify
+from ratelimit import rate_limit, get_limits, set_limits, DEFAULT_LIMITS
 
 router = APIRouter(prefix="/api", tags=["realtime-voice"])
 
@@ -67,6 +68,30 @@ async def admin_set_pricing(x: PricingIn, _: dict = Depends(require_admin)):
     return {**doc, "credits_per_min": credits_per_min(doc)}
 
 
+class LimitsIn(BaseModel):
+    chat_per_min: int = Field(ge=1, le=1000)
+    voice_per_min: int = Field(ge=1, le=1000)
+    calls_per_hour: int = Field(ge=1, le=1000)
+    max_call_minutes: int = Field(ge=1, le=600)
+    generation_per_hour: int = Field(ge=1, le=1000)
+
+
+@router.get("/admin/rate-limits")
+async def admin_limits(_: dict = Depends(require_admin)):
+    return await get_limits()
+
+
+@router.put("/admin/rate-limits")
+async def admin_set_limits(x: LimitsIn, _: dict = Depends(require_admin)):
+    return await set_limits(x.model_dump())
+
+
+MULTI_STYLE = ("You are in a LIVE SPOKEN MEETING with the user and other AI assistants: {others}. You hear the user directly. "
+               "What the other assistants say is delivered to you as text messages prefixed with their name in brackets. "
+               "Speak ONLY when a response is requested from you. Keep each turn to 1-3 short spoken sentences, build on what "
+               "others said without repeating them, never speak for them, and address the user by name now and then.")
+
+
 class CallIn(BaseModel):
     conversation_id: str
     opening: Optional[str] = Field(default=None, max_length=1500)  # e.g. reminder the assistant must deliver first
@@ -79,41 +104,53 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
     conv = await db.conversations.find_one({"id": x.conversation_id}, {"_id": 0})
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
+    await rate_limit(u, "calls")
     over = await quota_exceeded(u)
     if over:
         raise HTTPException(402, f"Kuota kredit harian Anda habis ({over['used']}/{over['limit']})")
-    persona = await db.personas.find_one({"id": conv.get("persona_id"), "user_id": workspace_id(u)}, {"_id": 0})
-    if not persona:
+    pids = conv.get("persona_ids") or ([conv["persona_id"]] if conv.get("persona_id") else [])
+    personas = [p async for p in db.personas.find({"id": {"$in": pids}, "user_id": workspace_id(u), "deleted": {"$ne": True}}, {"_id": 0})]
+    personas.sort(key=lambda p: pids.index(p["id"]))
+    if not personas:
         raise HTTPException(400, "Percakapan ini tidak memiliki persona")
+    multi = len(personas) > 1
     p = await get_pricing()
     cpm = credits_per_min(p)
     owner = await db.users.find_one({"id": workspace_id(u)}, {"_id": 0, "credits": 1}) or {}
-    if (owner.get("credits") or 0) < cpm:
+    if (owner.get("credits") or 0) < cpm * len(personas):
         raise HTTPException(402, "Kredit workspace tidak cukup untuk memulai panggilan")
 
-    system = await _persona_system(persona, u, None, voice_mode=True)
-    # close stale calls left open by a dropped tab (older than 2 min; no extra charge beyond what ticks already billed)
     stale_before = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
     await db.realtime_calls.update_many({"user_id": u["id"], "status": {"$in": ["created", "active"]}, "created_at": {"$lt": stale_before}},
                                         {"$set": {"status": "ended", "ended_at": now_iso(), "stale": True}})
-    history = await _history_text(conv["id"], limit=12)
-    instructions = system
-    if history.strip():
-        instructions += f"\n\nRecent conversation with the user (for context):\n{history[-3000:]}"
-    if x.opening:
-        instructions += (f"\n\nYOU ARE CALLING THE USER. Open the call immediately by delivering this reminder warmly in 2-3 short "
-                         f"spoken sentences, greeting {u.get('name') or 'the user'} by name, then ask if they need anything: {x.opening}")
-    else:
-        instructions += f"\n\nThe user just picked up the call. Greet {u.get('name') or 'the user'} briefly and warmly, then let them talk."
 
-    call = {"id": new_id(), "conversation_id": conv["id"], "user_id": u["id"], "persona_id": persona["id"],
-            "voice": VOICE_MAP.get(persona.get("voice", "alloy"), "marin"), "instructions": instructions,
-            "status": "created", "billed_minutes": 0, "credits": 0, "credits_per_min": cpm,
-            "created_at": now_iso(), "started_at": None, "ended_at": None, "seconds": 0}
-    await db.realtime_calls.insert_one(dict(call))
-    return {"call_id": call["id"], "voice": call["voice"], "model": REALTIME_MODEL, "credits_per_min": cpm,
-            "language": ((u.get("settings") or {}).get("conversation_language") or "id"),
-            "persona": {"id": persona["id"], "name": persona["name"], "portrait": persona.get("portrait")}}
+    history = await _history_text(conv["id"], limit=12)
+    roster = [q["name"] for q in personas]
+    uname = u.get("name") or "the user"
+    group_id = new_id()
+    sessions = []
+    for i, persona in enumerate(personas):
+        instructions = await _persona_system(persona, u, None, voice_mode=True)
+        if multi:
+            instructions += "\n\n" + MULTI_STYLE.format(others=", ".join(n for n in roster if n != persona["name"]))
+        if history.strip():
+            instructions += f"\n\nRecent conversation with the user (for context):\n{history[-3000:]}"
+        if x.opening and i == 0:
+            instructions += (f"\n\nYOU ARE CALLING THE USER. Open the call immediately by delivering this reminder warmly in 2-3 short "
+                             f"spoken sentences, greeting {uname} by name, then ask if they need anything: {x.opening}")
+        elif i == 0:
+            instructions += f"\n\nThe user just joined. Greet {uname} briefly and warmly, then let them talk."
+        call = {"id": new_id(), "group_id": group_id, "conversation_id": conv["id"], "user_id": u["id"], "persona_id": persona["id"],
+                "voice": VOICE_MAP.get(persona.get("voice", "alloy"), "marin"), "instructions": instructions,
+                "multi": multi, "primary": i == 0, "status": "created", "billed_minutes": 0, "credits": 0, "credits_per_min": cpm,
+                "created_at": now_iso(), "started_at": None, "ended_at": None, "seconds": 0}
+        await db.realtime_calls.insert_one(dict(call))
+        sessions.append({"call_id": call["id"], "voice": call["voice"], "primary": i == 0,
+                         "persona": {"id": persona["id"], "name": persona["name"], "portrait": persona.get("portrait")}})
+    first = sessions[0]
+    return {"call_id": first["call_id"], "voice": first["voice"], "persona": first["persona"], "model": REALTIME_MODEL,
+            "credits_per_min": cpm, "credits_per_min_total": cpm * len(sessions), "multi": multi, "group_id": group_id,
+            "sessions": sessions, "language": ((u.get("settings") or {}).get("conversation_language") or "id")}
 
 
 async def _own_call(call_id: str, u: dict) -> dict:
@@ -130,19 +167,17 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         raise HTTPException(400, "Call already ended")
     sdp_offer = (await request.body()).decode()
     lang = ((u.get("settings") or {}).get("conversation_language") or "id")
+    multi = bool(call.get("multi"))
+    audio_in = {"turn_detection": {"type": "server_vad", "threshold": 0.5, "prefix_padding_ms": 300,
+                                   "silence_duration_ms": 650, "create_response": not multi, "interrupt_response": True}}
+    if not multi or call.get("primary"):
+        audio_in["transcription"] = {"model": "gpt-4o-mini-transcribe", "language": lang}
     session = {
         "type": "realtime",
         "model": REALTIME_MODEL,
         "instructions": call["instructions"],
         "output_modalities": ["audio"],
-        "audio": {
-            "input": {
-                "transcription": {"model": "gpt-4o-mini-transcribe", "language": lang},
-                "turn_detection": {"type": "server_vad", "threshold": 0.5, "prefix_padding_ms": 300,
-                                   "silence_duration_ms": 650, "create_response": True, "interrupt_response": True},
-            },
-            "output": {"voice": call["voice"]},
-        },
+        "audio": {"input": audio_in, "output": {"voice": call["voice"]}},
     }
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post("https://api.openai.com/v1/realtime/calls",
@@ -200,6 +235,10 @@ async def tick(call_id: str, x: TickIn, u: dict = Depends(current_user)):
     if call["status"] == "ended":
         raise HTTPException(400, "Call already ended")
     out = await _bill(call, x.elapsed_seconds, u)
+    lim = await get_limits()
+    if x.elapsed_seconds >= lim["max_call_minutes"] * 60:
+        await db.realtime_calls.update_one({"id": call_id}, {"$set": {"status": "ended", "ended_at": now_iso(), "reason": "max_duration"}})
+        raise HTTPException(402, f"Durasi maksimal panggilan ({lim['max_call_minutes']} menit) tercapai")
     over = await quota_exceeded(u)
     owner = await db.users.find_one({"id": workspace_id(u)}, {"_id": 0, "credits": 1}) or {}
     if over or (owner.get("credits") or 0) <= 0:
