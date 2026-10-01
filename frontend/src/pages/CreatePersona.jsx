@@ -68,21 +68,21 @@ export default function CreatePersona() {
 
   return (
     <div className="mx-auto max-w-3xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="create-persona-page">
-      <button onClick={() => (step === "method" ? nav("/personas") : setStep("method"))} className="mb-4 flex items-center gap-1 text-sm text-slate-400 hover:text-white">
+      <button onClick={() => (step === "method" ? nav("/personas") : setStep("method"))} className="mb-4 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
         <ArrowLeft size={16} /> {t("common.back")}
       </button>
-      <h1 className="text-3xl font-extrabold text-white">{t("persona.create")}</h1>
+      <h1 className="text-3xl font-extrabold text-slate-900">{t("persona.create")}</h1>
 
       {step === "method" && (
         <>
-          <p className="mt-1 text-sm text-slate-400">Pilih cara membuat persona Anda.</p>
+          <p className="mt-1 text-sm text-slate-500">Pilih cara membuat persona Anda.</p>
           <div className="mt-6 grid gap-4 sm:grid-cols-3">
             {METHODS.map((m) => (
               <button key={m.id} data-testid={`method-${m.id}`} onClick={() => { setMethod(m.id); setStep("input"); }}
                 className="aivora-card aivora-card-hover flex flex-col items-start gap-3 p-5 text-left">
                 <span className="flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: "rgba(0,209,255,.14)", color: "#00D1FF" }}><m.icon size={22} /></span>
-                <span className="font-bold text-white">{m.title}</span>
-                <span className="text-xs text-slate-400">{m.desc}</span>
+                <span className="font-bold text-slate-900">{m.title}</span>
+                <span className="text-xs text-slate-500">{m.desc}</span>
               </button>
             ))}
           </div>
@@ -93,19 +93,19 @@ export default function CreatePersona() {
         <div className="mt-6 space-y-5">
           {needPhoto && (
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Foto referensi</label>
-              <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-600 py-8 hover:border-[#00D1FF]" data-testid="photo-upload">
-                {photo ? <img src={photo} alt="" className="h-28 w-28 rounded-xl object-cover" /> : <><Upload className="mb-2 text-slate-500" /><span className="text-sm text-slate-400">Klik untuk unggah</span></>}
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Foto referensi</label>
+              <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 py-8 hover:border-[#00D1FF]" data-testid="photo-upload">
+                {photo ? <img src={photo} alt="" className="h-28 w-28 rounded-xl object-cover" /> : <><Upload className="mb-2 text-slate-500" /><span className="text-sm text-slate-500">Klik untuk unggah</span></>}
                 <input type="file" accept="image/*" className="hidden" onChange={onFile} />
               </label>
-              <button onClick={() => setConsent(!consent)} data-testid="photo-consent" className="mt-3 flex items-center gap-2 text-left text-xs text-slate-300">
-                <span className={`flex h-4 w-4 items-center justify-center rounded border ${consent ? "btn-grad border-transparent" : "border-slate-500"}`}>{consent && <Check size={11} />}</span>
+              <button onClick={() => setConsent(!consent)} data-testid="photo-consent" className="mt-3 flex items-center gap-2 text-left text-xs text-slate-600">
+                <span className={`flex h-4 w-4 items-center justify-center rounded border ${consent ? "btn-grad border-transparent" : "border-slate-300"}`}>{consent && <Check size={11} />}</span>
                 Saya memiliki hak untuk menggunakan foto ini. Foto hanya dipakai sebagai referensi visual.
               </button>
             </div>
           )}
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">
               {method === "photo" ? "Catatan tambahan (opsional)" : "Deskripsikan karakter Anda"}
             </label>
             <textarea className="input-dark min-h-[140px]" data-testid="persona-desc"
@@ -120,7 +120,7 @@ export default function CreatePersona() {
 
       {step === "review" && profile && (
         <div className="mt-6 space-y-5" data-testid="profile-review">
-          <p className="text-sm text-slate-400">Tinjau & edit profil sebelum menyimpan.</p>
+          <p className="text-sm text-slate-500">Tinjau & edit profil sebelum menyimpan.</p>
           <Field label="Nama" value={profile.identity?.name || ""} onChange={(v) => setPath("identity", "name", v)} testid="rev-name" />
           <FieldArea label="Ringkasan" value={profile.identity?.summary || ""} onChange={(v) => setPath("identity", "summary", v)} testid="rev-summary" />
           <FieldArea label="Gaya komunikasi" value={profile.personality?.communication_style || ""} onChange={(v) => setPath("personality", "communication_style", v)} testid="rev-style" />
@@ -143,7 +143,7 @@ export default function CreatePersona() {
 function Field({ label, value, onChange, testid }) {
   return (
     <div>
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</label>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</label>
       <input className="input-dark" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testid} />
     </div>
   );
@@ -151,7 +151,7 @@ function Field({ label, value, onChange, testid }) {
 function FieldArea({ label, value, onChange, testid }) {
   return (
     <div>
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</label>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</label>
       <textarea className="input-dark min-h-[80px]" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testid} />
     </div>
   );

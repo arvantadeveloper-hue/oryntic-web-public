@@ -27,12 +27,12 @@ export default function Admin() {
 
   return (
     <div className="mx-auto max-w-6xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="admin-page">
-      <h1 className="text-3xl font-extrabold text-white">Admin Console</h1>
+      <h1 className="text-3xl font-extrabold text-slate-900">Admin Console</h1>
 
-      <div className="mt-5 flex gap-2 border-b border-[rgba(148,163,184,.15)]">
+      <div className="mt-5 flex gap-2 border-b border-slate-200">
         {[["overview", "Overview"], ["users", "Users"], ["tasks", "Tasks"], ["pricing", "Pricing"]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} data-testid={`admin-tab-${k}`}
-            className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium ${tab === k ? "border-[#00D1FF] text-white" : "border-transparent text-slate-400"}`}>{l}</button>
+            className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium ${tab === k ? "border-[#00D1FF] text-slate-900" : "border-transparent text-slate-500"}`}>{l}</button>
         ))}
       </div>
 
@@ -41,8 +41,8 @@ export default function Admin() {
           {stats.map((s) => (
             <div key={s.label} className="aivora-card p-5">
               <s.icon size={20} style={{ color: s.c }} />
-              <p className="mt-3 text-2xl font-extrabold text-white">{s.value}</p>
-              <p className="text-xs text-slate-400">{s.label}</p>
+              <p className="mt-3 text-2xl font-extrabold text-slate-900">{s.value}</p>
+              <p className="text-xs text-slate-500">{s.label}</p>
             </div>
           ))}
         </div>
@@ -54,10 +54,10 @@ export default function Admin() {
             <thead><tr className="text-left text-xs uppercase text-slate-500"><th className="p-4">Name</th><th className="p-4">Email</th><th className="p-4">Role</th><th className="p-4">Credits</th></tr></thead>
             <tbody>
               {users.map((u) => (
-                <tr key={u.id} className="border-t border-[rgba(148,163,184,.1)]" data-testid={`admin-user-${u.id}`}>
-                  <td className="p-4 text-white">{u.name}</td><td className="p-4 text-slate-300">{u.email}</td>
-                  <td className="p-4"><span className="rounded-full bg-[#1C2D5A] px-2 py-0.5 text-xs text-slate-300">{u.role}</span></td>
-                  <td className="p-4 text-slate-300">{u.credits}</td>
+                <tr key={u.id} className="border-t border-slate-200" data-testid={`admin-user-${u.id}`}>
+                  <td className="p-4 text-slate-900">{u.name}</td><td className="p-4 text-slate-600">{u.email}</td>
+                  <td className="p-4"><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{u.role}</span></td>
+                  <td className="p-4 text-slate-600">{u.credits}</td>
                 </tr>
               ))}
             </tbody>
@@ -71,10 +71,10 @@ export default function Admin() {
             <thead><tr className="text-left text-xs uppercase text-slate-500"><th className="p-4">Goal</th><th className="p-4">Status</th><th className="p-4">Credits</th></tr></thead>
             <tbody>
               {tasks.map((tk) => (
-                <tr key={tk.id} className="border-t border-[rgba(148,163,184,.1)]">
-                  <td className="max-w-md truncate p-4 text-white">{tk.goal}</td>
-                  <td className="p-4 capitalize text-slate-300">{tk.status}</td>
-                  <td className="p-4 text-slate-300">{tk.credits_used || 0}</td>
+                <tr key={tk.id} className="border-t border-slate-200">
+                  <td className="max-w-md truncate p-4 text-slate-900">{tk.goal}</td>
+                  <td className="p-4 capitalize text-slate-600">{tk.status}</td>
+                  <td className="p-4 text-slate-600">{tk.credits_used || 0}</td>
                 </tr>
               ))}
             </tbody>
@@ -85,23 +85,23 @@ export default function Admin() {
       {tab === "pricing" && pricing && (
         <div className="mt-6 space-y-6">
           <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">Credit Packages</h3>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Credit Packages</h3>
             <div className="grid gap-4 sm:grid-cols-5">
               {pricing.packages.map((p) => (
                 <div key={p.id} className="aivora-card p-4">
-                  <p className="font-bold text-white">{p.name}</p>
-                  <p className="text-sm text-slate-300">{p.credits} kredit</p>
+                  <p className="font-bold text-slate-900">{p.name}</p>
+                  <p className="text-sm text-slate-600">{p.credits} kredit</p>
                   <p className="text-xs text-slate-500">Rp {p.price_idr.toLocaleString("id-ID")}</p>
-                  <p className="mt-1 text-xs text-[#00D1FF]">Margin {(p.margin * 100).toFixed(0)}%</p>
+                  <p className="mt-1 text-xs text-[#2F6BFF]">Margin {(p.margin * 100).toFixed(0)}%</p>
                 </div>
               ))}
             </div>
           </div>
           <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">Providers & Tariff</h3>
-            <div className="aivora-card p-5 text-sm text-slate-300">
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Providers & Tariff</h3>
+            <div className="aivora-card p-5 text-sm text-slate-600">
               {pricing.providers.map((pr, i) => (
-                <div key={i} className="flex items-center justify-between border-b border-[rgba(148,163,184,.1)] py-2 last:border-0">
+                <div key={i} className="flex items-center justify-between border-b border-slate-200 py-2 last:border-0">
                   <span>{pr.provider} · <span className="text-slate-500">{pr.model}</span></span>
                   <span className="rounded-full bg-[#10B981]/20 px-2 py-0.5 text-xs text-[#10B981]">{pr.status}</span>
                 </div>

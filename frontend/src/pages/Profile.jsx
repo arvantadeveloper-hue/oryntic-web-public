@@ -26,31 +26,31 @@ export default function Profile() {
 
   return (
     <div className="mx-auto max-w-2xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="profile-page">
-      <h1 className="text-3xl font-extrabold text-white">{t("nav.profile")}</h1>
+      <h1 className="text-3xl font-extrabold text-slate-900">{t("nav.profile")}</h1>
 
       <div className="mt-6 aivora-card p-6">
         <div className="flex items-center gap-4">
           <div className="flex h-16 w-16 items-center justify-center rounded-full text-2xl font-bold text-[#06111f]" style={{ background: "linear-gradient(135deg,#00D1FF,#7C3AED)" }}>{(user?.name || "U")[0].toUpperCase()}</div>
           <div>
-            <p className="text-lg font-bold text-white">{user?.name}</p>
-            <p className="text-sm text-slate-400">{user?.email}</p>
+            <p className="text-lg font-bold text-slate-900">{user?.name}</p>
+            <p className="text-sm text-slate-500">{user?.email}</p>
             {user?.role === "admin" && <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#7C3AED]/20 px-2 py-0.5 text-xs text-[#a78bfa]"><Shield size={11} /> Admin</span>}
           </div>
-          <div className="ml-auto flex items-center gap-1.5 rounded-full border border-[rgba(0,209,255,.25)] bg-[#0e1830] px-3 py-1.5 text-sm"><Sparkles size={14} className="text-[#00D1FF]" /> <span className="font-semibold text-white">{user?.credits}</span></div>
+          <div className="ml-auto flex items-center gap-1.5 rounded-full border border-[rgba(0,209,255,.25)] bg-slate-50 px-3 py-1.5 text-sm"><Sparkles size={14} className="text-[#2F6BFF]" /> <span className="font-semibold text-slate-900">{user?.credits}</span></div>
         </div>
 
         <div className="mt-6 space-y-4">
           <div>
-            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400"><User size={13} /> Nama</label>
+            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500"><User size={13} /> Nama</label>
             <input className="input-dark" value={name} onChange={(e) => setName(e.target.value)} data-testid="profile-name" />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400"><Globe size={13} /> Bahasa Aplikasi</label>
+              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500"><Globe size={13} /> Bahasa Aplikasi</label>
               <select className="input-dark" value={appLang} onChange={(e) => setAppLang(e.target.value)} data-testid="profile-applang">{LANGS.map((l) => <option key={l.v} value={l.v}>{l.l}</option>)}</select>
             </div>
             <div>
-              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400"><Globe size={13} /> Bahasa Percakapan</label>
+              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500"><Globe size={13} /> Bahasa Percakapan</label>
               <select className="input-dark" value={convLang} onChange={(e) => setConvLang(e.target.value)} data-testid="profile-convlang">{LANGS.map((l) => <option key={l.v} value={l.v}>{l.l}</option>)}</select>
             </div>
           </div>
@@ -58,8 +58,8 @@ export default function Profile() {
         </div>
       </div>
 
-      <div className="mt-4 aivora-card p-6 text-sm text-slate-400">
-        <p className="font-semibold text-white">Privasi & Data</p>
+      <div className="mt-4 aivora-card p-6 text-sm text-slate-500">
+        <p className="font-semibold text-slate-900">Privasi & Data</p>
         <p className="mt-1">Data percakapan & memori Anda hanya digunakan untuk menjalankan layanan. Foto referensi persona hanya dipakai untuk penampilan visual. Anda dapat menghapus persona, memori, dan percakapan kapan saja.</p>
       </div>
     </div>

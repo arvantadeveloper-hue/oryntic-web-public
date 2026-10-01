@@ -39,8 +39,8 @@ export default function Workspace() {
 
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="workspace-page">
-      <h1 className="text-3xl font-extrabold text-white">{t("nav.workspace")}</h1>
-      <p className="text-sm text-slate-400">Beri Aivora sebuah tujuan — tim agent akan mengerjakannya.</p>
+      <h1 className="text-3xl font-extrabold text-slate-900">{t("nav.workspace")}</h1>
+      <p className="text-sm text-slate-500">Beri Aivora sebuah tujuan — tim agent akan mengerjakannya.</p>
 
       <div className="mt-6 aivora-card p-5" style={{ background: "linear-gradient(135deg, rgba(0,209,255,.08), rgba(124,58,237,.1))" }}>
         <textarea className="input-dark min-h-[90px]" placeholder={t("work.delegate")} value={goal} onChange={(e) => setGoal(e.target.value)} data-testid="goal-input" />
@@ -52,7 +52,7 @@ export default function Workspace() {
       <div className="mt-8 flex flex-wrap items-center gap-2">
         {STATUSES.map((s) => (
           <button key={s} onClick={() => setFilter(s)} data-testid={`filter-${s}`}
-            className={`rounded-full px-4 py-1.5 text-xs font-medium capitalize ${filter === s ? "btn-grad" : "border border-slate-600 text-slate-400"}`}>{s}</button>
+            className={`rounded-full px-4 py-1.5 text-xs font-medium capitalize ${filter === s ? "btn-grad" : "border border-slate-200 text-slate-500"}`}>{s}</button>
         ))}
         <div className="relative ml-auto">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -65,7 +65,7 @@ export default function Workspace() {
           <div key={tk.id} onClick={() => nav(`/workspace/${tk.id}`)} data-testid={`task-${tk.id}`}
             className="aivora-card aivora-card-hover group flex cursor-pointer items-center justify-between p-5">
             <div className="min-w-0">
-              <p className="truncate font-semibold text-white">{tk.goal}</p>
+              <p className="truncate font-semibold text-slate-900">{tk.goal}</p>
               <p className="mt-1 text-xs text-slate-500">{(tk.steps || []).length} subtugas · {tk.credits_used || 0} kredit</p>
             </div>
             <div className="ml-4 flex items-center gap-3">

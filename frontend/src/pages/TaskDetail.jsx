@@ -4,7 +4,7 @@ import { ArrowLeft, Download, Copy, CheckCircle2, Loader2, Clock, XCircle } from
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { Markdown } from "../components/Markdown";
-import { AIVORA_MARK } from "../components/Logo";
+import { Mark } from "../components/Logo";
 
 const roleColor = { Research: "#00D1FF", Planning: "#F59E0B", Writing: "#7C3AED", Analyst: "#06B6D4", Coding: "#10B981", Reviewer: "#EF4444" };
 
@@ -38,33 +38,33 @@ export default function TaskDetail() {
 
   return (
     <div className="mx-auto max-w-4xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="task-detail-page">
-      <button onClick={() => nav("/workspace")} className="mb-4 flex items-center gap-1 text-sm text-slate-400 hover:text-white"><ArrowLeft size={16} /> {t_back()}</button>
+      <button onClick={() => nav("/workspace")} className="mb-4 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"><ArrowLeft size={16} /> {t_back()}</button>
 
       <div className="aivora-card p-6">
         <div className="flex items-start gap-3">
-          <img src={AIVORA_MARK} alt="" className="h-10 w-10" />
+          <Mark size={40} />
           <div className="flex-1">
-            <h1 className="text-xl font-bold text-white" data-testid="task-goal">{task.goal}</h1>
-            {task.summary && <p className="mt-1 text-sm text-slate-400">{task.summary}</p>}
+            <h1 className="text-xl font-bold text-slate-900" data-testid="task-goal">{task.goal}</h1>
+            {task.summary && <p className="mt-1 text-sm text-slate-500">{task.summary}</p>}
           </div>
           <StatusBadge status={task.status} />
         </div>
       </div>
 
       {/* subtasks */}
-      <h2 className="mt-8 mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">Agent & Subtugas</h2>
+      <h2 className="mt-8 mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Agent & Subtugas</h2>
       <div className="space-y-3">
         {(task.steps || []).length === 0 && ["queued", "running"].includes(task.status) && (
-          <div className="aivora-card flex items-center gap-3 p-5 text-sm text-slate-400"><Loader2 size={16} className="animate-spin text-[#8B5CF6]" /> Aivora sedang menyusun rencana...</div>
+          <div className="aivora-card flex items-center gap-3 p-5 text-sm text-slate-500"><Loader2 size={16} className="animate-spin text-[#8B5CF6]" /> Aivora sedang menyusun rencana...</div>
         )}
         {(task.steps || []).map((s, i) => (
           <div key={s.id || i} className="aivora-card p-5" data-testid={`step-${i}`}>
             <div className="flex items-center gap-3">
               {stepIcon(s)}
               <span className="rounded-md px-2 py-0.5 text-xs font-semibold" style={{ background: `${roleColor[s.role] || "#94A3B8"}22`, color: roleColor[s.role] || "#94A3B8" }}>{s.role}</span>
-              <span className="text-sm font-semibold text-white">{s.title}</span>
+              <span className="text-sm font-semibold text-slate-900">{s.title}</span>
             </div>
-            {s.output && <div className="mt-3 border-t border-[rgba(148,163,184,.12)] pt-3 text-sm text-slate-300"><Markdown content={s.output} /></div>}
+            {s.output && <div className="mt-3 border-t border-slate-200 pt-3 text-sm text-slate-600"><Markdown content={s.output} /></div>}
           </div>
         ))}
       </div>
@@ -73,10 +73,10 @@ export default function TaskDetail() {
       {task.status === "completed" && (
         <div className="mt-8">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Hasil Akhir</h2>
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Hasil Akhir</h2>
             <div className="flex gap-2">
-              <button onClick={() => { navigator.clipboard.writeText(task.final_output); toast.success("Disalin"); }} className="flex items-center gap-1 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300" data-testid="copy-output"><Copy size={13} /> Salin</button>
-              <button onClick={exportMd} className="flex items-center gap-1 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300" data-testid="export-output"><Download size={13} /> Ekspor .md</button>
+              <button onClick={() => { navigator.clipboard.writeText(task.final_output); toast.success("Disalin"); }} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600" data-testid="copy-output"><Copy size={13} /> Salin</button>
+              <button onClick={exportMd} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600" data-testid="export-output"><Download size={13} /> Ekspor .md</button>
             </div>
           </div>
           <div className="aivora-card p-6" data-testid="final-output"><Markdown content={task.final_output} /></div>

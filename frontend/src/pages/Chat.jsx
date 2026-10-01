@@ -6,7 +6,7 @@ import { api, streamChat } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 import { Markdown } from "../components/Markdown";
-import { AIVORA_MARK } from "../components/Logo";
+import { Mark } from "../components/Logo";
 
 export default function Chat() {
   const { id } = useParams();
@@ -61,9 +61,9 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] md:h-screen" data-testid="chat-page">
+    <div className="flex h-[calc(100vh-4rem)]" data-testid="chat-page">
       {/* conversation list */}
-      <div className="hidden w-72 shrink-0 flex-col border-r border-[rgba(0,209,255,.1)] p-4 md:flex">
+      <div className="hidden w-72 shrink-0 flex-col border-r border-slate-200 p-4 md:flex">
         <button onClick={newChat} data-testid="new-chat-btn" className="btn-grad mb-4 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm"><Plus size={16} /> {t("chat.new")}</button>
         <div className="relative mb-3">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -72,7 +72,7 @@ export default function Chat() {
         <div className="flex-1 space-y-1 overflow-y-auto">
           {convs.map((c) => (
             <div key={c.id} onClick={() => nav(`/chat/${c.id}`)} data-testid={`conv-${c.id}`}
-              className={`group flex cursor-pointer items-center justify-between rounded-xl px-3 py-2.5 text-sm ${c.id === id ? "bg-[#1C2D5A] text-white" : "text-slate-300 hover:bg-[#162244]"}`}>
+              className={`group flex cursor-pointer items-center justify-between rounded-xl px-3 py-2.5 text-sm ${c.id === id ? "bg-slate-100 text-slate-900" : "text-slate-600 hover:bg-slate-50"}`}>
               <span className="truncate">{c.title}</span>
               <button onClick={(e) => delConv(c, e)} className="opacity-0 transition group-hover:opacity-100 text-slate-500 hover:text-[#EF4444]"><Trash2 size={13} /></button>
             </div>
@@ -82,18 +82,18 @@ export default function Chat() {
 
       {/* messages */}
       <div className="flex flex-1 flex-col">
-        <div className="glass flex items-center gap-3 border-b border-[rgba(0,209,255,.1)] px-5 py-3">
-          <img src={AIVORA_MARK} alt="" className="h-8 w-8" />
-          <div><p className="text-sm font-semibold text-white">{conv?.title || "Aivora"}</p><p className="text-xs text-slate-500">Asisten AI</p></div>
-          <button onClick={newChat} className="ml-auto rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 md:hidden">+ Baru</button>
+        <div className="glass flex items-center gap-3 border-b border-slate-200 px-5 py-3">
+          <Mark size={32} />
+          <div><p className="text-sm font-semibold text-slate-900">{conv?.title || "Aivora"}</p><p className="text-xs text-slate-500">Asisten AI</p></div>
+          <button onClick={newChat} className="ml-auto rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 md:hidden">+ Baru</button>
         </div>
 
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
           {messages.length === 0 && !streaming && (
             <div className="flex h-full flex-col items-center justify-center text-center">
-              <img src={AIVORA_MARK} alt="" className="mb-4 h-16 w-16 opacity-80" />
-              <h3 className="text-lg font-bold text-white">Mulai percakapan</h3>
-              <p className="mt-1 max-w-sm text-sm text-slate-400">Tanya apa saja, atau mulai chat dari halaman persona Anda.</p>
+              <Mark size={60} className="mb-4 opacity-90" />
+              <h3 className="text-lg font-bold text-slate-900">Mulai percakapan</h3>
+              <p className="mt-1 max-w-sm text-sm text-slate-500">Tanya apa saja, atau mulai chat dari halaman persona Anda.</p>
             </div>
           )}
           {messages.map((m, i) => (
@@ -103,9 +103,9 @@ export default function Chat() {
                 {m.role === "user" ? <p className="whitespace-pre-wrap">{m.content}</p> : <Markdown content={m.content} />}
                 {m.role === "assistant" && (
                   <div className="mt-2 flex gap-3 opacity-0 transition group-hover:opacity-100">
-                    <button onClick={() => copy(m.content)} className="text-slate-500 hover:text-white" title="Salin"><Copy size={13} /></button>
-                    <button onClick={() => saveMem(m.content)} className="text-slate-500 hover:text-white" title="Simpan ke memori"><Bookmark size={13} /></button>
-                    <button onClick={() => regen(m.id)} className="text-slate-500 hover:text-white" title="Regenerate"><RefreshCw size={13} /></button>
+                    <button onClick={() => copy(m.content)} className="text-slate-500 hover:text-slate-900" title="Salin"><Copy size={13} /></button>
+                    <button onClick={() => saveMem(m.content)} className="text-slate-500 hover:text-slate-900" title="Simpan ke memori"><Bookmark size={13} /></button>
+                    <button onClick={() => regen(m.id)} className="text-slate-500 hover:text-slate-900" title="Regenerate"><RefreshCw size={13} /></button>
                   </div>
                 )}
               </div>
@@ -121,7 +121,7 @@ export default function Chat() {
           <div ref={endRef} />
         </div>
 
-        <div className="border-t border-[rgba(0,209,255,.1)] p-4">
+        <div className="border-t border-slate-200 p-4">
           <div className="flex items-end gap-2">
             <textarea className="input-dark max-h-32 min-h-[48px] resize-none" rows={1} placeholder={t("chat.placeholder")}
               value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} data-testid="chat-input" />

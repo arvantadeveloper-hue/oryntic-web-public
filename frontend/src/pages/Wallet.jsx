@@ -28,17 +28,17 @@ export default function Wallet() {
 
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="wallet-page">
-      <h1 className="text-3xl font-extrabold text-white">{t("nav.wallet")}</h1>
-      <p className="text-sm text-slate-400">Kredit adalah satuan penggunaan layanan Aivora (bukan nilai uang langsung).</p>
+      <h1 className="text-3xl font-extrabold text-slate-900">{t("nav.wallet")}</h1>
+      <p className="text-sm text-slate-500">Kredit adalah satuan penggunaan layanan Aivora (bukan nilai uang langsung).</p>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <div className="aivora-card overflow-hidden p-6" style={{ background: "linear-gradient(135deg, rgba(0,209,255,.14), rgba(124,58,237,.16))" }}>
-          <p className="flex items-center gap-2 text-sm text-slate-300"><Sparkles size={16} className="text-[#00D1FF]" /> {t("wallet.balance")}</p>
-          <p className="mt-2 text-5xl font-extrabold text-white" data-testid="wallet-balance">{wallet?.available ?? user?.credits ?? 0}</p>
-          <p className="text-sm text-slate-400">tersedia · {wallet?.consumed ?? 0} terpakai</p>
+          <p className="flex items-center gap-2 text-sm text-slate-600"><Sparkles size={16} className="text-[#2F6BFF]" /> {t("wallet.balance")}</p>
+          <p className="mt-2 text-5xl font-extrabold text-slate-900" data-testid="wallet-balance">{wallet?.available ?? user?.credits ?? 0}</p>
+          <p className="text-sm text-slate-500">tersedia · {wallet?.consumed ?? 0} terpakai</p>
         </div>
         <div className="aivora-card p-6 lg:col-span-2">
-          <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><TrendingUp size={15} className="text-[#7C3AED]" /> Penggunaan per fitur</p>
+          <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900"><TrendingUp size={15} className="text-[#7C3AED]" /> Penggunaan per fitur</p>
           {chartData.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">Belum ada penggunaan.</p> : (
             <ResponsiveContainer width="100%" height={160}>
               <BarChart data={chartData}>
@@ -51,27 +51,27 @@ export default function Wallet() {
         </div>
       </div>
 
-      <h2 className="mt-10 text-lg font-bold text-white">{t("wallet.topup")} <span className="text-sm font-normal text-slate-500">(simulasi — tanpa pembayaran nyata)</span></h2>
+      <h2 className="mt-10 text-lg font-bold text-slate-900">{t("wallet.topup")} <span className="text-sm font-normal text-slate-500">(simulasi — tanpa pembayaran nyata)</span></h2>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {packages.map((p) => (
           <div key={p.id} className={`aivora-card aivora-card-hover relative p-5 ${p.best_value ? "ring-1 ring-[#00D1FF]" : ""}`} data-testid={`pkg-${p.id}`}>
             {p.best_value && <span className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-full btn-grad px-3 py-0.5 text-[10px] font-bold">BEST VALUE</span>}
-            <p className="text-sm font-bold text-white">{p.name}</p>
+            <p className="text-sm font-bold text-slate-900">{p.name}</p>
             <p className="mt-2 text-3xl font-extrabold grad-text">{p.credits}</p>
-            <p className="text-xs text-slate-400">kredit</p>
-            <p className="mt-3 text-sm text-slate-300">Rp {p.price_idr.toLocaleString("id-ID")}</p>
+            <p className="text-xs text-slate-500">kredit</p>
+            <p className="mt-3 text-sm text-slate-600">Rp {p.price_idr.toLocaleString("id-ID")}</p>
             <button onClick={() => topup(p)} disabled={busy === p.id} className="btn-grad mt-4 w-full rounded-xl py-2.5 text-sm" data-testid={`topup-${p.id}`}>{busy === p.id ? "..." : "Beli"}</button>
           </div>
         ))}
       </div>
 
-      <h2 className="mt-10 text-lg font-bold text-white">{t("wallet.history")}</h2>
-      <div className="mt-4 aivora-card divide-y divide-[rgba(148,163,184,.1)]">
+      <h2 className="mt-10 text-lg font-bold text-slate-900">{t("wallet.history")}</h2>
+      <div className="mt-4 aivora-card divide-y divide-slate-100">
         {(wallet?.transactions || []).length === 0 ? <p className="p-6 text-sm text-slate-500">Belum ada transaksi.</p> :
           wallet.transactions.map((tx) => (
             <div key={tx.id} className="flex items-center justify-between px-5 py-3" data-testid={`txn-${tx.id}`}>
               <div>
-                <p className="text-sm text-slate-200">{tx.description}</p>
+                <p className="text-sm text-slate-700">{tx.description}</p>
                 <p className="text-xs text-slate-500">{new Date(tx.created_at).toLocaleString()}</p>
               </div>
               <span className={`text-sm font-semibold ${tx.amount >= 0 ? "text-[#10B981]" : "text-[#EF4444]"}`}>{tx.amount >= 0 ? "+" : ""}{tx.amount}</span>

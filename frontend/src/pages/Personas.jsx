@@ -31,8 +31,8 @@ export default function Personas() {
     <div className="p-5 sm:p-8 lg:p-10 fade-up" data-testid="personas-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold text-white">{t("nav.personas")}</h1>
-          <p className="text-sm text-slate-400">Karakter AI buatan Anda.</p>
+          <h1 className="text-3xl font-extrabold text-slate-900">{t("nav.personas")}</h1>
+          <p className="text-sm text-slate-500">Karakter AI buatan Anda.</p>
         </div>
         <button onClick={() => nav("/personas/new")} data-testid="create-persona-btn" className="btn-grad flex items-center gap-2 rounded-xl px-5 py-3 text-sm">
           <Plus size={18} /> {t("persona.create")}
@@ -44,8 +44,8 @@ export default function Personas() {
       ) : items.length === 0 ? (
         <div className="mt-16 flex flex-col items-center text-center">
           <div className="mb-4 h-20 w-20 rounded-full" style={{ background: "radial-gradient(circle, rgba(0,209,255,.3), transparent 70%)" }} />
-          <h3 className="text-lg font-bold text-white">Belum ada persona</h3>
-          <p className="mt-1 max-w-sm text-sm text-slate-400">Buat karakter AI dengan mendeskripsikannya atau mengunggah foto referensi.</p>
+          <h3 className="text-lg font-bold text-slate-900">Belum ada persona</h3>
+          <p className="mt-1 max-w-sm text-sm text-slate-500">Buat karakter AI dengan mendeskripsikannya atau mengunggah foto referensi.</p>
           <button onClick={() => nav("/personas/new")} className="btn-grad mt-6 rounded-xl px-6 py-3 text-sm">{t("persona.create")}</button>
         </div>
       ) : (
@@ -53,17 +53,17 @@ export default function Personas() {
           {items.map((p) => (
             <div key={p.id} onClick={() => nav(`/personas/${p.id}`)} data-testid={`persona-card-${p.id}`}
               className="aivora-card aivora-card-hover group cursor-pointer overflow-hidden">
-              <div className="relative aspect-square bg-[#0e1830]">
+              <div className="relative aspect-square bg-slate-50">
                 {p.portrait ? <img src={p.portrait} alt={p.name} className="h-full w-full object-cover" />
                   : <div className="flex h-full w-full items-center justify-center text-4xl font-bold text-slate-600">{p.name[0]}</div>}
                 <div className="absolute inset-x-0 bottom-0 flex gap-2 p-3 opacity-0 transition group-hover:opacity-100" style={{ background: "linear-gradient(transparent, rgba(11,19,43,.9))" }}>
                   <button onClick={(e) => startChat(p, e)} data-testid={`persona-chat-${p.id}`} className="btn-grad flex flex-1 items-center justify-center gap-1 rounded-lg py-2 text-xs"><MessageSquare size={13} /> Chat</button>
-                  <button onClick={(e) => del(p, e)} data-testid={`persona-del-${p.id}`} className="rounded-lg bg-[#EF4444]/80 px-3 text-white"><Trash2 size={14} /></button>
+                  <button onClick={(e) => del(p, e)} data-testid={`persona-del-${p.id}`} className="rounded-lg bg-[#EF4444]/80 px-3 text-slate-900"><Trash2 size={14} /></button>
                 </div>
               </div>
               <div className="p-3">
-                <p className="truncate font-semibold text-white">{p.name}</p>
-                <p className="truncate text-xs text-slate-400">{p.summary || "Persona"}</p>
+                <p className="truncate font-semibold text-slate-900">{p.name}</p>
+                <p className="truncate text-xs text-slate-500">{p.summary || "Persona"}</p>
               </div>
             </div>
           ))}
