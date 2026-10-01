@@ -33,7 +33,9 @@ async def serve_file(path: str, authorization: Optional[str] = Header(None), aut
     uid = _verify(token)
     # Files are namespaced by user id: aivora/videos/{user_id}/...
     parts = path.split("/")
-    if len(parts) < 3 or parts[2] != uid:
+    if any(seg in ("", ".", "..") for seg in parts) or "\\" in path:
+        raise HTTPException(403, "Forbidden")
+    if len(parts) < 4 or parts[0] != "aivora" or parts[2] != uid:
         raise HTTPException(403, "Forbidden")
     try:
         data, content_type = await asyncio.to_thread(get_object, path)

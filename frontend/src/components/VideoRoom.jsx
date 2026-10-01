@@ -118,11 +118,17 @@ export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) 
     setMicLevel(0);
   };
 
+  const releaseAudio = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    try { a.onended = null; a.onerror = null; a.pause(); URL.revokeObjectURL(a.src); } catch (e) {}
+    audioRef.current = null;
+  };
+
   const stopSpeech = () => {
     try { abortRef.current?.abort(); } catch (e) {}
     abortRef.current = null;
-    try { if (audioRef.current) { audioRef.current.onended = null; audioRef.current.onerror = null; audioRef.current.pause(); } } catch (e) {}
-    audioRef.current = null;
+    releaseAudio();
     queueRef.current = [];
     playingRef.current = false;
     streamDoneRef.current = true;
@@ -239,11 +245,18 @@ export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) 
     const ctrl = new AbortController(); abortRef.current = ctrl;
     try {
       await streamChatWithAtt(cid, text, [], (ev) => consume(ev, myTurn), { moderator: false, voice_mode: true, interrupted }, ctrl.signal);
-    } catch (e) {}
+    } catch (e) { if (e?.name !== "AbortError" && myTurn === turnRef.current) turnFailed(e); }
     if (myTurn !== turnRef.current) return;
     streamDoneRef.current = true;
     onRefresh && onRefresh();
     drainQueue();
+  };
+
+  const turnFailed = (e) => {
+    const quota = e?.status === 402;
+    const msg = quota ? "Kuota kredit harian habis — hubungi admin." : "Gagal mendapatkan jawaban, coba bicara lagi.";
+    toast.error(msg);
+    setCaption({ name: "Sistem", text: msg });
   };
 
   const nudge = async () => {
@@ -252,7 +265,7 @@ export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) 
     streamDoneRef.current = false;
     const ctrl = new AbortController(); abortRef.current = ctrl;
     restartRecorder();
-    try { await streamSSE(`/conversations/${cid}/nudge`, {}, (ev) => consume(ev, myTurn), ctrl.signal); } catch (e) {}
+    try { await streamSSE(`/conversations/${cid}/nudge`, {}, (ev) => consume(ev, myTurn), ctrl.signal); } catch (e) { if (e?.name !== "AbortError") console.warn("nudge failed", e); }
     if (myTurn !== turnRef.current) return;
     streamDoneRef.current = true;
     onRefresh && onRefresh();
@@ -272,11 +285,13 @@ export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) 
     fireReaction(item.id, item.content);
     setCaption({ name: item.name, text: item.content });
     restartRecorder(); // only capture what the user says over this utterance
-    const finish = () => { if (myTurn !== turnRef.current) return; setStatus(item.id, ""); playingRef.current = false; drainQueue(); };
+    const finish = () => { releaseAudio(); if (myTurn !== turnRef.current) return; setStatus(item.id, ""); playingRef.current = false; drainQueue(); };
     try {
       const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: item.content.slice(0, 1500), voice: item.voice }), signal: abortRef.current?.signal });
       if (myTurn !== turnRef.current) return;
+      if (!res.ok) throw new Error("tts");
       const ab = await res.blob();
+      releaseAudio();
       const a = new Audio(URL.createObjectURL(ab)); audioRef.current = a;
       a.onended = finish; a.onerror = finish;
       await a.play();
@@ -315,6 +330,7 @@ export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) 
             new Promise((resolve) => { a.onended = resolve; a.onerror = resolve; a.play().catch(resolve); }),
             new Promise((resolve) => setTimeout(resolve, 25000)),
           ]);
+          releaseAudio();
         } catch (e) {}
       }
     } catch (e) {

@@ -33,8 +33,8 @@ async def transcribe(x: TranscribeIn, u: dict = Depends(current_user)):
     try:
         data = base64.b64decode(x.audio_b64.split(",")[-1])
         text = await transcribe_audio(data, x.filename, language=lang)
-    except Exception as e:
-        raise HTTPException(502, f"Transcription failed: {str(e)[:120]}")
+    except Exception:
+        raise HTTPException(502, "Transkripsi gagal, coba lagi")
     await record_usage(u["id"], "voice_stt", STT_CREDITS, {})
     return {"text": text}
 
@@ -46,7 +46,7 @@ async def tts(x: TTSIn, u: dict = Depends(current_user)):
     voice = x.voice if x.voice in VOICES else "alloy"
     try:
         audio = await synthesize_speech(x.text, voice)
-    except Exception as e:
-        raise HTTPException(502, f"TTS failed: {str(e)[:120]}")
+    except Exception:
+        raise HTTPException(502, "Sintesis suara gagal, coba lagi")
     await record_usage(u["id"], "voice_tts", TTS_CREDITS, {})
     return Response(content=audio, media_type="audio/mpeg")

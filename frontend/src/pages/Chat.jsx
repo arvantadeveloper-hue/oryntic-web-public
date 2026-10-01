@@ -112,8 +112,10 @@ export default function Chat() {
       const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: text.slice(0, 1500), voice: voice || "nova" }) });
       if (!res.ok) return;
       const blob = await res.blob();
-      if (audioRef.current) { audioRef.current.pause(); }
-      const a = new Audio(URL.createObjectURL(blob)); audioRef.current = a; a.play();
+      if (audioRef.current) { try { audioRef.current.pause(); URL.revokeObjectURL(audioRef.current.src); } catch (e) {} }
+      const a = new Audio(URL.createObjectURL(blob)); audioRef.current = a;
+      a.onended = () => { try { URL.revokeObjectURL(a.src); } catch (e) {} };
+      a.play();
     } catch (e) {}
   };
   const voiceFor = (pid) => (conv?.members || []).find((m) => m.id === pid)?.voice || "nova";
@@ -168,6 +170,16 @@ export default function Chat() {
   const copy = (txt) => { navigator.clipboard.writeText(txt); toast.success("Disalin"); };
   const saveMem = async (m) => { await api.post("/memory", { persona_id: m.persona_id || conv?.persona_id || null, content: m.content.slice(0, 300) }); toast.success("Disimpan ke memori"); };
   const regen = async (mid) => { setStreaming(true); try { await api.post(`/conversations/${id}/messages/${mid}/regenerate`); const mr = await api.get(`/conversations/${id}/messages`); setMessages(mr.data.messages); refreshUser(); } catch (e) { toast.error("Gagal"); } finally { setStreaming(false); } };
+
+  const [savingNotes, setSavingNotes] = useState(false);
+  const saveNotes = async () => {
+    setSavingNotes(true);
+    try {
+      await api.post(`/conversations/${id}/summary`);
+      const r = await api.get(`/conversations/${id}/messages`); setMessages(r.data.messages); refreshUser();
+      toast.success("Notulen tersimpan di Ruang Kerja");
+    } catch (e) { toast.error(e?.response?.data?.detail || "Gagal membuat notulen"); } finally { setSavingNotes(false); }
+  };
 
   const openInvite = () => { api.get("/admin/workspace-users").then((r) => setWsUsers(r.data)).catch(() => {}); setShowInvite(true); };
   const invite = async (uid) => {
@@ -230,6 +242,7 @@ export default function Chat() {
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {conv.type === "private" && <button onClick={() => setVideoOpen(true)} title="Mode panggilan suara" data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil</span></button>}
               {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Masuk ruang meeting" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#2F6BFF] px-2.5 text-xs font-semibold text-white sm:px-3"><Video size={15} /> <span className="hidden sm:inline">Masuk Meeting</span></button>}
+              {conv.type !== "private" && <button onClick={saveNotes} disabled={savingNotes} title="Buat & simpan notulen ke Ruang Kerja" data-testid="save-notes-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#E6EAF2] bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:px-3">{savingNotes ? <RefreshCw size={15} className="animate-spin" /> : <FileText size={15} />} <span className="hidden sm:inline">Notulen</span></button>}
               {conv.type === "meeting" && isAdmin && <button onClick={openInvite} title="Undang pengguna" data-testid="invite-user-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2F6BFF]/40 px-2.5 text-xs font-semibold text-[#2F6BFF] sm:px-3"><UserPlus size={15} /> <span className="hidden sm:inline">Undang</span></button>}
               <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
             </div>
@@ -261,7 +274,7 @@ export default function Chat() {
               <div key={m.id || i} className="flex justify-start gap-2.5">
                 <div className="mt-1 shrink-0"><Avatar name={m.persona_name} portrait={m.portrait} size={32} moderator={m.is_moderator} /></div>
                 <div className="group max-w-[78%]">
-                  <p className="mb-1 text-xs font-semibold text-slate-500">{m.persona_name}{m.is_moderator && " · ringkasan meeting"}</p>
+                  <p className="mb-1 text-xs font-semibold text-slate-500">{m.persona_name}{m.is_moderator && " · moderator"}</p>
                   <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm ${m.is_moderator ? "border border-[#2F6BFF]/30 bg-[#EEF3FF] text-slate-700" : "aivora-card text-slate-700"}`} data-testid="msg-assistant"><Markdown content={m.content} /></div>
                   <div className="mt-1.5 flex gap-3 opacity-0 transition group-hover:opacity-100">
                     <button onClick={() => copy(m.content)} className="text-slate-400 hover:text-slate-700"><Copy size={13} /></button>

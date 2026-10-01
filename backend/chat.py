@@ -12,6 +12,11 @@ from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, pu
 from llm import llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded
 from realtime import notify
 import secrets
+from datetime import datetime, timezone, timedelta
+
+INVITE_TTL_DAYS = 7
+INVITE_DEFAULT_DAILY_LIMIT = 200
+MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -33,6 +38,8 @@ async def _process_attachments(attachments, user_id):
             elif atype == "pdf":
                 from pypdf import PdfReader
                 raw = base64.b64decode(data.split(",")[-1])
+                if len(raw) > MAX_ATTACHMENT_BYTES:
+                    raise ValueError("attachment too large")
                 reader = PdfReader(io.BytesIO(raw))
                 txt = "".join((p.extract_text() or "") + "\n" for p in reader.pages[:20])
                 ctx.append(f"[PDF '{name}']:\n{txt[:6000]}")
@@ -65,7 +72,7 @@ def _can_access(conv: dict, u: dict) -> bool:
 class MsgIn(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
     attachments: list = []
-    moderator: bool = True  # meeting: when False, skip the per-turn moderator summary (used by Meeting Room)
+    moderator: bool = True  # legacy flag (ignored): Moderator now only interjects when the discussion is stuck
     voice_mode: bool = False  # spoken conversation: short, warm, human-like replies (no markdown)
     interrupted: bool = False  # the user barged in while the assistant was speaking
 
@@ -75,10 +82,13 @@ class MemIn(BaseModel):
     content: str = Field(min_length=1, max_length=1000)
 
 
-async def _get_personas(ids):
+async def _get_personas(ids, wid=None):
     out = []
     for pid in ids:
-        p = await db.personas.find_one({"id": pid}, {"_id": 0})
+        q = {"id": pid}
+        if wid:
+            q["user_id"] = wid
+        p = await db.personas.find_one(q, {"_id": 0})
         if p:
             out.append(p)
     return out
@@ -87,7 +97,7 @@ async def _get_personas(ids):
 # ---------- conversations ----------
 @router.post("/conversations")
 async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
-    personas = await _get_personas(x.persona_ids)
+    personas = await _get_personas(x.persona_ids, workspace_id(u))
     if not personas:
         raise HTTPException(400, "Pilih minimal satu persona untuk memulai percakapan")
     multi = x.type in ("group", "meeting") and (len(personas) > 1 or x.type == "meeting")
@@ -163,17 +173,24 @@ async def create_invite_link(cid: str, u: dict = Depends(current_user)):
     if conv.get("type") == "private":
         raise HTTPException(400, "Tautan hanya untuk grup atau meeting")
     token = conv.get("invite_token")
-    if not token:
-        token = secrets.token_urlsafe(10)
-        await db.conversations.update_one({"id": cid}, {"$set": {"invite_token": token}})
-    return {"token": token, "path": f"/join/{token}"}
+    exp = conv.get("invite_expires_at")
+    if not token or not exp or exp < now_iso():
+        token = secrets.token_urlsafe(24)
+        exp = (datetime.now(timezone.utc) + timedelta(days=INVITE_TTL_DAYS)).isoformat()
+        await db.conversations.update_one({"id": cid}, {"$set": {"invite_token": token, "invite_expires_at": exp}})
+    return {"token": token, "path": f"/join/{token}", "expires_at": exp}
+
+
+async def _conv_by_invite(token: str):
+    conv = await db.conversations.find_one({"invite_token": token})
+    if not conv or (conv.get("invite_expires_at") or "") < now_iso():
+        raise HTTPException(404, "Undangan tidak valid atau sudah kedaluwarsa")
+    return conv
 
 
 @router.get("/invites/{token}")
 async def invite_info(token: str):
-    conv = await db.conversations.find_one({"id": {"$exists": True}, "invite_token": token}, {"_id": 0})
-    if not conv:
-        raise HTTPException(404, "Undangan tidak valid")
+    conv = await _conv_by_invite(token)
     owner = await db.users.find_one({"id": conv.get("workspace_id")}, {"_id": 0})
     return {
         "title": conv.get("title"),
@@ -185,9 +202,7 @@ async def invite_info(token: str):
 
 @router.post("/invites/{token}/join")
 async def invite_join(token: str, u: dict = Depends(current_user)):
-    conv = await db.conversations.find_one({"invite_token": token})
-    if not conv:
-        raise HTTPException(404, "Undangan tidak valid")
+    conv = await _conv_by_invite(token)
     if (u.get("owner_id") or u["id"]) != conv.get("workspace_id"):
         raise HTTPException(403, "Akun Anda bukan bagian dari workspace ini")
     await db.conversations.update_one({"id": conv["id"]}, {"$addToSet": {"participants": u["id"]}})
@@ -203,9 +218,7 @@ class InviteRegisterIn(BaseModel):
 
 @router.post("/invites/{token}/register")
 async def invite_register(token: str, x: InviteRegisterIn):
-    conv = await db.conversations.find_one({"invite_token": token})
-    if not conv:
-        raise HTTPException(404, "Undangan tidak valid")
+    conv = await _conv_by_invite(token)
     email = str(x.email).lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(409, "Email sudah terdaftar. Silakan masuk lalu buka tautan lagi.")
@@ -215,6 +228,7 @@ async def invite_register(token: str, x: InviteRegisterIn):
     doc = {
         "id": uid, "email": email, "password_hash": pw_hash(x.password),
         "name": x.name, "role": "user", "owner_id": wid, "onboarded": True, "verified": True, "credits": 0,
+        "daily_credit_limit": INVITE_DEFAULT_DAILY_LIMIT, "joined_via_invite": True,
         "settings": {
             "app_language": owner.get("settings", {}).get("app_language", "id"),
             "conversation_language": owner.get("settings", {}).get("conversation_language", "id"),
@@ -233,12 +247,12 @@ async def list_conv(q: Optional[str] = None, u: dict = Depends(current_user)):
     query = {"$or": [{"user_id": u["id"]}, {"participants": u["id"]}]}
     if q:
         query["title"] = {"$regex": q, "$options": "i"}
-    return await db.conversations.find(query, {"_id": 0}).sort("updated_at", -1).to_list(200)
+    return await db.conversations.find(query, {"_id": 0, "invite_token": 0}).sort("updated_at", -1).to_list(200)
 
 
 @router.get("/conversations/{cid}/messages")
 async def get_messages(cid: str, u: dict = Depends(current_user)):
-    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0, "invite_token": 0})
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
     msgs = await db.messages.find({"conversation_id": cid}, {"_id": 0}).sort("created_at", 1).to_list(1000)
@@ -359,35 +373,9 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
             yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full})}\n\n"
             await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
 
-        # meeting moderator summary
-        if ctype == "meeting" and len(responders) > 1 and x.moderator:
-            mod_meta = {"persona_id": "__moderator__", "persona_name": "Moderator", "portrait": None, "is_moderator": True}
-            yield f"data: {json.dumps({**mod_meta, 'start': True})}\n\n"
-            history = await _history_text(cid, limit=20)
-            sys = (f"You are the meeting Moderator. You MUST write entirely in {_lang_name(u)}. Summarize the discussion so far into: key points, agreements, "
-                   "disagreements, and clear action items. Be concise and neutral. Use markdown.")
-            summary = await llm_text(sys, f"Topik: {x.content}\n\nDiskusi:\n{history}\n\nModerator summary:")
-            words = summary.split(" ")
-            for i, w in enumerate(words):
-                yield f"data: {json.dumps({**mod_meta, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
-                await asyncio.sleep(0.008)
-            used = text_credits(history, summary)
-            total += used
-            await record_usage(u["id"], "meeting_summary", used, {"conversation_id": cid})
-            msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": summary,
-                   "persona_id": "__moderator__", "persona_name": "Moderator", "is_moderator": True,
-                   "portrait": None, "credits": used, "created_at": now_iso()}
-            await db.messages.insert_one(dict(msg))
-            await db.tasks.insert_one({
-                "id": new_id(), "user_id": u["id"], "goal": f"Notulen meeting: {conv['title']}",
-                "type": "meeting_notes", "status": "completed", "steps": [], "summary": "Ringkasan & action items meeting",
-                "model": None, "final_output": summary, "credits_used": used, "video_url": None,
-                "created_at": now_iso(), "updated_at": now_iso(),
-            })
-            yield f"data: {json.dumps({**mod_meta, 'final': True, 'message_id': msg['id'], 'content': summary})}\n\n"
-
-        # meeting room: Moderator only steps in when the discussion is stuck (disagreement / going in circles)
-        elif ctype == "meeting" and len(responders) > 1 and not x.moderator:
+        # meeting: the Moderator only steps in when the discussion is stuck (disagreement / going in circles);
+        # the full notulen is produced on demand via POST /conversations/{cid}/summary
+        if ctype == "meeting" and len(responders) > 1:
             user_turns = await db.messages.count_documents({"conversation_id": cid, "role": "user"})
             if user_turns >= 2 and await _is_stuck(cid):
                 async for ev in _moderator_interject(cid, u, roster, "stuck"):
@@ -422,7 +410,6 @@ async def _is_stuck(cid: str) -> bool:
 
 async def _moderator_interject(cid: str, u: dict, roster: list, reason: str):
     """Yield SSE events for a short Moderator interjection; the final yielded item is the int credits used."""
-    yield f"data: {json.dumps({**MOD_META, 'start': True})}\n\n"
     history = await _history_text(cid, limit=12)
     if reason == "silence":
         goal = ("The user has been quiet for a while. In 1-2 warm, short spoken sentences: briefly note what has been agreed so far "
@@ -439,6 +426,7 @@ async def _moderator_interject(cid: str, u: dict, roster: list, reason: str):
     if not inter.strip():
         yield 0
         return
+    yield f"data: {json.dumps({**MOD_META, 'start': True})}\n\n"
     for i, w in enumerate(inter.split(" ")):
         yield f"data: {json.dumps({**MOD_META, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
         await asyncio.sleep(0.008)
@@ -513,8 +501,8 @@ async def nudge(cid: str, u: dict = Depends(current_user)):
 @router.post("/conversations/{cid}/summary")
 async def meeting_summary(cid: str, u: dict = Depends(current_user)):
     """Generate a closing Moderator summary, save it to the conversation and as a Workspace notulen."""
-    conv = await db.conversations.find_one({"id": cid, "user_id": u["id"]})
-    if not conv:
+    conv = await db.conversations.find_one({"id": cid})
+    if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
     if conv.get("type") == "private":
         raise HTTPException(400, "Notulen hanya untuk percakapan grup atau meeting")

@@ -1,0 +1,36 @@
+{
+  "summary": "Oryntix rebrand + iteration 9 features fully verified. Backend: 13/13 pytest cases pass (meeting-with-1-persona keeps type 'meeting'; group with 1 persona downgrades to private; group with 2 personas is 'group'; /send voice_mode:true produces short spoken-style SSE reply with no markdown bullets/headers; interrupted:true accepted; /nudge streams moderator in a 2-persona meeting and the persona in private; nudge returns 404 for unknown conv and 400 when no messages; moderator:false on a 2-persona meeting does NOT emit a moderator event or create a meeting_notes task on turn 1; legacy moderator:true still produces moderator summary + meeting_notes task; /summary works for meeting, 400 for private). Frontend: Login page shows Oryntix logo + tagline 'Intelligence, Orchestrated.'; admin sidebar has Dashboard, Chat & Meeting, AI Agents, Ruang Kerja, Pengingat, Team, Kredit, Settings, Admin; Home has hero text 'Turn your ideas into real results with AI.', 4 stat cards (stat-agents/projects/completed/meetings); no 'Aivora' text in UI (emails excluded). Chat page has new-chat-btn & new-meeting-btn; Meeting Baru modal has NO mode-group/mode-meeting toggles, footer reads 'Meeting · N asisten', start-conv-btn → VideoRoom overlay (video-room) opens IMMEDIATELY with tiles vr-tile-me + vr-tile-mod (2 personas) and controls vr-mute/vr-send/vr-captions/vr-end-save/vr-leave/vr-phase. Chat Baru with 1 persona → private, header shows call-mode-btn (Panggil); 2 personas → group chat, header shows video-call-btn (Masuk Meeting). No 'Video Call' text anywhere. Regular user budi@aivora.ai correctly hides AI Agents/Team/Kredit/Admin and can create Meeting Baru.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Chat sidebar conversation list", "issues": ["A legacy persona in the workspace has an empty name string, so conversations auto-titled 'Meeting: , Rio' / 'Chat dengan ' show a leading comma or trailing blank. Not a regression — pre-existing test-data artifact. Recommend filtering personas with empty names in Chat/Home/CreateConv listings (currently filtered in persona pickers but not in auto-titles)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_oryntix_iter9.py",
+    "/app/test_reports/pytest/iter9_results.xml"
+  ],
+  "action_items": [
+    "(Minor) Guard _get_personas / create_conv title generator against personas with empty name to avoid 'Meeting: , Rio' titles; or clean up the orphan persona in the demo workspace."
+  ],
+  "critical_code_review_comments": [
+    "chat.py create_conv: logic `multi = x.type in ('group','meeting') and (len(personas) > 1 or x.type == 'meeting')` correctly keeps type='meeting' for 1 persona and downgrades type='group' with 1 persona to 'private'. Correct per spec.",
+    "chat.py _persona_system VOICE_STYLE: explicit 'no markdown, bullets, headings, emojis, URLs' and max ~60 words — verified in test (reply has no bullets/headers and <1200 chars).",
+    "chat.py send_message moderator branch: when ctype=='meeting' and moderator:false, moderator interjection runs only if user_turns>=2 AND _is_stuck() returns YES. On turn 1 it is correctly skipped — no moderator event, no meeting_notes task. ✅",
+    "chat.py _moderator_interject: yields 0 (int) when LLM returns empty — the caller `async for ev in _moderator_interject` adds `ev` to total only if int, so this early-exit works. Clean.",
+    "chat.py /nudge: correctly chooses moderator for meeting-with-2+-personas, persona for private; 400 when no history. Returns 404 via _can_access when conv not accessible by current user — good tenant isolation.",
+    "chat.py MsgIn.interrupted: appended as a prompt note. Fine, but note the flag is not persisted on the user_msg document — if you later want analytics on barge-ins, store it on the message record.",
+    "VideoRoom.jsx data-testids complete (video-room, vr-tile-me/mod, vr-mute/send/captions/end-save/leave/phase). Barge-in / mic / VAD cannot be exercised headless.",
+    "AppLayout.jsx nav labels still use t('nav.chat') / t('nav.workspace') etc. — relying on i18n to render 'Chat & Meeting' / 'Ruang Kerja'. Verified against live UI, labels render correctly in Indonesian locale."
+  ],
+  "updated_files": ["/app/backend/tests/test_oryntix_iter9.py"],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% core flows"},
+  "test_credentials": "Admin demo@aivora.ai / demo123456; Regular budi@aivora.ai / budi123456",
+  "seed_data_creation": "Each test creates and deletes its own conversation (TEST_meet_1p, TEST_grp_1p, TEST_grp_2p, TEST_voice_priv, TEST_nudge_priv, TEST_nudge_meet, TEST_nudge_empty, TEST_mod_gate, TEST_legacy_mod, TEST_sum_priv, TEST_sum_meet). Legacy moderator meeting test creates a meeting_notes task that is NOT auto-deleted (desired side effect of /send with moderator:true).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "test_oryntix_iter9.py covers all iteration-9 backend features end-to-end against the public preview URL. Microphone/VAD/barge-in and the full vr-end-save → meeting_notes task flow cannot be exercised in headless Playwright (no real audio). The VideoRoom overlay does open immediately as expected. The orphan persona with empty name produces slightly odd auto-generated titles (e.g., 'Meeting: , Rio', 'Chat dengan ') — purely cosmetic and pre-existing. Note that LLM calls take ~5-15s each; the 13-test suite completed in ~45s on the preview URL.",
+  "rca of the issue": "No bugs. All reviewed-request items pass. The only cosmetic nit (empty-name persona producing comma-leading titles) is pre-existing test data and does not affect any functional contract."
+}

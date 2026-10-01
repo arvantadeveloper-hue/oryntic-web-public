@@ -126,8 +126,8 @@ async def gen_portrait(pid: str, x: PortraitIn, u: dict = Depends(require_admin)
         ref_b64 = ref.split(",", 1)[1]
     try:
         data_url = await generate_image(desc, ref_b64)
-    except Exception as e:
-        raise HTTPException(502, f"Image generation failed: {str(e)[:120]}")
+    except Exception:
+        raise HTTPException(502, "Pembuatan gambar gagal, coba lagi")
     if not data_url:
         raise HTTPException(502, "No image returned")
     await record_usage(u["id"], "persona_portrait", IMAGE_CREDITS, {"persona_id": pid})

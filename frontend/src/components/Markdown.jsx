@@ -1,13 +1,15 @@
 import React from "react";
 
 // Lightweight markdown renderer (headings, bold, lists, code blocks, inline code, tables-ish, paragraphs)
+const safeHref = (url) => (/^https?:\/\/[^\s"'<>]+$/i.test(url) ? url : "#");
+
 function inline(text) {
   let t = text
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => `<a href="${safeHref(url)}" target="_blank" rel="noreferrer noopener">${label}</a>`);
   return t;
 }
 

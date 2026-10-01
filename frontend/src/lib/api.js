@@ -39,7 +39,7 @@ export async function streamSSE(path, body, onEvent, signal) {
     body: JSON.stringify(body),
     signal,
   });
-  if (!res.ok || !res.body) throw new Error("stream failed");
+  if (!res.ok || !res.body) { const err = new Error("stream failed"); err.status = res.status; throw err; }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
