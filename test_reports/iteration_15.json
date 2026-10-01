@@ -1,0 +1,26 @@
+{
+  "summary": "Iter 15 verifies the cross-tenant persona isolation fix + trial-expiry inheritance + login brute-force throttle. 11/11 backend pytest cases pass. (1) Fresh-registered admin A creates a persona via POST /api/personas; fresh admin B's GET /api/admin/personas returns [] and never contains A's persona id. Demo admin's /api/admin/personas is a strict subset of own GET /api/personas (contains Rio/Nova/Nadia only). Budi (member) → 403. (2) Mongo-set demo.plan=trial, trial_ends_at=2020-01-01 → budi (member) POST /conversations/{cid}/send on existing private conv with Rio → 402 with 'Masa percobaan workspace Anda telah berakhir...'; demo (owner) same → 402. After restore (plan=paid, unset trial_ends_at) budi /send → 200 stream. Demo user doc was always restored (finally block). (3) Admin regression: GET /admin/workspace-users (demo) 200, /admin/usage-report?days=7 (demo) 200, /admin/pricing (demo) 403, (admin@aivora.ai) 200. (4) Login throttle: wrong-password POST /auth/login against a fresh email returns 401/429 and within ≤11 attempts yields 429 with 'Terlalu banyak percobaan login...' as required. Frontend smoke passed BEFORE throttle test: demo login lands on /home (Oryntix dashboard renders), /chat renders Chat & Meeting page (sidebar + persona list + 'Mulai Chat'); admin@aivora.ai login + /admin → Pricing tab exposes platform-pricing-card (margin/PPN/kurs inputs + rate chips + Simpan Tarif button).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_oryntix_iter15.py",
+    "/app/test_reports/pytest/iter15_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "admin.py GET /personas now scopes by workspace_id(admin) with projection excluding _id/portrait/reference_photo — correct fix for the HIGH cross-tenant leak.",
+    "llm.quota_exceeded(user): owner-aware lookup for members correctly cascades trial-expiry to role=user via owner_id, and the Indonesian 402 message is returned both for owner and members.",
+    "ratelimit.login_allowed uses both per-IP and per-account 10/5min buckets. Note: successful logins also increment the IP bucket, which means an entire test suite's logins can trip the IP limit for the shared egress IP (observed in this run); backend test tolerates this by accepting 401 OR 429 in the lockout test. Consider only counting failed logins against the IP bucket to avoid locking out legitimate traffic from shared NAT/office IPs.",
+    "chat._finish_stream reports owner wallet balance — not directly asserted here (member send after restore streams 200), but it did not regress the send path.",
+    "pytest.ini pins -n 2 --dist loadscope; serial execution requires -n 0 (documented in-file).",
+    "Minor: ratelimit map pruning runs opportunistically (every 300s) on each login call — fine for current scale, but memory grows O(active_ips+accounts) in the 5-min window; acceptable."
+  ],
+  "updated_files": ["/app/backend/tests/test_oryntix_iter15.py"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% (demo /home + /chat, admin /admin Pricing)"},
+  "test_credentials": "demo@aivora.ai/demo123456 (workspace admin), budi@aivora.ai/budi123456 (member), admin@aivora.ai/Aivora!Admin2026 (platform admin). Fresh admins registered on the fly via /api/auth/register with iter15a_/iter15b_ email prefixes.",
+  "seed_data_creation": "Two transient admin users iter15a_*/iter15b_*@aivora.ai (one persona on A) created via /api/auth/register and cleaned by module fixture (users + personas). Private conversations auto-created on demo workspace for Budi/Demo+Rio if missing (left in place; harmless, demo workspace already has similar TEST_* convs).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 15 covers HIGH cross-tenant persona leak fix (admin.py GET /personas), trial-expiry inheritance (llm.quota_exceeded owner lookup) for both admin owner and role=user member, login brute-force (ratelimit.login_allowed per-IP+per-account 10/5min, 429 'Terlalu banyak percobaan login...'), and admin platform-vs-workspace guards regression. Field name on POST /api/conversations/{cid}/send is 'content' (NOT 'text'). pytest must run with -n 0 to serialize; addopts in /app/backend/pytest.ini injects -n 2 --dist loadscope by default. Login throttle shares the egress IP bucket with every /auth/login call in the suite — run throttle test last and tolerate 401-or-429 pattern.",
+  "rca of the issue": "N/A — the three fixes (workspace-scoped admin personas, owner-aware quota_exceeded, login_allowed) all work as specified."
+}

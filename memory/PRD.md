@@ -143,6 +143,14 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Email verification: **ditunda** atas permintaan user (butuh penyedia email).
 - Tested: iteration_14 — backend 10/10, FE 100%.
 
+## Update 2026-06 (p) — Code review deployed app: perbaikan keamanan
+- **HIGH fixed**: `GET /api/admin/personas` kini di-scope ke workspace pemanggil (sebelumnya bocor lintas-tenant).
+- Anggota (role user) dari workspace yang trial-nya kedaluwarsa ikut diblokir (`quota_exceeded` cek plan pemilik).
+- Throttle login: 10 percobaan / 5 menit per IP & per akun → 429 (`ratelimit.login_allowed`); `_hits` dipangkas berkala.
+- `_finish_stream` melaporkan saldo dompet workspace (bukan saldo pribadi anggota).
+- Catatan: cache tarif & rate limit per-proses (deploy 1 worker) — bila scale-out perlu Redis.
+- Tested: iteration_15 — backend 11/11, FE 100%.
+
 ## Next tasks
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
 - Verifikasi email saat daftar (ditunda; perlu Resend/SendGrid key).
