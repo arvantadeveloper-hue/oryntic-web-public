@@ -410,8 +410,8 @@ async def _is_stuck(cid: str) -> bool:
     return ans.startswith("YES") or ans.startswith("YA")
 
 
-async def _moderator_interject(cid: str, u: dict, roster: list, reason: str):
-    """Yield SSE events for a short Moderator interjection; the final yielded item is the int credits used."""
+async def _moderator_text(cid: str, u: dict, roster: list, reason: str):
+    """Generate + persist a short Moderator interjection. Returns (text, credits_used); text is '' when nothing to say."""
     history = await _history_text(cid, limit=12)
     if reason == "silence":
         goal = ("The user has been quiet for a while. In 1-2 warm, short spoken sentences: briefly note what has been agreed so far "
@@ -426,12 +426,7 @@ async def _moderator_interject(cid: str, u: dict, roster: list, reason: str):
     except Exception:
         inter = ""
     if not inter.strip():
-        yield 0
-        return
-    yield f"data: {json.dumps({**MOD_META, 'start': True})}\n\n"
-    for i, w in enumerate(inter.split(" ")):
-        yield f"data: {json.dumps({**MOD_META, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
-        await asyncio.sleep(0.008)
+        return "", 0
     used = text_credits(history, inter)
     await record_usage(u["id"], "meeting_moderation", used, {"conversation_id": cid, "reason": reason})
     imsg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": inter,
@@ -439,8 +434,49 @@ async def _moderator_interject(cid: str, u: dict, roster: list, reason: str):
             "portrait": None, "credits": used, "created_at": now_iso()}
     await db.messages.insert_one(dict(imsg))
     await notify(cid, {"type": "message", "role": "assistant", "persona_id": "__moderator__"})
-    yield f"data: {json.dumps({**MOD_META, 'final': True, 'message_id': imsg['id'], 'content': inter})}\n\n"
+    return inter, used
+
+
+async def _moderator_interject(cid: str, u: dict, roster: list, reason: str):
+    """Yield SSE events for a short Moderator interjection; the final yielded item is the int credits used."""
+    inter, used = await _moderator_text(cid, u, roster, reason)
+    if not inter:
+        yield 0
+        return
+    yield f"data: {json.dumps({**MOD_META, 'start': True})}\n\n"
+    for i, w in enumerate(inter.split(" ")):
+        yield f"data: {json.dumps({**MOD_META, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
+        await asyncio.sleep(0.008)
+    yield f"data: {json.dumps({**MOD_META, 'final': True, 'content': inter})}\n\n"
     yield used
+
+
+class ModerateIn(BaseModel):
+    reason: str = Field(pattern="^(silence|stuck)$")
+
+
+@router.post("/conversations/{cid}/moderate")
+async def moderate(cid: str, x: ModerateIn, u: dict = Depends(current_user)):
+    """Realtime meeting: Moderator speaks only when stuck (LLM check) or after long silence. Returns text (or null)."""
+    await rate_limit(u, "chat")
+    conv = await db.conversations.find_one({"id": cid})
+    if not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    if conv.get("type") == "private":
+        raise HTTPException(400, "Moderator hanya untuk meeting")
+    over = await quota_exceeded(u)
+    if over:
+        raise HTTPException(402, "Kuota kredit harian Anda habis")
+    personas = await _get_personas(conv.get("persona_ids", []))
+    if len(personas) < 2:
+        return {"content": None, "voice": "onyx"}
+    user_turns = await db.messages.count_documents({"conversation_id": cid, "role": "user"})
+    if x.reason == "stuck" and (user_turns < 2 or not await _is_stuck(cid)):
+        return {"content": None, "voice": "onyx"}
+    if x.reason == "silence" and user_turns < 1:
+        return {"content": None, "voice": "onyx"}
+    text, used = await _moderator_text(cid, u, [p["name"] for p in personas], x.reason)
+    return {"content": text or None, "voice": "onyx", "credits_used": used}
 
 
 @router.post("/conversations/{cid}/nudge")

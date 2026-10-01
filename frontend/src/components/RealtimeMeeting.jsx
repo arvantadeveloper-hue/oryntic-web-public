@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../lib/api";
+import { api, API_BASE, getToken } from "../lib/api";
 import { RealtimeSession } from "../lib/realtimeSession";
 import { Tile } from "./VideoRoom";
 import { useAuth } from "../context/AuthContext";
 
 const ME = "__me__";
+const MOD = "__moderator__";
+const SILENCE_MS = 20000;
 
 // Multi-assistant meeting where every agent has its own Realtime voice; the browser orchestrates turns.
 export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
@@ -34,6 +36,10 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
   const rotateRef = useRef(0);
   const doneTimerRef = useRef(null);
   const userTimerRef = useRef(null);
+  const silenceTimerRef = useRef(null);
+  const modAudioRef = useRef(null);
+  const userTurnsRef = useRef(0);
+  const turnHadAgentRef = useRef(false);
   const msgCountRef = useRef(0);
 
   const secs = () => (startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0);
@@ -53,6 +59,36 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
       liveRef.current[s.callId] = "";
       saveTranscript(s.callId, "assistant", t);
     });
+  };
+
+  // ---------- moderator (TTS, only when stuck or silent) ----------
+  const stopModerator = () => {
+    const a = modAudioRef.current; if (!a) return;
+    try { a.onended = null; a.pause(); URL.revokeObjectURL(a.src); } catch (e) {}
+    modAudioRef.current = null; setStatus(MOD, "");
+  };
+  const clearSilence = () => { if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; } };
+  const armSilence = () => {
+    clearSilence();
+    silenceTimerRef.current = setTimeout(() => { if (!endedRef.current && !activeRef.current && queueRef.current.length === 0 && !modAudioRef.current) moderatorSpeak("silence"); }, SILENCE_MS);
+  };
+  const moderatorSpeak = async (reason) => {
+    if (endedRef.current || modAudioRef.current) return;
+    try {
+      setStatus(MOD, "thinking");
+      const r = await api.post(`/conversations/${cid}/moderate`, { reason });
+      if (endedRef.current || activeRef.current || !r.data.content) { setStatus(MOD, ""); if (!activeRef.current && reason !== "silence") armSilence(); return; }
+      const text = r.data.content;
+      setCaption({ name: "Moderator", text });
+      sessionsRef.current.forEach((o) => o.inject(`[Moderator]: ${text}`));
+      const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: text.slice(0, 1500), voice: r.data.voice || "onyx" }) });
+      if (!res.ok || endedRef.current) { setStatus(MOD, ""); return; }
+      const a = new Audio(URL.createObjectURL(await res.blob())); modAudioRef.current = a;
+      setStatus(MOD, "speaking"); setPhase("responding");
+      a.onended = () => { stopModerator(); if (!endedRef.current) { setPhase("listening"); setStatusMap({ [ME]: "listening" }); if (reason !== "silence") armSilence(); } };
+      await a.play();
+      onRefresh && onRefresh();
+    } catch (e) { setStatus(MOD, ""); }
   };
 
   // ---------- orchestration ----------
@@ -75,7 +111,12 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
     if (endedRef.current) return;
     if (doneTimerRef.current) { clearTimeout(doneTimerRef.current); doneTimerRef.current = null; }
     const next = queueRef.current.shift();
-    if (!next) { activeRef.current = null; setPhase("listening"); setStatusMap({ [ME]: "listening" }); return; }
+    if (!next) {
+      activeRef.current = null; setPhase("listening"); setStatusMap({ [ME]: "listening" });
+      if (turnHadAgentRef.current && userTurnsRef.current >= 2) { turnHadAgentRef.current = false; moderatorSpeak("stuck"); } else armSilence();
+      return;
+    }
+    turnHadAgentRef.current = true;
     activeRef.current = next;
     setPhase("responding"); setStatusMap({ [byCall(next).persona.id]: "thinking" });
     const isFirst = !liveRef.current.__turnStarted;
@@ -90,6 +131,7 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
   };
 
   const userInterrupted = () => {
+    clearSilence(); stopModerator();
     queueRef.current = []; liveRef.current.__turnStarted = false;
     const act = activeRef.current;
     if (act) { byCall(act)?.cancel(); setStatus(byCall(act).persona.id, ""); }
@@ -119,6 +161,7 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
         if (s.primary && ev.transcript) {
           setCaption({ name: user?.name || "Anda", text: ev.transcript });
           saveTranscript(s.callId, "user", ev.transcript);
+          userTurnsRef.current += 1;
           liveRef.current.__turnStarted = false;
           planTurn(ev.transcript);
         }
@@ -192,6 +235,7 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
     if (userTimerRef.current) clearTimeout(userTimerRef.current);
+    clearSilence(); stopModerator();
     sessionsRef.current.forEach((s) => s.close());
     try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch (e) {}
   };
@@ -225,14 +269,14 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
 
   const toggleMute = () => { const nv = !muted; setMuted(nv); streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !nv; }); };
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0"), ss = String(elapsed % 60).padStart(2, "0");
-  const label = { connecting: "Menyambungkan semua peserta...", listening: "Mendengarkan Anda — bicara saja, sebut nama untuk bertanya ke agen tertentu", user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
-  const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait }))];
+  const label = { connecting: "Menyambungkan semua peserta...", listening: "Mendengarkan Anda — bicara saja, sebut nama untuk bertanya ke agen tertentu. Moderator hanya menyela saat buntu/hening.", user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
+  const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait })), { id: MOD, isMod: true, name: "Moderator" }];
 
   return (
     <div className="fixed inset-0 z-[96] flex flex-col" style={{ background: "radial-gradient(1200px 500px at 50% -10%, #16213e 0%, #0a0f1f 60%)" }} data-testid="realtime-meeting">
       <div className="flex items-center gap-3 px-4 py-3 text-white sm:px-6">
         <span className="flex h-9 items-center gap-2 rounded-full bg-white/10 px-3 text-sm font-semibold backdrop-blur"><span className={`h-2 w-2 rounded-full ${phase === "connecting" ? "bg-amber-400 animate-pulse" : "bg-emerald-400"}`} /> {conv.title}</span>
-        <span className="flex items-center gap-1 rounded-full bg-[#2F6BFF]/20 px-2.5 py-1 text-[11px] font-bold text-[#8FB0FF]" data-testid="rtm-badge"><Zap size={11} /> Realtime · {members.length} agen</span>
+        <span className="flex items-center gap-1 rounded-full bg-[#2F6BFF]/20 px-2.5 py-1 text-[11px] font-bold text-[#8FB0FF]" data-testid="rtm-badge"><Zap size={11} /> Realtime · {members.length} agen + Moderator</span>
         <span className="ml-auto font-mono text-sm text-white/80" data-testid="rtm-timer">{mm}:{ss}</span>
         {cpmTotal && <span className="hidden text-xs text-white/50 sm:block">{cpmTotal} kredit/mnt</span>}
       </div>
@@ -241,7 +285,7 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
       <div className="flex flex-1 items-center overflow-y-auto px-4 pb-2 sm:px-6">
         <div className="mx-auto grid w-full max-w-6xl gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
           {tiles.map((tl) => (
-            <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} />
+            <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} />
           ))}
         </div>
       </div>
