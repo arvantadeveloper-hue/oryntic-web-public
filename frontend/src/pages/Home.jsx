@@ -101,13 +101,13 @@ export default function Home() {
         {/* quick actions */}
         <section>
           <h2 className="mb-4 text-lg font-bold text-slate-900">Mulai dengan cepat</h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             {QUICK.map((q) => (
               <button key={q.title} onClick={() => nav(q.to)} data-testid={`qa-${q.title}`}
-                className="aivora-card aivora-card-hover flex flex-col items-center gap-3 p-4 text-center">
+                className="aivora-card aivora-card-hover flex flex-col items-center gap-3 p-5 text-center">
                 <span className="flex h-12 w-12 items-center justify-center rounded-2xl" style={{ background: `${q.c}15`, color: q.c }}><q.icon size={22} /></span>
-                <span className="text-xs font-bold text-slate-900">{q.title}</span>
-                <span className="text-[11px] leading-tight text-slate-400">{q.desc}</span>
+                <span className="text-sm font-bold text-slate-900">{q.title}</span>
+                <span className="text-xs leading-tight text-slate-400">{q.desc}</span>
               </button>
             ))}
           </div>
