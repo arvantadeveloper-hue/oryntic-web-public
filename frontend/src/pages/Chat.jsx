@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare } from "lucide-react";
+import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare, Video } from "lucide-react";
 import { toast } from "sonner";
-import { api, streamChat, API_BASE, getToken } from "../lib/api";
+import { api, API_BASE, getToken, streamChatWithAtt } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 import { Markdown } from "../components/Markdown";
+import { VideoRoom } from "../components/VideoRoom";
 
 function Avatar({ name, portrait, size = 32, moderator }) {
   if (moderator) return <span className="flex items-center justify-center rounded-full bg-[#0B132B] text-white" style={{ width: size, height: size }}><Gavel size={size * 0.5} /></span>;
@@ -41,6 +42,7 @@ export default function Chat() {
   const [recording, setRecording] = useState(false);
   const [speaker, setSpeaker] = useState(false);
   const [callOpen, setCallOpen] = useState(false);
+  const [videoOpen, setVideoOpen] = useState(false);
   const [showConvList, setShowConvList] = useState(false);
   const endRef = useRef(null);
   const fileRef = useRef(null);
@@ -195,6 +197,7 @@ export default function Chat() {
           {conv && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {conv.type === "private" && <button onClick={() => setCallOpen(true)} title="Mode panggilan suara" data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil</span></button>}
+              {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Ruang video call" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-white sm:px-3" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}><Video size={15} /> <span className="hidden sm:inline">Video Call</span></button>}
               <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
             </div>
           )}
@@ -276,6 +279,8 @@ export default function Chat() {
 
       {callOpen && conv && <CallMode conv={conv} cid={id} onClose={() => setCallOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />}
 
+      {videoOpen && conv && <VideoRoom conv={conv} cid={id} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />}
+
       {showModal && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowModal(false)} />
@@ -311,30 +316,6 @@ export default function Chat() {
       )}
     </div>
   );
-}
-
-// send with attachments via fetch SSE
-async function streamChatWithAtt(cid, content, attachments, onEvent) {
-  const res = await fetch(`${API_BASE}/conversations/${cid}/send`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-    body: JSON.stringify({ content, attachments }),
-  });
-  if (!res.ok || !res.body) throw new Error("stream failed");
-  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const evs = buf.split("\n\n"); buf = evs.pop();
-    for (const ev of evs) {
-      const line = ev.split("\n").find((l) => l.startsWith("data: "));
-      if (!line) continue;
-      const d = line.slice(6);
-      if (d === "[DONE]") continue;
-      try { onEvent(JSON.parse(d)); } catch (e) {}
-    }
-  }
 }
 
 function CallMode({ conv, cid, onClose, onRefresh }) {

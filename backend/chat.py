@@ -50,6 +50,7 @@ class ConvIn(BaseModel):
 class MsgIn(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
     attachments: list = []
+    moderator: bool = True  # meeting: when False, skip the per-turn moderator summary (used by Video Room)
 
 
 class MemIn(BaseModel):
@@ -199,7 +200,7 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
             yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full})}\n\n"
 
         # meeting moderator summary
-        if ctype == "meeting" and len(responders) > 1:
+        if ctype == "meeting" and len(responders) > 1 and x.moderator:
             mod_meta = {"persona_id": "__moderator__", "persona_name": "Moderator", "portrait": None, "is_moderator": True}
             yield f"data: {json.dumps({**mod_meta, 'start': True})}\n\n"
             history = await _history_text(cid, limit=20)
@@ -232,6 +233,35 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/conversations/{cid}/summary")
+async def meeting_summary(cid: str, u: dict = Depends(current_user)):
+    """Generate a closing Moderator summary, save it to the conversation and as a Workspace notulen."""
+    conv = await db.conversations.find_one({"id": cid, "user_id": u["id"]})
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+    history = await _history_text(cid, limit=40)
+    if not history.strip():
+        raise HTTPException(400, "Belum ada diskusi untuk diringkas")
+    sys = ("You are the meeting Moderator. Summarize the whole discussion into: key points, agreements, "
+           "disagreements, and clear action items. Be concise, warm and neutral. Use markdown. "
+           f"Write in the user's conversation language ({u.get('settings',{}).get('conversation_language','id')}).")
+    summary = await llm_text(sys, f"Diskusi rapat:\n{history}\n\nRingkasan moderator:")
+    used = text_credits(history, summary)
+    await record_usage(u["id"], "meeting_summary", used, {"conversation_id": cid})
+    msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": summary,
+           "persona_id": "__moderator__", "persona_name": "Moderator", "is_moderator": True,
+           "portrait": None, "credits": used, "created_at": now_iso()}
+    await db.messages.insert_one(dict(msg))
+    await db.tasks.insert_one({
+        "id": new_id(), "user_id": u["id"], "goal": f"Notulen rapat: {conv['title']}",
+        "type": "meeting_notes", "status": "completed", "steps": [], "summary": "Ringkasan & action items rapat (video call)",
+        "model": None, "final_output": summary, "credits_used": used, "video_url": None,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso()}})
+    return {"summary": summary, "message_id": msg["id"], "credits_used": used}
 
 
 @router.post("/conversations/{cid}/messages/{mid}/regenerate")

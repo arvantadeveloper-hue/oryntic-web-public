@@ -22,15 +22,12 @@ export function getToken() {
   return localStorage.getItem("aivora_token");
 }
 
-// Streaming chat via fetch (SSE). Calls onEvent(obj) for each parsed event.
-export async function streamChat(conversationId, content, onEvent) {
-  const res = await fetch(`${API_BASE}/conversations/${conversationId}/send`, {
+// Streaming chat with attachments + optional extra body fields (e.g. {moderator:false}).
+export async function streamChatWithAtt(cid, content, attachments, onEvent, extra = {}) {
+  const res = await fetch(`${API_BASE}/conversations/${cid}/send`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    },
-    body: JSON.stringify({ content }),
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+    body: JSON.stringify({ content, attachments, ...extra }),
   });
   if (!res.ok || !res.body) throw new Error("stream failed");
   const reader = res.body.getReader();
