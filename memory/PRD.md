@@ -91,7 +91,18 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **Kamera di meeting**: DITUNDA atas permintaan user (butuh WebRTC + TURN).
 - Tested: testing agent iteration_8 — backend 12/12, frontend 100% core. Fix pasca-tes: daftar percakapan refetch saat auth berubah (sidebar langsung muncul setelah guest join).
 
+## Update 2026-06 (i) — Rebranding Oryntix, tema dashboard baru, meeting langsung, barge-in, moderator hanya saat buntu, code review + security audit
+- **Rebranding → Oryntix** ("Intelligence, Orchestrated."): aset di `frontend/public/brand/` (mark.png/mark-512.png, logo-dark.webp, logo-white.webp), favicon, title. `Logo.jsx` ekspor `Logo`, `Mark`, `LogoFull`, `BRAND_*`, `TAGLINE`. Semua teks "Aivora" → "Oryntix" (kunci localStorage `aivora_*`, class `aivora-card`, prefix storage `aivora/` sengaja TIDAK diubah).
+- **Tema UI** mengikuti referensi ui-dashboard: sidebar navy gelap (`.sidebar-dark`, `.nav-item`), konten terang, base font 14px (desktop)/15px (mobile), `.btn-primary`/`.btn-soft`. `AppLayout.jsx` (sidebar Workspace Usage + user, header search + New). `Home.jsx` redesign: hero "Turn your ideas into real results with AI.", 4 stat card, Recent Activity, Your AI Agents, Quick Actions, kalender/Upcoming/promo/Popular Tools. Login page pakai mark ribbon.
+- **Chat & Meeting**: tombol **Chat Baru** (1+ asisten → private/group teks) dan **Meeting Baru** (1+ asisten → type `meeting`, ruang meeting langsung terbuka via router state `openMeeting`). Toggle Grup/Meeting dihapus. Semua kata "Video Call" → "Meeting" ("Masuk Meeting"). Backend `create_conv` kini mengizinkan meeting dengan 1 persona. Tombol **Notulen** (`save-notes-btn`) di header grup/meeting → `/summary`.
+- **Suara humanis & bahasa**: `send` menerima `voice_mode:true` → prompt `VOICE_STYLE` (kalimat lisan pendek, hangat, tanpa markdown) + `interrupted:true`; bahasa tetap dari `settings.conversation_language` (STT+LLM).
+- **Barge-in (menyela) di VideoRoom**: mic persisten + analyser; saat asisten bicara/berpikir, suara user yang cukup keras ≥300ms → audio berhenti, antrean dibersihkan, SSE+TTS fetch di-abort (AbortController), giliran berpindah ke user (pill "Anda menyela"). Recorder di-restart tiap transisi agar rekaman hanya berisi ucapan user. Blob URL audio di-revoke; error 402/jaringan ditampilkan sebagai toast+caption.
+- **Moderator hanya saat buntu**: per giliran meeting (teks maupun ruang meeting) Moderator cuma menyela bila `_is_stuck()` (cek LLM YES/NO) pada user_turns ≥ 2. Hening 20 dtk di ruang meeting → `POST /conversations/{cid}/nudge` (Moderator untuk meeting 2+ asisten, persona untuk privat/1 asisten). Notulen lengkap hanya via `/summary` (kini boleh pembuat/peserta/admin).
+- **Security audit fixes**: tautan undangan kedaluwarsa 7 hari (`invite_expires_at`, token 32 char), user dari undangan default `daily_credit_limit=200`; `invite_token` tidak lagi dikembalikan di payload percakapan; persona_ids divalidasi milik workspace; `/api/files` tolak `..`/prefix salah; pesan error voice/portrait tidak bocorkan exception; batas lampiran 8MB; `Markdown.jsx` hanya izinkan link http/https + escape kutip.
+- Tested: iteration_9 (backend 13/13, FE 100%) & iteration_10 regression (backend 11/11, FE 100%). Barge-in/VAD butuh uji manual dengan mikrofon.
+- Catatan audit tersisa (P3, belum dikerjakan): rate limiting per-user pada endpoint pemakan kredit, pin CORS origins eksplisit untuk produksi.
+
 ## Next tasks
-- (Opsional) Kamera/video 2-arah antar-manusia (WebRTC + TURN) — ditunda.
-- (Opsional) VideoRoom multi-manusia: tile manusia lain + status bicara real-time.
-- (Backlog P1) Real payment gateway menggantikan top-up simulasi.
+- Uji manual barge-in & nudge dengan mikrofon nyata (user).
+- (P3) Rate limiting endpoint LLM/TTS/STT; CORS pin untuk produksi.
+- (Backlog P1) Payment gateway nyata; (P2) kamera WebRTC antar-manusia (ditunda).
