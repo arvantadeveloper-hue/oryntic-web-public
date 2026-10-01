@@ -1,0 +1,24 @@
+{
+  "summary": "Verified STT language-forcing fix + Zoom-style private VideoRoom. Backend pytest 6/6 passed in 12s (/app/backend/tests/test_voice_stt_lang.py, junit /app/test_reports/pytest/voice_stt_lang.xml): (1) GET /api/voice/voices returns 9 voices (alloy/nova/shimmer/echo/fable/onyx/coral/sage/ash); (2) POST /api/voice/tts with empty text -> 400; (3) POST /api/voice/tts with valid text+voice='nova' -> 200 audio/mpeg >1KB bytes; (4) Round-trip CORE BUG — TTS Indonesian text ('Halo, apa kabar hari ini? Aku ingin bercerita tentang pekerjaanku.') -> base64 -> POST /api/voice/transcribe without language field: transcript stayed Indonesian (>=3 ID keyword hits in {halo,apa,kabar,hari,aku,ingin,tentang}) — confirms backend fallback resolves to user settings.conversation_language or 'id'; (5) Same round-trip with explicit {language:'id'} also returns Indonesian transcript; (6) STT deducts >=1 credit from /api/auth/me balance. Frontend (desktop 1440x900, demo@aivora.ai via api/auth/login + localStorage aivora_token): PRIVATE cid ca8b4741... header shows call-mode-btn (green 'Panggil'), NO video-call-btn; clicking opens video-room overlay; tiles=['vr-tile-me','vr-tile-Rio'] (exactly 2, NO vr-tile-mod); controls vr-mute+vr-send+vr-captions+vr-end-save present, vr-leave ABSENT; end button label is exactly 'Akhiri Panggilan' (no 'Notulen'); clicking vr-end-save closes overlay cleanly, no console errors referencing CallMode. GROUP cid 04d5c2c9... header shows video-call-btn ('Video Call'), NO call-mode-btn; overlay shows vr-tile-mod PRESENT, vr-leave PRESENT, end label 'Akhiri & Simpan Notulen' — regression intact. CallMode component fully removed from /app/frontend/src (grep returned 0 matches).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_voice_stt_lang.py",
+    "/app/test_reports/pytest/voice_stt_lang.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "voice.py /transcribe lang resolution order is correct: body.language -> user.settings.conversation_language -> 'id' default. llm.transcribe_audio passes language+temperature=0 to whisper-1 which is the documented way to constrain Whisper away from mis-detection — matches the main agent's reproduction of the Welsh-gibberish bug.",
+    "VideoRoom.jsx endMeeting isPrivate branch closes immediately without calling /summary — correct per spec; also skips moderator TTS. Good.",
+    "Chat.jsx line 283 wires isPrivate={conv.type === 'private'} to <VideoRoom/> and header buttons gate on conv.type — both call-mode-btn (private) and video-call-btn (non-private) feed the same setVideoOpen(true), so isPrivate alone drives behavior. Clean.",
+    "Carried from iter_4: Tile data-testid uses persona.name which can collide if two members share a name (low priority)."
+  ],
+  "updated_files": ["/app/backend/tests/test_voice_stt_lang.py"],
+  "success_rate": {"backend": "100% (6/6 pytest)", "frontend": "100% (private: me+persona only, Akhiri Panggilan, overlay closes; group regression: mod+leave+Notulen intact)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (JWT stored in localStorage key aivora_token)",
+  "seed_data_creation": "Minor usage credits consumed on demo user via 3 TTS and 3 STT calls — no persistent test data created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Voice STT regression lives at /app/backend/tests/test_voice_stt_lang.py (uses REACT_APP_BACKEND_URL from env/.env). The Zoom-style private call is verified only at the markup/controls level — the hands-free mic VAD loop and per-turn TTS cannot be exercised headlessly (per request guidance). Frontend browser automation must use the REACT_APP_BACKEND_URL (ai-companion-test-5...) NOT the aivora-chat-2 preview URL which routes through a sleep gate.",
+  "rca of the issue": "N/A — both the STT language-forcing fix and the private Zoom-style VideoRoom route behave exactly as specified; whisper-1 now receives language='id' which prevents the auto-detect misroute to Welsh/English that was reported by the Indonesian user."
+}
