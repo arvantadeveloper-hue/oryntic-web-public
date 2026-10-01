@@ -192,12 +192,14 @@ export default function Home() {
           ))}
         </div>
 
-        <div className="aivora-card overflow-hidden p-5" style={{ background: "linear-gradient(135deg,#EEF3FF,#F3EEFF)" }}>
-          <p className="flex items-center gap-2 text-sm font-bold text-slate-900"><Sparkles size={16} className="text-[#2F6BFF]" /> Ringkasan Kredit</p>
-          <p className="mt-2 text-3xl font-extrabold grad-text">{user?.credits ?? 0}</p>
-          <p className="text-xs text-slate-500">kredit tersedia</p>
-          <button onClick={() => nav("/wallet")} data-testid="home-topup-btn" className="btn-grad mt-3 w-full rounded-xl py-2.5 text-sm">Isi Ulang</button>
-        </div>
+        {user?.role === "admin" && (
+          <div className="aivora-card overflow-hidden p-5" style={{ background: "linear-gradient(135deg,#EEF3FF,#F3EEFF)" }}>
+            <p className="flex items-center gap-2 text-sm font-bold text-slate-900"><Sparkles size={16} className="text-[#2F6BFF]" /> Ringkasan Kredit</p>
+            <p className="mt-2 text-3xl font-extrabold grad-text">{user?.credits ?? 0}</p>
+            <p className="text-xs text-slate-500">kredit tersedia</p>
+            <button onClick={() => nav("/wallet")} data-testid="home-topup-btn" className="btn-grad mt-3 w-full rounded-xl py-2.5 text-sm">Isi Ulang</button>
+          </div>
+        )}
       </aside>
     </div>
   );

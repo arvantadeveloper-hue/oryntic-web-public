@@ -8,8 +8,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
-from auth import current_user
+from auth import current_user, workspace_id
 from llm import llm_text, record_usage, text_credits, describe_image, VISION_CREDITS
+from realtime import notify
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -43,8 +44,21 @@ async def _process_attachments(attachments, user_id):
 
 class ConvIn(BaseModel):
     persona_ids: list = []
-    type: str = "private"  # private | group
+    type: str = "private"  # private | group | meeting
     title: Optional[str] = None
+    participant_ids: list = []  # other workspace humans invited to a meeting
+
+
+def _can_access(conv: dict, u: dict) -> bool:
+    if not conv:
+        return False
+    if conv.get("user_id") == u["id"]:
+        return True
+    if u["id"] in (conv.get("participants") or []):
+        return True
+    if u.get("role") == "admin" and conv.get("workspace_id") == workspace_id(u):
+        return True
+    return False
 
 
 class MsgIn(BaseModel):
@@ -84,8 +98,17 @@ async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
         else:
             title = f"Chat dengan {personas[0]['name']}"
     cid = new_id()
+    # resolve invited human participants (must be in the same workspace)
+    participants = [u["id"]]
+    if x.participant_ids and ctype == "meeting":
+        wid = workspace_id(u)
+        valid = await db.users.find({"id": {"$in": x.participant_ids}, "owner_id": wid}, {"_id": 0, "id": 1}).to_list(50)
+        for v in valid:
+            if v["id"] not in participants:
+                participants.append(v["id"])
     doc = {
-        "id": cid, "user_id": u["id"],
+        "id": cid, "user_id": u["id"], "workspace_id": workspace_id(u),
+        "participants": participants,
         "type": ctype,
         "persona_ids": [p["id"] for p in personas],
         "persona_id": personas[0]["id"],
@@ -96,18 +119,49 @@ async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
     return clean(doc)
 
 
+class InviteIn(BaseModel):
+    user_ids: list = []
+
+
+@router.get("/conversations/{cid}/participants")
+async def list_participants(cid: str, u: dict = Depends(current_user)):
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    ids = conv.get("participants") or [conv.get("user_id")]
+    users = await db.users.find({"id": {"$in": ids}}, {"_id": 0, "password_hash": 0}).to_list(50)
+    return [{"id": x["id"], "name": x.get("name"), "email": x.get("email"), "is_owner": x["id"] == conv.get("user_id")} for x in users]
+
+
+@router.post("/conversations/{cid}/participants")
+async def add_participants(cid: str, x: InviteIn, u: dict = Depends(current_user)):
+    conv = await db.conversations.find_one({"id": cid})
+    if not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    if conv.get("user_id") != u["id"] and u.get("role") != "admin":
+        raise HTTPException(403, "Hanya pembuat atau admin yang bisa mengundang")
+    if conv.get("type") == "private":
+        raise HTTPException(400, "Undangan hanya untuk grup atau meeting")
+    wid = workspace_id(u)
+    valid = await db.users.find({"id": {"$in": x.user_ids}, "owner_id": wid}, {"_id": 0, "id": 1}).to_list(50)
+    add = [v["id"] for v in valid]
+    await db.conversations.update_one({"id": cid}, {"$addToSet": {"participants": {"$each": add}}, "$set": {"updated_at": now_iso()}})
+    await notify(cid, {"type": "participants"})
+    return {"ok": True, "added": add}
+
+
 @router.get("/conversations")
 async def list_conv(q: Optional[str] = None, u: dict = Depends(current_user)):
-    query = {"user_id": u["id"]}
+    query = {"$or": [{"user_id": u["id"]}, {"participants": u["id"]}]}
     if q:
-        query["$or"] = [{"title": {"$regex": q, "$options": "i"}}, {"last_message": {"$regex": q, "$options": "i"}}]
+        query["title"] = {"$regex": q, "$options": "i"}
     return await db.conversations.find(query, {"_id": 0}).sort("updated_at", -1).to_list(200)
 
 
 @router.get("/conversations/{cid}/messages")
 async def get_messages(cid: str, u: dict = Depends(current_user)):
-    conv = await db.conversations.find_one({"id": cid, "user_id": u["id"]}, {"_id": 0})
-    if not conv:
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
     msgs = await db.messages.find({"conversation_id": cid}, {"_id": 0}).sort("created_at", 1).to_list(1000)
     return {"conversation": conv, "messages": msgs}
@@ -115,7 +169,14 @@ async def get_messages(cid: str, u: dict = Depends(current_user)):
 
 @router.delete("/conversations/{cid}")
 async def del_conv(cid: str, u: dict = Depends(current_user)):
-    await db.conversations.delete_one({"id": cid, "user_id": u["id"]})
+    conv = await db.conversations.find_one({"id": cid})
+    if not conv:
+        return {"ok": True}
+    if conv.get("user_id") != u["id"] and u.get("role") != "admin":
+        # a non-owner participant just leaves the conversation
+        await db.conversations.update_one({"id": cid}, {"$pull": {"participants": u["id"]}})
+        return {"ok": True, "left": True}
+    await db.conversations.delete_one({"id": cid})
     await db.messages.delete_many({"conversation_id": cid})
     return {"ok": True}
 
@@ -154,15 +215,18 @@ async def _history_text(cid: str, limit=14) -> str:
     msgs = await db.messages.find({"conversation_id": cid}, {"_id": 0}).sort("created_at", 1).to_list(1000)
     lines = []
     for m in msgs[-limit:]:
-        who = "User" if m["role"] == "user" else (m.get("persona_name") or "Assistant")
+        if m["role"] == "user":
+            who = m.get("sender_name") or "User"
+        else:
+            who = m.get("persona_name") or "Assistant"
         lines.append(f"{who}: {m['content']}")
     return "\n".join(lines)
 
 
 @router.post("/conversations/{cid}/send")
 async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
-    conv = await db.conversations.find_one({"id": cid, "user_id": u["id"]})
-    if not conv:
+    conv = await db.conversations.find_one({"id": cid})
+    if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
     personas = await _get_personas(conv.get("persona_ids", []))
     if not personas:
@@ -170,8 +234,10 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
 
     attach_text, attach_meta = await _process_attachments(x.attachments, u["id"])
     user_msg = {"id": new_id(), "conversation_id": cid, "role": "user", "content": x.content,
-                "attachments": attach_meta, "created_at": now_iso()}
+                "attachments": attach_meta, "sender_user_id": u["id"], "sender_name": u.get("name") or "User",
+                "created_at": now_iso()}
     await db.messages.insert_one(dict(user_msg))
+    await notify(cid, {"type": "message", "role": "user", "sender_name": user_msg["sender_name"]})
 
     # @mention routing: if the user names specific personas, only they respond
     lower = x.content.lower()
@@ -209,6 +275,7 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
                       "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso()}
             await db.messages.insert_one(dict(ai_msg))
             yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full})}\n\n"
+            await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
 
         # meeting moderator summary
         if ctype == "meeting" and len(responders) > 1 and x.moderator:

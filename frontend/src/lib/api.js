@@ -22,6 +22,15 @@ export function getToken() {
   return localStorage.getItem("aivora_token");
 }
 
+export const WS_BASE = API_BASE.replace(/^http/, "ws");
+
+// Open a realtime WebSocket for a conversation. Returns the WebSocket (auto-closes handled by caller).
+export function openConvSocket(cid, onEvent) {
+  const ws = new WebSocket(`${WS_BASE}/ws/${cid}?token=${getToken()}`);
+  ws.onmessage = (e) => { try { onEvent(JSON.parse(e.data)); } catch (_) {} };
+  return ws;
+}
+
 // Streaming chat with attachments + optional extra body fields (e.g. {moderator:false}).
 export async function streamChatWithAtt(cid, content, attachments, onEvent, extra = {}) {
   const res = await fetch(`${API_BASE}/conversations/${cid}/send`, {

@@ -18,12 +18,21 @@ import Reminders from "./pages/Reminders";
 import WalletPage from "./pages/Wallet";
 import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
+import Team from "./pages/Team";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="flex min-h-screen items-center justify-center mesh-bg text-slate-400">Loading...</div>;
   if (!user) return <Navigate to="/" replace />;
   if (!user.onboarded) return <Navigate to="/onboarding" replace />;
+  return children;
+}
+
+function AdminOnly({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="flex min-h-screen items-center justify-center mesh-bg text-slate-400">Loading...</div>;
+  if (!user) return <Navigate to="/" replace />;
+  if (user.role !== "admin") return <Navigate to="/home" replace />;
   return children;
 }
 
@@ -46,17 +55,18 @@ function App() {
               <Route path="/onboarding" element={<Onboarding />} />
               <Route element={<Protected><AppLayout /></Protected>}>
                 <Route path="/home" element={<Home />} />
-                <Route path="/personas" element={<Personas />} />
-                <Route path="/personas/new" element={<CreatePersona />} />
-                <Route path="/personas/:id" element={<PersonaDetail />} />
+                <Route path="/personas" element={<AdminOnly><Personas /></AdminOnly>} />
+                <Route path="/personas/new" element={<AdminOnly><CreatePersona /></AdminOnly>} />
+                <Route path="/personas/:id" element={<AdminOnly><PersonaDetail /></AdminOnly>} />
                 <Route path="/chat" element={<Chat />} />
                 <Route path="/chat/:id" element={<Chat />} />
                 <Route path="/workspace" element={<Workspace />} />
                 <Route path="/workspace/:id" element={<TaskDetail />} />
                 <Route path="/reminders" element={<Reminders />} />
-                <Route path="/wallet" element={<WalletPage />} />
+                <Route path="/wallet" element={<AdminOnly><WalletPage /></AdminOnly>} />
                 <Route path="/profile" element={<Profile />} />
-                <Route path="/admin" element={<Admin />} />
+                <Route path="/team" element={<AdminOnly><Team /></AdminOnly>} />
+                <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
               </Route>
             </Routes>
           </BrowserRouter>

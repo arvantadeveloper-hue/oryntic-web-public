@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare, Video } from "lucide-react";
+import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare, Video, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import { api, API_BASE, getToken, streamChatWithAtt } from "../lib/api";
+import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 import { Markdown } from "../components/Markdown";
@@ -24,8 +24,9 @@ const fileToData = (file) => new Promise((res) => {
 export default function Chat() {
   const { id } = useParams();
   const nav = useNavigate();
-  const { refreshUser } = useAuth();
+  const { refreshUser, user } = useAuth();
   const { t } = useI18n();
+  const isAdmin = user?.role === "admin";
   const [convs, setConvs] = useState([]);
   const [q, setQ] = useState("");
   const [conv, setConv] = useState(null);
@@ -43,10 +44,15 @@ export default function Chat() {
   const [speaker, setSpeaker] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
   const [showConvList, setShowConvList] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [wsUsers, setWsUsers] = useState([]);
+  const streamingRef = useRef(false);
   const endRef = useRef(null);
   const fileRef = useRef(null);
   const recRef = useRef(null);
   const audioRef = useRef(null);
+
+  useEffect(() => { streamingRef.current = streaming; }, [streaming]);
 
   const loadConvs = (query = "") => api.get(`/conversations${query ? `?q=${encodeURIComponent(query)}` : ""}`).then((r) => setConvs(r.data)).catch(() => {});
   useEffect(() => { loadConvs(); api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {}); }, []);
@@ -57,6 +63,20 @@ export default function Chat() {
     if (pre && id) { setInput(pre); sessionStorage.removeItem("aivora_prefill"); }
   }, [id]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, liveMap]);
+
+  // realtime: other humans' and AI messages in shared meetings/groups
+  useEffect(() => {
+    if (!id) return;
+    let ws;
+    try {
+      ws = openConvSocket(id, (ev) => {
+        if ((ev.type === "message" || ev.type === "participants") && !streamingRef.current) {
+          api.get(`/conversations/${id}/messages`).then((r) => { setConv(r.data.conversation); setMessages(r.data.messages); }).catch(() => {});
+        }
+      });
+    } catch (e) {}
+    return () => { try { ws && ws.close(); } catch (e) {} };
+  }, [id]);
 
   const openModal = (m = "group") => {
     if (personas.length === 0) { toast.message("Buat persona dulu untuk memulai percakapan"); nav("/personas/new"); return; }
@@ -143,6 +163,12 @@ export default function Chat() {
   const saveMem = async (m) => { await api.post("/memory", { persona_id: m.persona_id || conv?.persona_id || null, content: m.content.slice(0, 300) }); toast.success("Disimpan ke memori"); };
   const regen = async (mid) => { setStreaming(true); try { await api.post(`/conversations/${id}/messages/${mid}/regenerate`); const mr = await api.get(`/conversations/${id}/messages`); setMessages(mr.data.messages); refreshUser(); } catch (e) { toast.error("Gagal"); } finally { setStreaming(false); } };
 
+  const openInvite = () => { api.get("/admin/workspace-users").then((r) => setWsUsers(r.data)).catch(() => {}); setShowInvite(true); };
+  const invite = async (uid) => {
+    try { await api.post(`/conversations/${id}/participants`, { user_ids: [uid] }); toast.success("Pengguna diundang"); api.get(`/conversations/${id}/messages`).then((r) => setConv(r.data.conversation)); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengundang"); }
+  };
+
   const isMulti = conv && conv.type !== "private";
 
   const convListInner = (mobile) => (
@@ -198,6 +224,7 @@ export default function Chat() {
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {conv.type === "private" && <button onClick={() => setVideoOpen(true)} title="Mode panggilan suara" data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil</span></button>}
               {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Ruang video call" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-white sm:px-3" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}><Video size={15} /> <span className="hidden sm:inline">Video Call</span></button>}
+              {conv.type === "meeting" && isAdmin && <button onClick={openInvite} title="Undang pengguna" data-testid="invite-user-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2F6BFF]/40 px-2.5 text-xs font-semibold text-[#2F6BFF] sm:px-3"><UserPlus size={15} /> <span className="hidden sm:inline">Undang</span></button>}
               <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
             </div>
           )}
@@ -217,7 +244,8 @@ export default function Chat() {
           )}
           {messages.map((m, i) => (
             m.role === "user" ? (
-              <div key={m.id || i} className="flex justify-end">
+              <div key={m.id || i} className="flex flex-col items-end">
+                {isMulti && m.sender_user_id && m.sender_user_id !== user?.id && <p className="mb-1 mr-1 text-xs font-semibold text-slate-500">{m.sender_name}</p>}
                 <div className="max-w-[78%] rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }} data-testid="msg-user">
                   {(m.attachments || []).length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">{m.attachments.map((a, k) => <span key={k} className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs">{a.type === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}</span>)}</div>}
                   <p className="whitespace-pre-wrap">{m.content}</p>
@@ -281,6 +309,31 @@ export default function Chat() {
       </div>
 
       {videoOpen && conv && <VideoRoom conv={conv} cid={id} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />}
+
+      {showInvite && conv && (
+        <div className="fixed inset-0 z-[92] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowInvite(false)} />
+          <div className="relative w-full max-w-md rounded-3xl border border-[#E7ECF3] bg-white p-6 shadow-2xl fade-up" data-testid="invite-modal">
+            <button onClick={() => setShowInvite(false)} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
+            <h3 className="text-lg font-bold text-slate-900">Undang ke Meeting</h3>
+            <p className="mt-1 text-sm text-slate-500">Pilih pengguna workspace untuk bergabung ke rapat ini secara real-time.</p>
+            <div className="mt-4 max-h-80 space-y-2 overflow-y-auto">
+              {wsUsers.filter((wu) => !wu.is_admin).map((wu) => {
+                const joined = (conv.participants || []).includes(wu.id);
+                return (
+                  <div key={wu.id} className="flex items-center gap-3 rounded-xl border border-[#E7ECF3] p-3" data-testid={`invite-row-${wu.email}`}>
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(wu.name || "U")[0].toUpperCase()}</span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold text-slate-900">{wu.name}</span><span className="block truncate text-xs text-slate-400">{wu.email}</span></span>
+                    {joined ? <span className="text-xs font-semibold text-[#10B981]">Bergabung</span>
+                      : <button onClick={() => invite(wu.id)} data-testid={`invite-btn-${wu.email}`} className="btn-grad rounded-lg px-3 py-1.5 text-xs">Undang</button>}
+                  </div>
+                );
+              })}
+              {wsUsers.filter((wu) => !wu.is_admin).length === 0 && <p className="py-4 text-center text-xs text-slate-400">Belum ada pengguna. Tambah di menu Tim.</p>}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">

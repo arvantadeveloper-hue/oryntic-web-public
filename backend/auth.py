@@ -52,10 +52,17 @@ def public_user(u: dict) -> dict:
         "email": u["email"],
         "name": u.get("name"),
         "role": u.get("role", "user"),
+        "owner_id": u.get("owner_id") or u["id"],
+        "is_admin": u.get("role") == "admin",
         "onboarded": u.get("onboarded", False),
         "settings": u.get("settings", {}),
         "credits": u.get("credits", 0),
     }
+
+
+def workspace_id(user: dict) -> str:
+    """The id of the workspace owner (admin). Admins own their own workspace."""
+    return user.get("owner_id") or user["id"]
 
 
 # ---------- models ----------
@@ -120,6 +127,7 @@ async def register(x: RegisterIn):
         "password_hash": pw_hash(x.password),
         "name": x.name or email.split("@")[0],
         "role": "user",
+        "owner_id": uid,
         "onboarded": False,
         "verified": True,
         "credits": STARTING_CREDITS,
@@ -173,13 +181,22 @@ async def onboard(x: OnboardIn, u: dict = Depends(current_user)):
 async def seed_admin():
     email = os.environ["ADMIN_EMAIL"].lower()
     existing = await db.users.find_one({"email": email})
-    if existing:
-        return
-    uid = new_id()
-    await db.users.insert_one({
-        "id": uid, "email": email, "password_hash": pw_hash(os.environ["ADMIN_PASSWORD"]),
-        "name": "Aivora Admin", "role": "admin", "onboarded": True, "verified": True,
-        "credits": 100000,
-        "settings": {"app_language": "en", "conversation_language": "en", "timezone": "Asia/Jakarta", "theme": "dark"},
-        "created_at": now_iso(),
-    })
+    if not existing:
+        uid = new_id()
+        await db.users.insert_one({
+            "id": uid, "email": email, "password_hash": pw_hash(os.environ["ADMIN_PASSWORD"]),
+            "name": "Aivora Admin", "role": "admin", "owner_id": uid, "onboarded": True, "verified": True,
+            "credits": 100000,
+            "settings": {"app_language": "en", "conversation_language": "en", "timezone": "Asia/Jakarta", "theme": "dark"},
+            "created_at": now_iso(),
+        })
+    await migrate_workspace()
+
+
+async def migrate_workspace():
+    """Promote the demo account to admin and backfill owner_id so every account owns a workspace."""
+    demo = await db.users.find_one({"email": "demo@aivora.ai"})
+    if demo:
+        await db.users.update_one({"id": demo["id"]}, {"$set": {"role": "admin", "owner_id": demo["id"]}})
+    # any user without an owner_id becomes the owner of their own workspace
+    await db.users.update_many({"owner_id": {"$exists": False}}, [{"$set": {"owner_id": "$id"}}])

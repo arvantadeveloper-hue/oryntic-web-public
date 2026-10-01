@@ -64,19 +64,24 @@ def text_credits(input_text: str, output_text: str) -> int:
 
 
 async def record_usage(user_id: str, feature: str, credits: int, meta: dict | None = None):
-    """Record a usage event and deduct credits from the wallet ledger. Returns balance_after."""
-    user = await db.users.find_one({"id": user_id})
-    balance = int(user.get("credits", 0)) if user else 0
+    """Record a usage event and deduct credits from the WORKSPACE OWNER's wallet. Returns balance_after."""
+    actor = await db.users.find_one({"id": user_id})
+    owner_id = (actor.get("owner_id") if actor else None) or user_id
+    owner = await db.users.find_one({"id": owner_id}) or actor
+    balance = int(owner.get("credits", 0)) if owner else 0
     new_balance = max(0, balance - credits)
-    await db.users.update_one({"id": user_id}, {"$set": {"credits": new_balance}})
+    await db.users.update_one({"id": owner_id}, {"$set": {"credits": new_balance}})
+    meta = dict(meta or {})
+    if owner_id != user_id:
+        meta["actor_id"] = user_id
     await db.usage_events.insert_one({
-        "id": new_id(), "user_id": user_id, "feature": feature, "credits": credits,
-        "meta": meta or {}, "created_at": now_iso(),
+        "id": new_id(), "user_id": owner_id, "feature": feature, "credits": credits,
+        "meta": meta, "created_at": now_iso(),
     })
     await db.credit_transactions.insert_one({
-        "id": new_id(), "user_id": user_id, "type": "usage", "amount": -credits,
+        "id": new_id(), "user_id": owner_id, "type": "usage", "amount": -credits,
         "balance_after": new_balance, "description": f"Usage: {feature}",
-        "meta": meta or {}, "created_at": now_iso(),
+        "meta": meta, "created_at": now_iso(),
     })
     return new_balance
 

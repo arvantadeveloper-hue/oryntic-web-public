@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
-from auth import current_user
+from auth import current_user, require_admin, workspace_id
 from llm import llm_json, generate_image, record_usage, text_credits, PROFILE_CREDITS, IMAGE_CREDITS, MODEL_CATALOG, DEFAULT_MODEL_KEY
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
@@ -55,7 +55,7 @@ PROFILE_SYS = (
 
 
 @router.post("/generate-profile")
-async def generate_profile(x: GenerateProfileIn, u: dict = Depends(current_user)):
+async def generate_profile(x: GenerateProfileIn, u: dict = Depends(require_admin)):
     prompt = f"Create method: {x.method}\nUser request:\n{x.description}"
     if x.photo_b64:
         prompt += "\n\n(The user uploaded a reference photo. Describe only neutral visual appearance cues.)"
@@ -69,12 +69,12 @@ async def generate_profile(x: GenerateProfileIn, u: dict = Depends(current_user)
 
 @router.get("")
 async def list_personas(u: dict = Depends(current_user)):
-    items = await db.personas.find({"user_id": u["id"], "deleted": {"$ne": True}}, {"_id": 0}).sort("updated_at", -1).to_list(200)
+    items = await db.personas.find({"user_id": workspace_id(u), "deleted": {"$ne": True}}, {"_id": 0}).sort("updated_at", -1).to_list(200)
     return items
 
 
 @router.post("")
-async def create_persona(x: PersonaIn, u: dict = Depends(current_user)):
+async def create_persona(x: PersonaIn, u: dict = Depends(require_admin)):
     ident = x.profile.get("identity", {})
     pid = new_id()
     doc = {
@@ -97,14 +97,14 @@ async def create_persona(x: PersonaIn, u: dict = Depends(current_user)):
 
 @router.get("/{pid}")
 async def get_persona(pid: str, u: dict = Depends(current_user)):
-    p = await db.personas.find_one({"id": pid, "user_id": u["id"]}, {"_id": 0})
+    p = await db.personas.find_one({"id": pid, "user_id": workspace_id(u)}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Persona not found")
     return p
 
 
 @router.post("/{pid}/portrait")
-async def gen_portrait(pid: str, x: PortraitIn, u: dict = Depends(current_user)):
+async def gen_portrait(pid: str, x: PortraitIn, u: dict = Depends(require_admin)):
     p = await db.personas.find_one({"id": pid, "user_id": u["id"]})
     if not p:
         raise HTTPException(404, "Persona not found")
@@ -137,7 +137,7 @@ async def gen_portrait(pid: str, x: PortraitIn, u: dict = Depends(current_user))
 
 
 @router.put("/{pid}")
-async def update_persona(pid: str, body: dict, u: dict = Depends(current_user)):
+async def update_persona(pid: str, body: dict, u: dict = Depends(require_admin)):
     p = await db.personas.find_one({"id": pid, "user_id": u["id"]})
     if not p:
         raise HTTPException(404, "Persona not found")
@@ -159,7 +159,7 @@ async def update_persona(pid: str, body: dict, u: dict = Depends(current_user)):
 
 
 @router.post("/{pid}/edit")
-async def edit_persona_nl(pid: str, x: EditIn, u: dict = Depends(current_user)):
+async def edit_persona_nl(pid: str, x: EditIn, u: dict = Depends(require_admin)):
     p = await db.personas.find_one({"id": pid, "user_id": u["id"]})
     if not p:
         raise HTTPException(404, "Persona not found")
@@ -187,7 +187,7 @@ async def edit_persona_nl(pid: str, x: EditIn, u: dict = Depends(current_user)):
 
 
 @router.post("/{pid}/duplicate")
-async def duplicate_persona(pid: str, u: dict = Depends(current_user)):
+async def duplicate_persona(pid: str, u: dict = Depends(require_admin)):
     p = await db.personas.find_one({"id": pid, "user_id": u["id"]}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Persona not found")
@@ -199,7 +199,7 @@ async def duplicate_persona(pid: str, u: dict = Depends(current_user)):
 
 
 @router.delete("/{pid}")
-async def delete_persona(pid: str, u: dict = Depends(current_user)):
+async def delete_persona(pid: str, u: dict = Depends(require_admin)):
     r = await db.personas.update_one({"id": pid, "user_id": u["id"]}, {"$set": {"deleted": True, "updated_at": now_iso()}})
     if r.matched_count == 0:
         raise HTTPException(404, "Persona not found")

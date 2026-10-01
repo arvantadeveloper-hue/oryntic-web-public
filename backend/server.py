@@ -2,13 +2,14 @@ import os
 import asyncio
 import logging
 
-from fastapi import FastAPI
+import jwt
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from starlette.middleware.cors import CORSMiddleware
 
 from db import db, ensure_indexes
-from auth import router as auth_router, seed_admin
+from auth import router as auth_router, seed_admin, JWT_SECRET, JWT_ISSUER
 from personas import router as personas_router
-from chat import router as chat_router
+from chat import router as chat_router, _can_access
 from agents import router as agents_router
 from reminders import router as reminders_router, scheduler_tick
 from wallet import router as wallet_router
@@ -17,6 +18,7 @@ from models import router as models_router
 from voice import router as voice_router
 from files import router as files_router
 from storage import init_storage
+from realtime import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("aivora")
@@ -39,6 +41,29 @@ app.include_router(admin_router)
 app.include_router(models_router)
 app.include_router(voice_router)
 app.include_router(files_router)
+
+
+@app.websocket("/api/ws/{cid}")
+async def ws_meeting(ws: WebSocket, cid: str, token: str = ""):
+    try:
+        p = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], issuer=JWT_ISSUER,
+                       options={"require": ["sub", "exp", "iat", "iss"]})
+    except Exception:
+        await ws.close(code=4401)
+        return
+    u = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not u or not _can_access(conv, u):
+        await ws.close(code=4403)
+        return
+    await manager.connect(cid, ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        await manager.disconnect(cid, ws)
+    except Exception:
+        await manager.disconnect(cid, ws)
 
 app.add_middleware(
     CORSMiddleware,
