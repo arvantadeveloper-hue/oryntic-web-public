@@ -19,6 +19,7 @@ import WalletPage from "./pages/Wallet";
 import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
 import Team from "./pages/Team";
+import JoinMeeting from "./pages/JoinMeeting";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -53,6 +54,7 @@ function App() {
             <Routes>
               <Route path="/" element={<Gate />} />
               <Route path="/onboarding" element={<Onboarding />} />
+              <Route path="/join/:token" element={<JoinMeeting />} />
               <Route element={<Protected><AppLayout /></Protected>}>
                 <Route path="/home" element={<Home />} />
                 <Route path="/personas" element={<AdminOnly><Personas /></AdminOnly>} />

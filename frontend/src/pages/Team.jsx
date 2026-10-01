@@ -3,6 +3,22 @@ import { UserPlus, Trash2, Shield, User as UserIcon, Loader2, Mail, KeyRound } f
 import { toast } from "sonner";
 import { api } from "../lib/api";
 
+function QuotaControl({ user, onSaved }) {
+  const [val, setVal] = useState(String(user.daily_credit_limit || 0));
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    try { await api.patch(`/admin/users/${user.id}`, { daily_credit_limit: parseInt(val || "0", 10) }); toast.success("Kuota diperbarui"); onSaved && onSaved(); }
+    catch (e) { toast.error("Gagal menyimpan kuota"); } finally { setSaving(false); }
+  };
+  return (
+    <span className="flex items-center gap-1">
+      <input type="number" min="0" value={val} onChange={(e) => setVal(e.target.value)} className="input-dark w-20 py-1.5 text-xs" placeholder="0 = ∞" data-testid={`quota-input-${user.email}`} title="Jatah kredit harian (0 = tanpa batas)" />
+      <button onClick={save} disabled={saving} className="rounded-lg border border-[#E7ECF3] px-2 py-1.5 text-xs font-semibold text-[#2F6BFF] hover:bg-[#EEF3FF]" data-testid={`quota-save-${user.email}`}>{saving ? "..." : "Set"}</button>
+    </span>
+  );
+}
+
 export default function Team() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +70,7 @@ export default function Team() {
 
       <div className="mt-6 space-y-2">
         {loading ? <p className="text-sm text-slate-400">Memuat...</p> : users.map((u) => (
-          <div key={u.id} className="aivora-card flex items-center gap-3 p-4" data-testid={`team-user-${u.email}`}>
+          <div key={u.id} className="aivora-card flex flex-wrap items-center gap-3 p-4" data-testid={`team-user-${u.email}`}>
             <span className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: u.is_admin ? "#0B132B" : "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(u.name || "U")[0].toUpperCase()}</span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-bold text-slate-900">{u.name}</p>
@@ -63,7 +79,13 @@ export default function Team() {
             <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${u.is_admin ? "bg-[#0B132B] text-white" : "bg-[#EEF3FF] text-[#2F6BFF]"}`}>
               {u.is_admin ? <Shield size={12} /> : <UserIcon size={12} />} {u.is_admin ? "Administrator" : "Pengguna"}
             </span>
-            {!u.is_admin && <button onClick={() => remove(u)} className="text-slate-400 transition hover:text-[#EF4444]" data-testid={`delete-user-${u.email}`}><Trash2 size={16} /></button>}
+            {!u.is_admin && (
+              <div className="flex items-center gap-2" data-testid={`quota-${u.email}`}>
+                <span className="text-xs text-slate-500">Hari ini: <b className="text-slate-800">{u.today_usage ?? 0}</b> kredit</span>
+                <QuotaControl user={u} onSaved={load} />
+                <button onClick={() => remove(u)} className="text-slate-400 transition hover:text-[#EF4444]" data-testid={`delete-user-${u.email}`}><Trash2 size={16} /></button>
+              </div>
+            )}
           </div>
         ))}
       </div>

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
-from auth import current_user
+from auth import current_user, _lang_name
 from llm import llm_text, record_usage, text_credits
 
 router = APIRouter(prefix="/api/reminders", tags=["reminders"])
@@ -93,15 +93,15 @@ async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
         await db.reminders.update_one({"id": rid}, {"$set": {"status": "declined"}})
         return {"status": "declined"}
     # accept -> generate reminder message from real data only
-    persona_name = "Asisten"
+    persona = None
     if r.get("persona_id"):
-        p = await db.personas.find_one({"id": r["persona_id"]})
-        if p:
-            persona_name = p["name"]
+        persona = await db.personas.find_one({"id": r["persona_id"]}, {"_id": 0})
+    persona_name = persona["name"] if persona else "Asisten"
     pending = await db.tasks.count_documents({"user_id": u["id"], "status": {"$in": ["queued", "running"]}})
     sys = (
-        f"You are {persona_name}, delivering a short, warm proactive voice reminder. Use ONLY the data given. "
-        "Do not invent agenda items, flight status, or completed tasks. Keep it to 2-3 sentences, spoken style."
+        f"You are {persona_name}, delivering a short, warm, friendly PROACTIVE VOICE reminder, as if speaking on a phone call. "
+        f"You MUST speak in {_lang_name(u)}. Sound human, caring and natural (not robotic). Greet the user by name. "
+        "Use ONLY the data given. Do not invent agenda items, flight status, or completed tasks. 2-3 short spoken sentences."
     )
     prompt = (
         f"User name: {u.get('name')}. Reminder title: {r['title']}. Details: {r['description']}. "
@@ -111,7 +111,31 @@ async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
     used = text_credits(prompt, msg)
     await record_usage(u["id"], "reminder_call", used, {"reminder_id": rid})
     await db.reminders.update_one({"id": rid}, {"$set": {"status": "answered", "message": msg}})
-    return {"status": "answered", "message": msg, "persona_name": persona_name}
+
+    result = {"status": "answered", "message": msg, "persona_name": persona_name}
+    # If a persona is attached, set up/continue a real voice call conversation
+    if persona:
+        conv = await db.conversations.find_one({"user_id": u["id"], "type": "private", "persona_id": persona["id"]}, {"_id": 0})
+        if not conv:
+            cid = new_id()
+            conv = {
+                "id": cid, "user_id": u["id"], "workspace_id": u.get("owner_id") or u["id"],
+                "participants": [u["id"]], "type": "private",
+                "persona_ids": [persona["id"]], "persona_id": persona["id"],
+                "members": [{"id": persona["id"], "name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}],
+                "title": f"Chat dengan {persona['name']}", "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
+            }
+            await db.conversations.insert_one(dict(conv))
+        # store the spoken reminder as the assistant's opening message in the call
+        await db.messages.insert_one({
+            "id": new_id(), "conversation_id": conv["id"], "role": "assistant", "content": msg,
+            "persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"),
+            "credits": used, "created_at": now_iso(),
+        })
+        await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "last_message": msg[:120]}})
+        result["persona"] = {"id": persona["id"], "name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}
+        result["conversation"] = conv
+    return result
 
 
 # ---------- scheduler (called from server loop) ----------

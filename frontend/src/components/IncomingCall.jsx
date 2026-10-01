@@ -1,15 +1,19 @@
 import React, { useEffect, useState, useRef } from "react";
-import { Phone, PhoneOff, X } from "lucide-react";
-import { api } from "../lib/api";
+import { Phone, PhoneOff, X, Volume2 } from "lucide-react";
+import { api, API_BASE, getToken } from "../lib/api";
 import { Mark } from "./Logo";
 import { useAuth } from "../context/AuthContext";
+import { VideoRoom } from "./VideoRoom";
 
 export function IncomingCall() {
   const { user, refreshUser } = useAuth();
   const [call, setCall] = useState(null);
   const [answered, setAnswered] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [inCall, setInCall] = useState(null); // {conv, cid}
   const dismissed = useRef(new Set());
+  const audioRef = useRef(null);
 
   useEffect(() => {
     if (!user) return;
@@ -18,14 +22,17 @@ export function IncomingCall() {
       try {
         const r = await api.get("/reminders/incoming");
         const next = (r.data || []).find((x) => !dismissed.current.has(x.id));
-        if (active && next && !answered) setCall((c) => c || next);
+        if (active && next && !answered && !inCall) setCall((c) => c || next);
       } catch (e) {}
     };
     poll();
     const iv = setInterval(poll, 12000);
     return () => { active = false; clearInterval(iv); };
-  }, [user, answered]);
+  }, [user, answered, inCall]);
 
+  if (inCall) {
+    return <VideoRoom conv={inCall.conv} cid={inCall.cid} isPrivate onClose={() => { setInCall(null); setAnswered(null); setCall(null); }} onRefresh={() => refreshUser()} />;
+  }
   if (!call) return null;
   const persona = call.persona;
   const portrait = persona?.portrait;
@@ -36,6 +43,24 @@ export function IncomingCall() {
     try { await api.post(`/reminders/${call.id}/respond`, { action: "decline" }); } catch (e) {}
     setCall(null);
   };
+
+  const speakAndContinue = async (data) => {
+    // play the reminder aloud in the persona's voice, then continue as a normal call
+    if (data.persona && data.message) {
+      setSpeaking(true);
+      try {
+        const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: data.message.slice(0, 1200), voice: data.persona.voice || "nova" }) });
+        const ab = await res.blob();
+        const a = new Audio(URL.createObjectURL(ab)); audioRef.current = a;
+        await new Promise((resolve) => { a.onended = resolve; a.onerror = resolve; a.play().catch(resolve); });
+      } catch (e) {}
+      setSpeaking(false);
+    }
+    if (data.conversation) {
+      setInCall({ conv: data.conversation, cid: data.conversation.id });
+    }
+  };
+
   const accept = async () => {
     setBusy(true);
     try {
@@ -43,9 +68,10 @@ export function IncomingCall() {
       dismissed.current.add(call.id);
       setAnswered({ ...r.data, name });
       refreshUser();
+      speakAndContinue(r.data);
     } catch (e) {} finally { setBusy(false); }
   };
-  const closeAnswered = () => { setAnswered(null); setCall(null); };
+  const closeAnswered = () => { try { audioRef.current?.pause(); } catch (e) {} setAnswered(null); setCall(null); setInCall(null); };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" data-testid="incoming-call-overlay">
@@ -68,12 +94,17 @@ export function IncomingCall() {
         ) : (
           <>
             <button onClick={closeAnswered} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
-            <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-[#EEF3FF]" style={{ border: "2px solid #2F6BFF" }}>
+            <div className={`mx-auto mb-4 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-[#EEF3FF] ${speaking ? "glow-ring" : ""}`} style={{ border: "2px solid #2F6BFF" }}>
               {portrait ? <img src={portrait} alt={name} className="h-full w-full object-cover" /> : <Mark size={44} />}
             </div>
             <h3 className="text-lg font-bold text-slate-900">{name}</h3>
+            <p className="mt-1 flex items-center justify-center gap-1.5 text-xs font-semibold text-[#10B981]">{speaking ? <><Volume2 size={13} /> Sedang berbicara...</> : "Pengingat"}</p>
             <p className="mt-3 text-left text-sm leading-relaxed text-slate-600" data-testid="call-message">{answered.message}</p>
-            <button onClick={closeAnswered} data-testid="call-end-btn" className="btn-grad mt-6 w-full rounded-xl py-3">Akhiri</button>
+            {answered.conversation ? (
+              <button onClick={() => setInCall({ conv: answered.conversation, cid: answered.conversation.id })} data-testid="call-continue-btn" className="btn-grad mt-6 w-full rounded-xl py-3">Lanjutkan Panggilan</button>
+            ) : (
+              <button onClick={closeAnswered} data-testid="call-end-btn" className="btn-grad mt-6 w-full rounded-xl py-3">Akhiri</button>
+            )}
           </>
         )}
       </div>

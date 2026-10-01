@@ -7,6 +7,7 @@ from typing import Optional
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpeech
 import io
+from datetime import datetime, timezone
 
 from db import db, now_iso, new_id
 
@@ -84,6 +85,30 @@ async def record_usage(user_id: str, feature: str, credits: int, meta: dict | No
         "meta": meta, "created_at": now_iso(),
     })
     return new_balance
+
+
+async def user_today_usage(user_id: str) -> int:
+    """Credits consumed by this user (as actor) so far today (UTC)."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    q = {"created_at": {"$gte": today}, "$or": [
+        {"meta.actor_id": user_id},
+        {"$and": [{"user_id": user_id}, {"meta.actor_id": {"$exists": False}}]},
+    ]}
+    events = await db.usage_events.find(q).to_list(10000)
+    return sum(e.get("credits", 0) for e in events)
+
+
+async def quota_exceeded(user: dict):
+    """Return {used, limit} if a regular user is over their daily credit quota, else None."""
+    if user.get("role") == "admin":
+        return None
+    limit = int(user.get("daily_credit_limit") or 0)
+    if limit <= 0:
+        return None
+    used = await user_today_usage(user["id"])
+    if used >= limit:
+        return {"used": used, "limit": limit}
+    return None
 
 
 async def llm_text(system_message: str, user_text: str, model_key: str | None = None) -> str:

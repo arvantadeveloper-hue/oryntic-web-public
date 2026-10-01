@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare, Video, UserPlus } from "lucide-react";
+import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare, Video, UserPlus, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -317,6 +317,7 @@ export default function Chat() {
             <button onClick={() => setShowInvite(false)} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
             <h3 className="text-lg font-bold text-slate-900">Undang ke Meeting</h3>
             <p className="mt-1 text-sm text-slate-500">Pilih pengguna workspace untuk bergabung ke rapat ini secara real-time.</p>
+            <button onClick={async () => { try { const r = await api.post(`/conversations/${id}/invite-link`); const url = `${window.location.origin}${r.data.path}`; try { await navigator.clipboard.writeText(url); } catch (e) {} toast.success("Tautan undangan disalin"); } catch (e) { toast.error("Gagal membuat tautan"); } }} data-testid="copy-invite-link-btn" className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[#2F6BFF]/40 py-2.5 text-sm font-semibold text-[#2F6BFF] hover:bg-[#EEF3FF]"><LinkIcon size={15} /> Salin Tautan Undangan Sekali Klik</button>
             <div className="mt-4 max-h-80 space-y-2 overflow-y-auto">
               {wsUsers.filter((wu) => !wu.is_admin).map((wu) => {
                 const joined = (conv.participants || []).includes(wu.id);

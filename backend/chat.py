@@ -5,12 +5,13 @@ import io
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 
 from db import db, now_iso, new_id, clean
-from auth import current_user, workspace_id
-from llm import llm_text, record_usage, text_credits, describe_image, VISION_CREDITS
+from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, public_user
+from llm import llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded
 from realtime import notify
+import secrets
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -150,6 +151,81 @@ async def add_participants(cid: str, x: InviteIn, u: dict = Depends(current_user
     return {"ok": True, "added": add}
 
 
+@router.post("/conversations/{cid}/invite-link")
+async def create_invite_link(cid: str, u: dict = Depends(current_user)):
+    conv = await db.conversations.find_one({"id": cid})
+    if not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    if conv.get("user_id") != u["id"] and u.get("role") != "admin":
+        raise HTTPException(403, "Hanya pembuat atau admin yang bisa membuat tautan")
+    if conv.get("type") == "private":
+        raise HTTPException(400, "Tautan hanya untuk grup atau meeting")
+    token = conv.get("invite_token")
+    if not token:
+        token = secrets.token_urlsafe(10)
+        await db.conversations.update_one({"id": cid}, {"$set": {"invite_token": token}})
+    return {"token": token, "path": f"/join/{token}"}
+
+
+@router.get("/invites/{token}")
+async def invite_info(token: str):
+    conv = await db.conversations.find_one({"id": {"$exists": True}, "invite_token": token}, {"_id": 0})
+    if not conv:
+        raise HTTPException(404, "Undangan tidak valid")
+    owner = await db.users.find_one({"id": conv.get("workspace_id")}, {"_id": 0})
+    return {
+        "title": conv.get("title"),
+        "type": conv.get("type"),
+        "members": [{"name": m.get("name"), "portrait": m.get("portrait")} for m in conv.get("members", [])],
+        "workspace": (owner or {}).get("name") or "Aivora",
+    }
+
+
+@router.post("/invites/{token}/join")
+async def invite_join(token: str, u: dict = Depends(current_user)):
+    conv = await db.conversations.find_one({"invite_token": token})
+    if not conv:
+        raise HTTPException(404, "Undangan tidak valid")
+    if (u.get("owner_id") or u["id"]) != conv.get("workspace_id"):
+        raise HTTPException(403, "Akun Anda bukan bagian dari workspace ini")
+    await db.conversations.update_one({"id": conv["id"]}, {"$addToSet": {"participants": u["id"]}})
+    await notify(conv["id"], {"type": "participants"})
+    return {"conversation_id": conv["id"]}
+
+
+class InviteRegisterIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=72)
+
+
+@router.post("/invites/{token}/register")
+async def invite_register(token: str, x: InviteRegisterIn):
+    conv = await db.conversations.find_one({"invite_token": token})
+    if not conv:
+        raise HTTPException(404, "Undangan tidak valid")
+    email = str(x.email).lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(409, "Email sudah terdaftar. Silakan masuk lalu buka tautan lagi.")
+    wid = conv.get("workspace_id")
+    owner = await db.users.find_one({"id": wid}) or {}
+    uid = new_id()
+    doc = {
+        "id": uid, "email": email, "password_hash": pw_hash(x.password),
+        "name": x.name, "role": "user", "owner_id": wid, "onboarded": True, "verified": True, "credits": 0,
+        "settings": {
+            "app_language": owner.get("settings", {}).get("app_language", "id"),
+            "conversation_language": owner.get("settings", {}).get("conversation_language", "id"),
+            "timezone": owner.get("settings", {}).get("timezone", "Asia/Jakarta"), "theme": "light",
+        },
+        "created_at": now_iso(),
+    }
+    await db.users.insert_one(doc)
+    await db.conversations.update_one({"id": conv["id"]}, {"$addToSet": {"participants": uid}})
+    await notify(conv["id"], {"type": "participants"})
+    return {"access_token": make_token(uid, "user"), "user": public_user(doc), "conversation_id": conv["id"]}
+
+
 @router.get("/conversations")
 async def list_conv(q: Optional[str] = None, u: dict = Depends(current_user)):
     query = {"$or": [{"user_id": u["id"]}, {"participants": u["id"]}]}
@@ -179,16 +255,6 @@ async def del_conv(cid: str, u: dict = Depends(current_user)):
     await db.conversations.delete_one({"id": cid})
     await db.messages.delete_many({"conversation_id": cid})
     return {"ok": True}
-
-
-LANG_NAMES = {"id": "Bahasa Indonesia", "en": "English", "es": "Spanish", "fr": "French",
-              "de": "German", "pt": "Portuguese", "ar": "Arabic", "ja": "Japanese",
-              "ko": "Korean", "zh": "Chinese", "hi": "Hindi", "ru": "Russian", "it": "Italian"}
-
-
-def _lang_name(user) -> str:
-    code = ((user.get("settings", {}) or {}).get("conversation_language") or "id").lower()
-    return LANG_NAMES.get(code, LANG_NAMES.get(code.split("-")[0], "Bahasa Indonesia"))
 
 
 async def _persona_system(persona, user, roster=None):
@@ -228,6 +294,9 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     conv = await db.conversations.find_one({"id": cid})
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
+    over = await quota_exceeded(u)
+    if over:
+        raise HTTPException(402, f"Kuota kredit harian Anda habis ({over['used']}/{over['limit']}). Hubungi admin atau coba lagi besok.")
     personas = await _get_personas(conv.get("persona_ids", []))
     if not personas:
         raise HTTPException(400, "Percakapan ini tidak memiliki persona")

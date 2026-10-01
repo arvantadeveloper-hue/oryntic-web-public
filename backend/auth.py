@@ -65,6 +65,16 @@ def workspace_id(user: dict) -> str:
     return user.get("owner_id") or user["id"]
 
 
+LANG_NAMES = {"id": "Bahasa Indonesia", "en": "English", "es": "Spanish", "fr": "French",
+              "de": "German", "pt": "Portuguese", "ar": "Arabic", "ja": "Japanese",
+              "ko": "Korean", "zh": "Chinese", "hi": "Hindi", "ru": "Russian", "it": "Italian"}
+
+
+def _lang_name(user: dict) -> str:
+    code = ((user.get("settings", {}) or {}).get("conversation_language") or "id").lower()
+    return LANG_NAMES.get(code, LANG_NAMES.get(code.split("-")[0], "Bahasa Indonesia"))
+
+
 # ---------- models ----------
 class RegisterIn(BaseModel):
     email: EmailStr
