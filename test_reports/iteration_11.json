@@ -1,0 +1,51 @@
+{
+  "summary": "Oryntix iteration-11 Realtime voice (speech-to-speech) end-to-end verification. Backend: 14 passed, 1 skipped (meeting-without-persona skipped because /api/conversations rejects meetings with empty persona_ids before we could create one; alternative 400 path 'Percakapan ini tidak memiliki persona' is still enforced in code — see realtime_voice.py L84-86). All critical items pass: /realtime/status returns {enabled:true, model:'gpt-realtime', credits_per_min:75}; /admin/realtime-pricing GET defaults and PUT math (0.2/30/11/16000/80 → 58, defaults → 75) correct; budi gets 403 on both GET/PUT; POST /realtime/calls returns call_id/voice/model/credits_per_min/language/persona{id,name,portrait} on an admin private conv, 404 for bogus conversation_id; POST /negotiate with 'invalid sdp' returns 502 with detail 'Negosiasi Realtime gagal, coba lagi' (verified against localhost:8001 since Cloudflare preview edge rewrites upstream 502 into an HTML error page); /transcript assistant+user both 200 and show up in /conversations/{cid}/messages with via='realtime', persona_name set for assistant; role='bogus' → 422; billing tick(70)→billed=2 charged=2*cpm (admin credits dropped exactly 2*cpm via /auth/me diff), tick(90)→billed=2 charged=0, end(130)→billed=3 charged=cpm, subsequent tick→400 'Call already ended'; another user's call_id → 404. Reminders: creating a reminder with NO persona_id and start_at+1min, remind_minutes=1 → within ~20s GET /reminders/incoming shows it as 'ringing' WITH a persona (fallback to workspace's first active persona works), respond {accept, realtime:true} returns status=answered, message=null, opening containing the title, persona.voice set, conversation.id with type='private'; respond {accept, realtime:false} on another reminder returns a non-empty Indonesian LLM message. Frontend: Admin → /admin → Pricing tab shows realtime-pricing-card with all 5 rt-pricing-* inputs (keys use underscore, not dash: rt-pricing-provider_usd_per_min etc.) and rt-credits-per-min badge '75 kredit/menit'; changing provider_usd_per_min to 0.2 and clicking rt-pricing-save shows toast 'Tarif Realtime disimpan' and badge updates to '60 kredit/menit' (expected 60 given usd_to_idr stays at 16500: ceil(0.2*1.3*1.11*16500/80)=60); restored via API to 75. Chat → private conv header shows call-mode-btn with exact label 'Panggil · Realtime'. Clicking it (microphone permission granted) opens overlay data-testid realtime-call with all expected sub-testids (rt-badge, rt-timer, rt-phase, rt-mute, rt-captions-toggle, rt-end). WebRTC negotiation succeeded in headless Chromium: rt-phase quickly left 'Menyambungkan...' and rt-captions showed Indonesian greeting 'Halo, Demo! Senang bisa ngobrol dengan kamu hari ini. Silakan, ada yang mau kamu bicarakan dulu?' within ~2s; rt-phase then rotated to 'Rio berbicara — sela kapan saja'. Clicking rt-end closed overlay immediately (count=0). Group/meeting conv header shows video-call-btn (NOT call-mode-btn) and clicking it opens VideoRoom (data-testid=video-room), not realtime-call — confirming the spec that only private conversations with rt.enabled use the Realtime overlay.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Realtime call → chat persistence of greeting",
+        "issue": "After hangup the Indonesian assistant greeting that appeared live in rt-captions did NOT persist as a msg-assistant into /conversations/{cid}/messages (GET returned messages:[]). RealtimeCall.jsx only calls POST /realtime/calls/{id}/transcript inside the 'response.audio_transcript.done' handler (line 75). If the user ends the call before the OpenAI session emits .done (e.g. the assistant is still speaking, or the done event batches with turn end), the transcript is lost. Suggest: also flush the current liveRef buffer via saveTranscript('assistant', liveRef.current) inside hangup()/cleanup() when non-empty, and/or save on 'response.done' as a fallback. Confirmed via API: brand-new private conv created immediately before the call → messages:[] after rt-end even though captions showed the full completed sentence.",
+        "affected_selectors": ["[data-testid=realtime-call]", "[data-testid=rt-end]", "[data-testid=msg-assistant]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_oryntix_iter11.py",
+    "/app/test_reports/pytest/iter11_results.xml"
+  ],
+  "action_items": [
+    "RealtimeCall.jsx: flush pending assistant transcript on hangup/cleanup so the live caption always persists as msg-assistant (see integration_issues above). Expected spec: 'a new msg-assistant with the greeting text appears in chat after refresh' — currently flaky."
+  ],
+  "critical_code_review_comments": [
+    "realtime_voice.py L34-35 credits_per_min correctly uses math.ceil and clamps idr_per_credit to >=0.01; verified 0.25/30/11/16500/80 → 75 and 0.2/30/11/16000/80 → 58 and 0.2/30/11/16500/80 → 60.",
+    "realtime_voice.py L146-147 negotiate: non-2xx from OpenAI is translated to generic 502 'Negosiasi Realtime gagal, coba lagi' without leaking raw provider body — good; however response_class=PlainTextResponse means FastAPI returns the HTTPException detail as JSON on error path (which is fine) but the response Content-Type when the error path is hit via Cloudflare edge is overwritten by the edge's own HTML 502 page. Not a backend bug, just a preview artifact — test uses localhost:8001 to validate.",
+    "realtime_voice.py L180-189 _bill: minute billing uses ceil, delta correctly computed, record_usage charges only on positive delta — confirmed via /auth/me credit diff.",
+    "realtime_voice.py L74-91 create_call: proper quota/credit guard, 402 on insufficient credits, 400 when conv has no persona, 404 when conv not accessible — all enforced.",
+    "reminders.py L21-29 _reminder_persona: fallback to workspace's first active persona (sorted by updated_at desc) works; verified an incoming reminder with no persona_id still gets a persona object in /incoming and in the respond result.",
+    "reminders.py L122-123 realtime:true branch skips llm_text and record_usage, so creating a reminder in realtime mode costs zero text credits — correct.",
+    "RealtimeCall.jsx hangup() does NOT flush the live caption buffer; only 'response.audio_transcript.done' persists via POST /transcript. See action_items.",
+    "Chat.jsx L333-335 correctly routes to RealtimeCall only for private conv AND rt.enabled; meeting/group conv falls back to VideoRoom. Verified in UI.",
+    "RealtimePricingCard.jsx data-testids use the exact Pydantic field keys with underscores (rt-pricing-provider_usd_per_min, ...) — review request writes 'rt-pricing-*' which matches; keep the underscore naming consistent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_oryntix_iter11.py",
+    "/app/test_reports/pytest/iter11_results.xml",
+    "/app/test_reports/iteration_11.json"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 effective, 1 skip due to API precondition)",
+    "frontend": "~95% (greeting-not-persisted-on-end timing issue; all UI testids & flows otherwise work)"
+  },
+  "test_credentials": "Admin demo@aivora.ai/demo123456, User budi@aivora.ai/budi123456 — both confirmed working.",
+  "seed_data_creation": "Each test creates/leaves a few TEST_rt_* private conversations in the admin workspace (used for call-creation + transcript tests). A couple of TEST_rt_rem reminders created (one answered-realtime, one answered-text). Admin credit wallet consumed ~225 credits across the UI realtime calls (3 x ~75 cpm minute, each ended within ~30s but minute-billed at ceil). Pricing config was mutated during tests and restored to defaults (0.25/30/11/16500/80 → 75 cpm) at end.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Negotiate 502 test MUST hit http://localhost:8001 directly — the Cloudflare preview edge replaces upstream 502 bodies with an HTML Bad Gateway page. RealtimePricingCard testids use underscores (rt-pricing-provider_usd_per_min, rt-pricing-margin_pct, rt-pricing-tax_pct, rt-pricing-usd_to_idr, rt-pricing-idr_per_credit) exactly as the Pydantic field names. To test realtime overlay without burning credits, keep calls <60s (one minute billed). Chat Baru button in top of sidebar is data-testid=new-chat-btn (desktop) / new-chat-btn-mobile; alternative is empty-new-chat-btn in the empty-state right pane — the latter was more reliable in headless. Private conv first create needs 'persona_ids' array with >=1 persona id. Group/meeting header uses video-call-btn (opens VideoRoom data-testid=video-room). Realtime overlay data-testids: realtime-call, rt-badge, rt-timer, rt-phase, rt-mute, rt-captions, rt-captions-toggle, rt-end, rt-avatar.",
+  "rca of the issue": "RealtimeCall.jsx persists assistant transcript only on OpenAI event 'response.audio_transcript.done' (line 75). If the user clicks rt-end before that event fires (e.g. the assistant is still speaking, or the done event is coalesced after the end-of-turn), the already-captioned live transcript (liveRef.current) is discarded. Repro: open RealtimeCall on a brand-new private conv, wait for first greeting captions to appear (~2s), click rt-end at ~5-25s before the assistant finishes/.done fires, reload the conversation → messages:[]. Fix: in hangup()/cleanup() also POST /realtime/calls/{id}/transcript {role:'assistant', content: liveRef.current} if liveRef.current.trim() is non-empty, then clear liveRef. Alternatively hook 'response.done' as a secondary flush point."
+}

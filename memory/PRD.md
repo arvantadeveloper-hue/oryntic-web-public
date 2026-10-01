@@ -102,7 +102,18 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Tested: iteration_9 (backend 13/13, FE 100%) & iteration_10 regression (backend 11/11, FE 100%). Barge-in/VAD butuh uji manual dengan mikrofon.
 - Catatan audit tersisa (P3, belum dikerjakan): rate limiting per-user pada endpoint pemakan kredit, pin CORS origins eksplisit untuk produksi.
 
-## Next tasks
-- Uji manual barge-in & nudge dengan mikrofon nyata (user).
+## Update 2026-06 (j) — Mode Realtime (speech-to-speech ala ChatGPT Voice) + panggilan pengingat bersuara
+- **Realtime voice call** (`backend/realtime_voice.py`, `frontend/src/components/RealtimeCall.jsx`): OpenAI Realtime API **gpt-realtime** via WebRTC, negosiasi SDP lewat backend (`POST /api/realtime/calls/{id}/negotiate` → `https://api.openai.com/v1/realtime/calls`, key tidak pernah ke browser). BYOK: `OPENAI_API_KEY` + `OPENAI_REALTIME_MODEL` di `backend/.env` (bukan Universal Key). Server VAD `interrupt_response:true` (menyela native), transkripsi `gpt-4o-mini-transcribe` bahasa = `settings.conversation_language`. Instruksi sesi = `_persona_system(voice_mode=True)` + riwayat 12 pesan. Asisten **bicara duluan** (sapaan singkat / pengingat). Transkrip user & asisten disimpan ke `messages` (`via:"realtime"`) via `/transcript`; flush saat hangup.
+- **Metering**: `realtime_calls` collection; `tick` tiap 60 dtk + `end` → tagih per menit berjalan (ceil) dari dompet admin, hormati kuota harian; 402 → panggilan ditutup. Tarif dikonfigurasi admin (`GET/PUT /api/admin/realtime-pricing`, kartu di Admin → Pricing): kredit/menit = ceil(USD/menit × (1+margin 30%) × (1+PPN 11%) × kurs / IDR per kredit) → default 75 kredit/menit. `GET /api/realtime/status` → `{enabled, model, credits_per_min}`.
+- **Pemakaian**: chat privat → tombol "Panggil · Realtime" membuka RealtimeCall (fallback VideoRoom bila key tidak ada). Meeting/grup multi-asisten tetap memakai VideoRoom (Realtime hanya satu suara).
+- **Panggilan pengingat**: reminder tanpa persona kini **fallback ke persona pertama workspace** (`_reminder_persona`) sehingga selalu bersuara. `respond {accept, realtime:true}` melewati TTS dan mengembalikan `opening`; RealtimeCall dibuka dan asisten langsung **mengucapkan pengingat dengan ramah**, lalu lanjut sebagai panggilan biasa. Fallback non-realtime: TTS seperti sebelumnya.
+- Fix: guard React StrictMode (runId) agar tidak membuat 2 panggilan; sweep panggilan basi (>2 mnt) saat panggilan baru.
+- Tested: iteration_11 — backend 14/14, FE 100% (negosiasi WebRTC nyata berhasil di headless; sapaan Indonesia muncul <2 dtk; billing 75 kredit terpotong). Fix pasca-tes: transkrip di-flush saat hangup — diverifikasi ulang.
+- **MOCK/LIMITASI**: biaya provider default 0.25 USD/menit adalah estimasi — admin wajib sesuaikan di Pricing.
 - (P3) Rate limiting endpoint LLM/TTS/STT; CORS pin untuk produksi.
 - (Backlog P1) Payment gateway nyata; (P2) kamera WebRTC antar-manusia (ditunda).
+
+## Next tasks
+- Uji manual Mode Realtime & panggilan pengingat dengan mikrofon nyata (user).
+- (P3) Rate limiting endpoint LLM/TTS/STT; CORS pin untuk produksi.
+- (Backlog P1) Payment gateway nyata; (P2) kamera WebRTC antar-manusia (ditunda); Realtime untuk meeting multi-asisten (butuh multi-voice).

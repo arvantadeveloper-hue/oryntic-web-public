@@ -36,6 +36,14 @@ export function RealtimeCall({ conv, cid, onClose, onRefresh, opening = null }) 
     api.post(`/realtime/calls/${callIdRef.current}/transcript`, { role, content }).then(() => onRefresh && onRefresh()).catch(() => {});
   };
 
+  const flushLive = () => {
+    const t = liveRef.current.trim();
+    if (!t) return;
+    liveRef.current = ""; setLive("");
+    setCaptions((c) => [...c.slice(-5), { role: "assistant", text: t }]);
+    saveTranscript("assistant", t);
+  };
+
   const monitor = (stream) => {
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -79,6 +87,7 @@ export function RealtimeCall({ conv, cid, onClose, onRefresh, opening = null }) 
         break;
       }
       case "response.done":
+        flushLive();
         setPhase((p) => (p === "user_speaking" ? p : "listening")); break;
       case "error":
         toast.error(ev.error?.message || "Realtime error"); break;
@@ -137,6 +146,7 @@ export function RealtimeCall({ conv, cid, onClose, onRefresh, opening = null }) 
   const hangup = () => {
     if (endedRef.current) return;
     endedRef.current = true; setPhase("ended");
+    flushLive();
     const s = secs(); cleanup();
     onClose();
     if (callIdRef.current) api.post(`/realtime/calls/${callIdRef.current}/end`, { elapsed_seconds: s }).then(() => onRefresh && onRefresh()).catch(() => {});
@@ -149,7 +159,7 @@ export function RealtimeCall({ conv, cid, onClose, onRefresh, opening = null }) 
     const t = setInterval(() => setElapsed(secs()), 1000);
     return () => {
       clearInterval(t); runIdRef.current++;
-      if (!endedRef.current) { endedRef.current = true; const s = secs(); cleanup(); if (callIdRef.current) api.post(`/realtime/calls/${callIdRef.current}/end`, { elapsed_seconds: s }).catch(() => {}); callIdRef.current = null; startedAtRef.current = null; }
+      if (!endedRef.current) { endedRef.current = true; flushLive(); const s = secs(); cleanup(); if (callIdRef.current) api.post(`/realtime/calls/${callIdRef.current}/end`, { elapsed_seconds: s }).catch(() => {}); callIdRef.current = null; startedAtRef.current = null; }
     };
     // eslint-disable-next-line
   }, []);

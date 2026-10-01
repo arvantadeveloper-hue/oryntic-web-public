@@ -2,6 +2,7 @@ import os
 import math
 import json
 import httpx
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -91,6 +92,10 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
         raise HTTPException(402, "Kredit workspace tidak cukup untuk memulai panggilan")
 
     system = await _persona_system(persona, u, None, voice_mode=True)
+    # close stale calls left open by a dropped tab (older than 2 min; no extra charge beyond what ticks already billed)
+    stale_before = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+    await db.realtime_calls.update_many({"user_id": u["id"], "status": {"$in": ["created", "active"]}, "created_at": {"$lt": stale_before}},
+                                        {"$set": {"status": "ended", "ended_at": now_iso(), "stale": True}})
     history = await _history_text(conv["id"], limit=12)
     instructions = system
     if history.strip():
