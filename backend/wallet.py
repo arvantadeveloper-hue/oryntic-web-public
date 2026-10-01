@@ -65,7 +65,7 @@ async def topup(x: TopupIn, u: dict = Depends(require_admin)):
     wid = workspace_id(u)
     user = await db.users.find_one({"id": wid})
     new_balance = int(user.get("credits", 0)) + pkg["credits"]
-    await db.users.update_one({"id": wid}, {"$set": {"credits": new_balance}})
+    await db.users.update_one({"id": wid}, {"$set": {"credits": new_balance, "plan": "paid", "daily_credit_limit": 0}})
     await db.credit_transactions.insert_one({
         "id": new_id(), "user_id": wid, "type": "topup", "amount": pkg["credits"],
         "balance_after": new_balance, "description": f"Top-up {pkg['name']} (simulated)",

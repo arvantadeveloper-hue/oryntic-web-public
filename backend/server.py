@@ -91,6 +91,8 @@ async def _scheduler_loop():
 async def startup():
     await ensure_indexes()
     await seed_admin()
+    from pricing import refresh as refresh_pricing
+    await refresh_pricing(force=True)
     try:
         await asyncio.to_thread(init_storage)
         logger.info("Object storage initialized")

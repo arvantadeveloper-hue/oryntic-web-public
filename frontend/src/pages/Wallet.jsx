@@ -3,6 +3,7 @@ import { Sparkles, Check, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, Cell } from "recharts";
 import { api } from "../lib/api";
+import { TrialBanner } from "../components/TrialBanner";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 
@@ -29,6 +30,7 @@ export default function Wallet() {
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="wallet-page">
       <h1 className="text-3xl font-extrabold text-slate-900">{t("nav.wallet")}</h1>
+      <div className="mt-4"><TrialBanner /></div>
       <p className="text-sm text-slate-500">Kredit adalah satuan penggunaan layanan Oryntix (bukan nilai uang langsung).</p>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">

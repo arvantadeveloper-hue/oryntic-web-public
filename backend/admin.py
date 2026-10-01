@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 from db import db, now_iso, new_id
-from auth import require_admin, workspace_id, pw_hash, public_user
+from auth import require_admin, require_platform_admin, workspace_id, pw_hash, public_user
 from wallet import get_packages
-from llm import GPT_MODEL, IMAGE_MODEL, TEXT_CREDITS_PER_1K_CHARS, IMAGE_CREDITS, PROFILE_CREDITS, user_today_usage
+from llm import GPT_MODEL, IMAGE_MODEL, user_today_usage
+from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -87,7 +88,7 @@ async def delete_workspace_user(uid: str, admin: dict = Depends(require_admin)):
 
 
 @router.get("/overview")
-async def overview(_: dict = Depends(require_admin)):
+async def overview(_: dict = Depends(require_platform_admin)):
     users = await db.users.count_documents({})
     personas = await db.personas.count_documents({"deleted": {"$ne": True}})
     tasks = await db.tasks.count_documents({})
@@ -110,7 +111,7 @@ async def overview(_: dict = Depends(require_admin)):
 
 
 @router.get("/users")
-async def users(_: dict = Depends(require_admin)):
+async def users(_: dict = Depends(require_platform_admin)):
     items = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(500)
     return items
 
@@ -121,28 +122,59 @@ async def personas(_: dict = Depends(require_admin)):
 
 
 @router.get("/tasks")
-async def tasks(_: dict = Depends(require_admin)):
+async def tasks(_: dict = Depends(require_platform_admin)):
     return await db.tasks.find({}, {"_id": 0, "steps": 0, "final_output": 0}).sort("created_at", -1).to_list(500)
 
 
+class PlatformPricingIn(BaseModel):
+    margin_pct: float = Field(ge=0, le=500)
+    tax_pct: float = Field(ge=0, le=100)
+    usd_to_idr: float = Field(gt=0)
+    idr_per_credit: float = Field(gt=0)
+    text_usd_per_1k_chars: float = Field(gt=0)
+    image_usd: float = Field(gt=0)
+    profile_usd: float = Field(gt=0)
+    stt_usd: float = Field(gt=0)
+    tts_usd: float = Field(gt=0)
+    provider_usd_per_min: float = Field(gt=0)
+
+
+class TrialIn(BaseModel):
+    trial_days: int = Field(ge=0, le=365)
+    trial_daily_limit: int = Field(ge=0, le=100000)
+    trial_credits: int = Field(ge=0, le=1000000)
+
+
 @router.get("/pricing")
-async def pricing(_: dict = Depends(require_admin)):
-    pkgs = await get_packages()
+async def pricing(_: dict = Depends(require_platform_admin)):
+    p = await get_pricing()
     return {
-        "packages": pkgs,
+        "packages": await get_packages(),
+        "pricing": p,
+        "rates": compute_rates(p),
+        "trial": await get_trial(),
         "providers": [
-            {"provider": "OpenAI", "model": GPT_MODEL, "capability": "text", "unit": "chars",
-             "rate_credits_per_1k_chars": TEXT_CREDITS_PER_1K_CHARS, "status": "active"},
-            {"provider": "Gemini (Nano Banana)", "model": IMAGE_MODEL, "capability": "image",
-             "unit": "image", "rate_credits": IMAGE_CREDITS, "status": "active"},
+            {"provider": "OpenAI", "model": GPT_MODEL, "capability": "text", "unit": "1k chars", "rate_credits_per_1k_chars": RATES["text_per_1k"], "status": "active"},
+            {"provider": "Gemini (Nano Banana)", "model": IMAGE_MODEL, "capability": "image", "unit": "image", "rate_credits": RATES["image"], "status": "active"},
+            {"provider": "OpenAI", "model": "gpt-realtime", "capability": "realtime voice", "unit": "minute", "rate_credits": RATES["realtime_per_min"], "status": "active"},
         ],
         "tariff": {
-            "profile_generation_credits": PROFILE_CREDITS,
-            "image_generation_credits": IMAGE_CREDITS,
-            "text_credits_per_1k_chars": TEXT_CREDITS_PER_1K_CHARS,
-            "method": "usage-based metering (credits = usage units)",
+            "profile_generation_credits": RATES["profile"], "image_generation_credits": RATES["image"],
+            "text_credits_per_1k_chars": RATES["text_per_1k"],
+            "method": "biaya provider × (1 + margin) × (1 + PPN) × kurs ÷ nilai kredit",
         },
     }
+
+
+@router.put("/pricing")
+async def put_pricing(x: PlatformPricingIn, _: dict = Depends(require_platform_admin)):
+    p = await set_pricing(x.model_dump())
+    return {"pricing": p, "rates": compute_rates(p)}
+
+
+@router.put("/trial")
+async def put_trial(x: TrialIn, _: dict = Depends(require_platform_admin)):
+    return {"trial": await set_trial(x.model_dump())}
 
 
 FEATURE_LABELS = {"chat": "Chat", "meeting_moderation": "Moderator", "meeting_summary": "Notulen", "realtime_call": "Panggilan Realtime",

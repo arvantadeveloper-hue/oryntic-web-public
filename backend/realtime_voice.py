@@ -1,5 +1,4 @@
 import os
-import math
 import json
 import httpx
 from datetime import datetime, timezone, timedelta
@@ -9,11 +8,12 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id
-from auth import current_user, require_admin, workspace_id
-from llm import record_usage, quota_exceeded
+from auth import current_user, require_platform_admin, workspace_id
+from llm import record_usage, quota_exceeded, quota_message
 from chat import _can_access, _persona_system, _history_text
 from realtime import notify
 from ratelimit import rate_limit, get_limits, set_limits
+from pricing import get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates
 
 router = APIRouter(prefix="/api", tags=["realtime-voice"])
 
@@ -24,17 +24,12 @@ REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
 VOICE_MAP = {"alloy": "alloy", "echo": "echo", "shimmer": "shimmer", "nova": "coral", "onyx": "ash", "fable": "ballad",
              "ash": "ash", "coral": "coral", "sage": "sage", "verse": "verse", "marin": "marin", "cedar": "cedar"}
 
-DEFAULT_PRICING = {"provider_usd_per_min": 0.25, "margin_pct": 30.0, "tax_pct": 11.0, "usd_to_idr": 16500.0, "idr_per_credit": 80.0}
-
-
 async def get_pricing() -> dict:
-    cfg = await db.config.find_one({"id": "realtime_pricing"}, {"_id": 0, "id": 0})
-    return {**DEFAULT_PRICING, **(cfg or {})}
+    return await platform_pricing()
 
 
 def credits_per_min(p: dict) -> int:
-    idr = p["provider_usd_per_min"] * (1 + p["margin_pct"] / 100) * (1 + p["tax_pct"] / 100) * p["usd_to_idr"]
-    return max(1, math.ceil(idr / max(p["idr_per_credit"], 0.01)))
+    return compute_rates(p)["realtime_per_min"]
 
 
 def enabled() -> bool:
@@ -56,15 +51,14 @@ class PricingIn(BaseModel):
 
 
 @router.get("/admin/realtime-pricing")
-async def admin_pricing(_: dict = Depends(require_admin)):
+async def admin_pricing(_: dict = Depends(require_platform_admin)):
     p = await get_pricing()
     return {**p, "credits_per_min": credits_per_min(p), "model": REALTIME_MODEL, "enabled": enabled()}
 
 
 @router.put("/admin/realtime-pricing")
-async def admin_set_pricing(x: PricingIn, _: dict = Depends(require_admin)):
-    doc = x.model_dump()
-    await db.config.update_one({"id": "realtime_pricing"}, {"$set": {**doc, "updated_at": now_iso()}}, upsert=True)
+async def admin_set_pricing(x: PricingIn, _: dict = Depends(require_platform_admin)):
+    doc = await platform_set_pricing(x.model_dump())
     return {**doc, "credits_per_min": credits_per_min(doc)}
 
 
@@ -77,12 +71,12 @@ class LimitsIn(BaseModel):
 
 
 @router.get("/admin/rate-limits")
-async def admin_limits(_: dict = Depends(require_admin)):
+async def admin_limits(_: dict = Depends(require_platform_admin)):
     return await get_limits()
 
 
 @router.put("/admin/rate-limits")
-async def admin_set_limits(x: LimitsIn, _: dict = Depends(require_admin)):
+async def admin_set_limits(x: LimitsIn, _: dict = Depends(require_platform_admin)):
     return await set_limits(x.model_dump())
 
 
@@ -109,7 +103,7 @@ async def _call_personas(conv: dict, u: dict) -> list:
 async def _ensure_affordable(u: dict, n_sessions: int, cpm: int):
     over = await quota_exceeded(u)
     if over:
-        raise HTTPException(402, f"Kuota kredit harian Anda habis ({over['used']}/{over['limit']})")
+        raise HTTPException(402, quota_message(over))
     owner = await db.users.find_one({"id": workspace_id(u)}, {"_id": 0, "credits": 1}) or {}
     if (owner.get("credits") or 0) < cpm * n_sessions:
         raise HTTPException(402, "Kredit workspace tidak cukup untuk memulai panggilan")

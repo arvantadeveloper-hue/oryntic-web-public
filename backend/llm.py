@@ -8,6 +8,7 @@ from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpee
 import io
 from datetime import datetime, timezone
 
+from pricing import RATES, rate
 from db import db, now_iso, new_id
 
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
@@ -60,7 +61,7 @@ def _extract_text(resp) -> str:
 
 def text_credits(input_text: str, output_text: str) -> int:
     chars = len(input_text or "") + len(output_text or "")
-    return max(MIN_CREDITS, math.ceil(chars / 1000 * TEXT_CREDITS_PER_1K_CHARS))
+    return max(MIN_CREDITS, math.ceil(chars / 1000 * RATES["text_per_1k"]))
 
 
 async def record_usage(user_id: str, feature: str, credits: int, meta: dict | None = None):
@@ -97,10 +98,20 @@ async def user_today_usage(user_id: str) -> int:
     return sum(e.get("credits", 0) for e in events)
 
 
+def quota_message(over: dict) -> str:
+    if over.get("trial_expired"):
+        return "Masa percobaan workspace Anda telah berakhir. Beli paket kredit di menu Kredit untuk melanjutkan."
+    return f"Kuota kredit harian Anda habis ({over['used']}/{over['limit']}). Hubungi admin atau coba lagi besok."
+
+
 async def quota_exceeded(user: dict):
-    """Return {used, limit} if a regular user is over their daily credit quota, else None."""
+    """Return {used, limit} if the user is over their daily credit quota (members, and owners on a trial plan), else None."""
     if user.get("role") == "admin":
-        return None
+        if user.get("plan") != "trial":
+            return None
+        ends = user.get("trial_ends_at") or ""
+        if ends and ends < now_iso():
+            return {"used": 0, "limit": 0, "trial_expired": True}
     limit = int(user.get("daily_credit_limit") or 0)
     if limit <= 0:
         return None

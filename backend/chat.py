@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, EmailStr
 
 from db import db, now_iso, new_id, clean
 from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, public_user
-from llm import llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded
+from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded
 from realtime import notify
 from ratelimit import rate_limit
 import secrets
@@ -324,7 +324,7 @@ async def _load_ai_conv(cid: str, u: dict):
         raise HTTPException(404, "Conversation not found")
     over = await quota_exceeded(u)
     if over:
-        raise HTTPException(402, f"Kuota kredit harian Anda habis ({over['used']}/{over['limit']}). Hubungi admin atau coba lagi besok.")
+        raise HTTPException(402, quota_message(over))
     personas = await _get_personas(conv.get("persona_ids", []))
     if not personas:
         raise HTTPException(400, "Percakapan ini tidak memiliki persona")

@@ -29,11 +29,11 @@ function Protected({ children }) {
   return children;
 }
 
-function AdminOnly({ children }) {
+function AdminOnly({ children, platform = false }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="flex min-h-screen items-center justify-center mesh-bg text-slate-400">Loading...</div>;
   if (!user) return <Navigate to="/" replace />;
-  if (user.role !== "admin") return <Navigate to="/home" replace />;
+  if (user.role !== "admin" || (platform && !user.is_platform_admin)) return <Navigate to="/home" replace />;
   return children;
 }
 
@@ -68,7 +68,7 @@ function App() {
                 <Route path="/wallet" element={<AdminOnly><WalletPage /></AdminOnly>} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/team" element={<AdminOnly><Team /></AdminOnly>} />
-                <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
+                <Route path="/admin" element={<AdminOnly platform><Admin /></AdminOnly>} />
               </Route>
             </Routes>
           </BrowserRouter>

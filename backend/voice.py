@@ -4,7 +4,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from auth import current_user
-from llm import transcribe_audio, synthesize_speech, record_usage, STT_CREDITS, TTS_CREDITS
+from llm import transcribe_audio, synthesize_speech, record_usage, rate
 from ratelimit import rate_limit
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
@@ -38,7 +38,7 @@ async def transcribe(x: TranscribeIn, u: dict = Depends(current_user)):
         text = await transcribe_audio(data, x.filename, language=lang)
     except Exception as exc:
         raise HTTPException(502, "Transkripsi gagal, coba lagi") from exc
-    await record_usage(u["id"], "voice_stt", STT_CREDITS, {})
+    await record_usage(u["id"], "voice_stt", rate("stt"), {})
     return {"text": text}
 
 
@@ -53,5 +53,5 @@ async def tts(x: TTSIn, u: dict = Depends(current_user)):
         audio = await synthesize_speech(x.text, voice)
     except Exception as exc:
         raise HTTPException(502, "Sintesis suara gagal, coba lagi") from exc
-    await record_usage(u["id"], "voice_tts", TTS_CREDITS, {})
+    await record_usage(u["id"], "voice_tts", rate("tts"), {})
     return Response(content=audio, media_type="audio/mpeg")

@@ -24,10 +24,8 @@ export function AppLayout() {
     { to: "/profile", icon: Settings, label: "Settings", id: "profile" },
   ];
   const items = allItems.filter((it) => !it.adminOnly || isAdmin);
-  if (isAdmin) {
-    items.splice(5, 0, { to: "/team", icon: Users, label: "Team", id: "team" });
-    items.push({ to: "/admin", icon: Shield, label: t("nav.admin"), id: "admin" });
-  }
+  if (isAdmin) items.splice(5, 0, { to: "/team", icon: Users, label: "Team", id: "team" });
+  if (user?.is_platform_admin) items.push({ to: "/admin", icon: Shield, label: t("nav.admin"), id: "admin" });
 
   const handleLogout = () => { logout(); nav("/"); };
   const doSearch = (e) => { if (e.key === "Enter" && q.trim()) { nav("/chat"); } };
@@ -67,7 +65,7 @@ export function AppLayout() {
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(user?.name || "U")[0].toUpperCase()}</span>
             <span className="min-w-0 leading-tight">
               <span className="block truncate text-sm font-semibold">{user?.name}</span>
-              <span className="block truncate text-[11px] text-white/55">{isAdmin ? "Workspace Owner" : "Member"}</span>
+              <span className="block truncate text-[11px] text-white/55">{user?.is_platform_admin ? "Platform Admin" : isAdmin ? (user?.plan === "trial" ? "Workspace Owner · Trial" : "Workspace Owner") : "Member"}</span>
             </span>
           </button>
           <button onClick={handleLogout} data-testid="logout-btn" title={t("nav.logout")} className="flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition hover:bg-white/10 hover:text-white"><LogOut size={16} /></button>

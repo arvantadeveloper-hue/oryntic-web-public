@@ -4,6 +4,7 @@ import { MessageSquare, FileText, Bot, Users, Sparkles, Plus, ArrowRight, CheckC
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { BRAND_HERO } from "../components/Logo";
+import { TrialBanner } from "../components/TrialBanner";
 
 const statusColor = { completed: "#10B981", running: "#7C3AED", queued: "#F59E0B", failed: "#EF4444", cancelled: "#94A3B8" };
 const ago = (iso) => {
@@ -82,6 +83,7 @@ export default function Home() {
   return (
     <div className="grid grid-cols-1 gap-5 p-4 sm:p-6 xl:grid-cols-[1fr_320px] fade-up" data-testid="home-page">
       <div className="min-w-0 space-y-5">
+        <TrialBanner />
         {/* hero banner */}
         <section className="relative overflow-hidden rounded-3xl p-6 sm:p-8" style={{ background: "linear-gradient(110deg,#EAF0FF 0%,#F2F5FF 55%,#E6F4FF 100%)" }} data-testid="home-hero">
           <div className="relative z-10 max-w-lg">

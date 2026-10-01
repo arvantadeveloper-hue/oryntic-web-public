@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
 from auth import current_user, require_admin, workspace_id
-from llm import llm_json, generate_image, record_usage, text_credits, PROFILE_CREDITS, IMAGE_CREDITS, MODEL_CATALOG, DEFAULT_MODEL_KEY
+from llm import llm_json, generate_image, record_usage, text_credits, rate, MODEL_CATALOG, DEFAULT_MODEL_KEY
 from ratelimit import rate_limit
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
@@ -64,9 +64,9 @@ async def generate_profile(x: GenerateProfileIn, u: dict = Depends(require_admin
     profile = await llm_json(PROFILE_SYS, prompt)
     if not profile:
         raise HTTPException(502, "Could not generate profile, please try again")
-    await record_usage(u["id"], "persona_profile", PROFILE_CREDITS, {"method": x.method})
+    await record_usage(u["id"], "persona_profile", rate("profile"), {"method": x.method})
     bal = (await db.users.find_one({"id": u["id"]}))["credits"]
-    return {"profile": profile, "credits_used": PROFILE_CREDITS, "credits": bal}
+    return {"profile": profile, "credits_used": rate("profile"), "credits": bal}
 
 
 @router.get("")
@@ -134,10 +134,10 @@ async def gen_portrait(pid: str, x: PortraitIn, u: dict = Depends(require_admin)
         raise HTTPException(502, "Pembuatan gambar gagal, coba lagi") from exc
     if not data_url:
         raise HTTPException(502, "No image returned")
-    await record_usage(u["id"], "persona_portrait", IMAGE_CREDITS, {"persona_id": pid})
+    await record_usage(u["id"], "persona_portrait", rate("image"), {"persona_id": pid})
     await db.personas.update_one({"id": pid}, {"$set": {"portrait": data_url, "updated_at": now_iso()}})
     bal = (await db.users.find_one({"id": u["id"]}))["credits"]
-    return {"portrait": data_url, "credits_used": IMAGE_CREDITS, "credits": bal}
+    return {"portrait": data_url, "credits_used": rate("image"), "credits": bal}
 
 
 @router.put("/{pid}")

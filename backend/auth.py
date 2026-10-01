@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
 
+from pricing import get_trial
 from db import db, now_iso, new_id
 
 JWT_SECRET = os.environ["JWT_SECRET"]
@@ -57,7 +58,15 @@ def public_user(u: dict) -> dict:
         "onboarded": u.get("onboarded", False),
         "settings": u.get("settings", {}),
         "credits": u.get("credits", 0),
+        "is_platform_admin": is_platform_admin(u),
+        "plan": u.get("plan") or ("paid" if u.get("role") == "admin" else "member"),
+        "trial_ends_at": u.get("trial_ends_at"),
+        "daily_credit_limit": int(u.get("daily_credit_limit") or 0),
     }
+
+
+def is_platform_admin(u: dict) -> bool:
+    return (u.get("email") or "").lower() == os.environ["ADMIN_EMAIL"].lower()
 
 
 def workspace_id(user: dict) -> str:
@@ -124,14 +133,25 @@ async def require_admin(u: dict = Depends(current_user)) -> dict:
     return u
 
 
+async def require_platform_admin(u: dict = Depends(current_user)) -> dict:
+    """Platform operator (ADMIN_EMAIL): global tariffs, rate limits, trial config, cross-workspace views."""
+    if not is_platform_admin(u):
+        raise HTTPException(403, "Platform admin access required")
+    return u
+
+
 # ---------- routes ----------
 @router.post("/register")
 async def register(x: RegisterIn):
     email = str(x.email).lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(409, "Email already registered")
+    trial = await get_trial()
     uid = new_id()
     doc = {
+        "plan": "trial",
+        "trial_ends_at": (datetime.now(timezone.utc) + timedelta(days=int(trial["trial_days"]))).isoformat(),
+        "daily_credit_limit": int(trial["trial_daily_limit"]),
         "id": uid,
         "email": email,
         "password_hash": pw_hash(x.password),
@@ -140,7 +160,7 @@ async def register(x: RegisterIn):
         "owner_id": uid,
         "onboarded": False,
         "verified": True,
-        "credits": STARTING_CREDITS,
+        "credits": int(trial["trial_credits"]),
         "settings": {
             "app_language": "id",
             "conversation_language": "id",
@@ -151,8 +171,8 @@ async def register(x: RegisterIn):
     }
     await db.users.insert_one(doc)
     await db.credit_transactions.insert_one({
-        "id": new_id(), "user_id": uid, "type": "grant", "amount": STARTING_CREDITS,
-        "balance_after": STARTING_CREDITS, "description": "Welcome bonus", "created_at": now_iso(),
+        "id": new_id(), "user_id": uid, "type": "grant", "amount": int(trial["trial_credits"]),
+        "balance_after": int(trial["trial_credits"]), "description": f"Paket percobaan {trial['trial_days']} hari", "created_at": now_iso(),
     })
     return {"access_token": make_token(uid, "user"), "user": public_user(doc)}
 

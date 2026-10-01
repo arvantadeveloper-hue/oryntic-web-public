@@ -3,6 +3,7 @@ import { Users, Briefcase, MessageSquare, Sparkles, Bell, Server } from "lucide-
 import { api } from "../lib/api";
 import { RealtimePricingCard } from "../components/RealtimePricingCard";
 import { RateLimitsCard } from "../components/RateLimitsCard";
+import { PlatformPricingCard, TrialCard } from "../components/PlatformPricingCards";
 
 export default function Admin() {
   const [tab, setTab] = useState("overview");
@@ -109,6 +110,13 @@ export default function Admin() {
                 </div>
               ))}
               <p className="mt-3 text-xs text-slate-500">Metode: {pricing.tariff.method}. Teks: {pricing.tariff.text_credits_per_1k_chars} kredit/1k char · Gambar: {pricing.tariff.image_generation_credits} kredit · Profil: {pricing.tariff.profile_generation_credits} kredit.</p>
+            </div>
+          </div>
+          <div>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Platform Tariff & Trial</h3>
+            <div className="space-y-4">
+              <PlatformPricingCard pricing={pricing.pricing} rates={pricing.rates} onSaved={(d) => setPricing({ ...pricing, pricing: d.pricing, rates: d.rates })} />
+              <TrialCard trial={pricing.trial} onSaved={(tr) => setPricing({ ...pricing, trial: tr })} />
             </div>
           </div>
           <div>
