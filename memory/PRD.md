@@ -53,7 +53,14 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **Notulen Meeting Tersimpan**: ringkasan Moderator meeting otomatis dibuat jadi dokumen `meeting_notes` di Ruang Kerja.
 - **Suara Persona**: tiap persona punya voice TTS sendiri (field `voice`, selektor di detail persona); dipakai di auto-read, tombol play, dan mode panggilan.
 
+## Update 2026-06 (d) — VAD call mode, permanent video storage, onboarding voice picker, responsive polish
+- **Deteksi Diam (VAD)**: Mode Panggilan kini hands-free. Memakai Web Audio AnalyserNode (RMS) — auto-kirim giliran setelah pengguna berhenti bicara ~1.4s, dan **auto-akhiri panggilan** bila tidak ada suara ~12s. Tombol Kirim/Tutup manual tetap ada; avatar berdenyut mengikuti level mic. (`Chat.jsx` CallMode)
+- **Video Seedance Permanen**: hasil Seedance diunduh lalu disimpan ke Emergent Object Storage (`storage.py`, prefix `aivora/videos/{user_id}/{task_id}.mp4`). Task menyimpan `video_path`; disajikan via `GET /api/files/{path}` dengan auth query-param (`?auth=<jwt>`, cek segmen user-id). TaskDetail memutar dari URL permanen. init storage saat startup.
+- **Suara di Onboarding/Pembuatan Persona**: langkah review CreatePersona punya pemilih "Suara Persona (TTS)" dengan 9 opsi + tombol **Dengar contoh** (preview TTS). Voice ikut tersimpan di POST /api/personas.
+- **UI Responsif**: Chat punya drawer daftar percakapan di mobile (tombol `mobile-conv-btn` → `mobile-conv-drawer`), header chat truncate + tombol Panggil ikon-saja di layar kecil. Testid drawer dinamai terpisah (`new-chat-btn-mobile`, `conv-m-*`).
+- Tested: testing agent iteration_2 — backend /api/files auth 4/4, frontend 3/3 (voice picker, mobile drawer, call overlay). VAD mic tidak diuji otomatis (tanpa mikrofon di headless).
+
 ## Next tasks
-- Konfirmasi endpoint id Seedance via satu run video nyata, lalu salin output ke object storage.
-- VAD auto-stop agar mode panggilan benar-benar hands-free tanpa tekan Kirim.
+- Konfirmasi endpoint id Seedance via satu run video nyata end-to-end (eksekusi + simpan permanen).
 - True token-by-token streaming.
+- (Backlog P1) Real payment gateway menggantikan top-up simulasi.

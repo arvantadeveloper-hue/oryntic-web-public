@@ -144,16 +144,16 @@ export default function Chat() {
 
   const isMulti = conv && conv.type !== "private";
 
-  const convListInner = (onNavigate) => (
+  const convListInner = (mobile) => (
     <div className="flex h-full flex-col p-4">
-      <button onClick={() => { openModal(); onNavigate && onNavigate(); }} data-testid="new-chat-btn" className="btn-grad mb-4 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm"><Plus size={16} /> {t("chat.new")}</button>
+      <button onClick={() => { openModal(); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-chat-btn-mobile" : "new-chat-btn"} className="btn-grad mb-4 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm"><Plus size={16} /> {t("chat.new")}</button>
       <div className="relative mb-3">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input className="input-dark py-2 pl-9" placeholder={t("common.search")} value={q} onChange={(e) => { setQ(e.target.value); loadConvs(e.target.value); }} data-testid="chat-search" />
+        <input className="input-dark py-2 pl-9" placeholder={t("common.search")} value={q} onChange={(e) => { setQ(e.target.value); loadConvs(e.target.value); }} data-testid={mobile ? "chat-search-mobile" : "chat-search"} />
       </div>
       <div className="flex-1 space-y-1 overflow-y-auto">
         {convs.map((c) => (
-          <div key={c.id} onClick={() => { nav(`/chat/${c.id}`); onNavigate && onNavigate(); }} data-testid={`conv-${c.id}`}
+          <div key={c.id} onClick={() => { nav(`/chat/${c.id}`); if (mobile) setShowConvList(false); }} data-testid={`${mobile ? "conv-m-" : "conv-"}${c.id}`}
             className={`group flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${c.id === id ? "bg-[#EEF3FF] text-[#2F6BFF]" : "text-slate-600 hover:bg-slate-50"}`}>
             {c.type === "meeting" ? <Gavel size={15} className="shrink-0" /> : c.type === "group" ? <Users size={15} className="shrink-0" /> : <User size={15} className="shrink-0" />}
             <span className="flex-1 truncate">{c.title}</span>
@@ -168,7 +168,7 @@ export default function Chat() {
   return (
     <div className="flex h-[calc(100vh-4rem)]" data-testid="chat-page">
       <div className="hidden w-72 shrink-0 border-r border-[#E7ECF3] bg-white md:block">
-        {convListInner()}
+        {convListInner(false)}
       </div>
 
       {/* mobile conversations drawer */}
@@ -177,7 +177,7 @@ export default function Chat() {
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowConvList(false)} />
           <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl">
             <button className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-500 shadow" onClick={() => setShowConvList(false)}><X size={16} /></button>
-            {convListInner(() => setShowConvList(false))}
+            {convListInner(true)}
           </div>
         </div>
       )}
