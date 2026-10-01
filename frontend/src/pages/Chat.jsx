@@ -41,7 +41,6 @@ export default function Chat() {
   const [attachments, setAttachments] = useState([]);
   const [recording, setRecording] = useState(false);
   const [speaker, setSpeaker] = useState(false);
-  const [callOpen, setCallOpen] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
   const [showConvList, setShowConvList] = useState(false);
   const endRef = useRef(null);
@@ -197,7 +196,7 @@ export default function Chat() {
           ) : <p className="truncate text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
           {conv && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              {conv.type === "private" && <button onClick={() => setCallOpen(true)} title="Mode panggilan suara" data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil</span></button>}
+              {conv.type === "private" && <button onClick={() => setVideoOpen(true)} title="Mode panggilan suara" data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil</span></button>}
               {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Ruang video call" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-white sm:px-3" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}><Video size={15} /> <span className="hidden sm:inline">Video Call</span></button>}
               <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
             </div>
@@ -281,9 +280,7 @@ export default function Chat() {
         )}
       </div>
 
-      {callOpen && conv && <CallMode conv={conv} cid={id} onClose={() => setCallOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />}
-
-      {videoOpen && conv && <VideoRoom conv={conv} cid={id} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />}
+      {videoOpen && conv && <VideoRoom conv={conv} cid={id} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />}
 
       {showModal && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
@@ -318,141 +315,6 @@ export default function Chat() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function CallMode({ conv, cid, onClose, onRefresh }) {
-  const member = (conv.members || [])[0] || {};
-  const [status, setStatus] = useState("idle"); // idle | listening | thinking | speaking
-  const [level, setLevel] = useState(0); // live mic level 0..1 for the visualizer
-  const recRef = useRef(null);
-  const audioRef = useRef(null);
-  const openRef = useRef(true);
-  const acRef = useRef(null);
-  const monitorRef = useRef(null);
-  const streamRef = useRef(null);
-
-  const VOICE_THRESHOLD = 0.045;      // RMS above this = speaking
-  const SILENCE_AFTER_SPEECH_MS = 1400; // auto-send after this much silence following speech
-  const MAX_IDLE_MS = 12000;          // no speech at all for this long -> end call
-
-  const cleanupAudio = () => {
-    if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
-    try { acRef.current?.close(); } catch (e) {}
-    acRef.current = null;
-    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch (e) {}
-    streamRef.current = null;
-  };
-
-  useEffect(() => {
-    openRef.current = true;
-    return () => {
-      openRef.current = false;
-      try { recRef.current?.stop(); } catch (e) {}
-      try { audioRef.current?.pause(); } catch (e) {}
-      cleanupAudio();
-    };
-  }, []);
-
-  const endCall = () => { openRef.current = false; try { recRef.current?.stop(); } catch (e) {} cleanupAudio(); toast.message("Panggilan diakhiri (tidak ada suara)."); onClose(); };
-
-  const startListening = async () => {
-    if (!openRef.current) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const mr = new MediaRecorder(stream); recRef.current = mr; const chunks = [];
-      mr.ondataavailable = (ev) => chunks.push(ev.data);
-      mr.onstop = async () => {
-        if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
-        try { acRef.current?.close(); } catch (e) {}
-        acRef.current = null;
-        stream.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-        setLevel(0);
-        if (!openRef.current) return;
-        setStatus("thinking");
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        const reader = new FileReader();
-        reader.onload = async () => {
-          try {
-            const tr = await api.post("/voice/transcribe", { audio_b64: reader.result, filename: "audio.webm" });
-            const text = (tr.data.text || "").trim();
-            if (!text) { if (openRef.current) startListening(); return; }
-            let reply = "";
-            await streamChatWithAtt(cid, text, [], (ev) => { if (ev.final && ev.content) reply = ev.content; });
-            onRefresh && onRefresh();
-            if (!reply) { if (openRef.current) startListening(); return; }
-            setStatus("speaking");
-            const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: reply.slice(0, 1500), voice: member.voice || "nova" }) });
-            const ab = await res.blob();
-            const a = new Audio(URL.createObjectURL(ab)); audioRef.current = a;
-            a.onended = () => { if (openRef.current) startListening(); };
-            a.play();
-          } catch (e) { if (openRef.current) startListening(); }
-        };
-        reader.readAsDataURL(blob);
-      };
-      mr.start(); setStatus("listening");
-
-      // --- Voice Activity Detection on the same stream ---
-      const AC = window.AudioContext || window.webkitAudioContext;
-      const ac = new AC(); acRef.current = ac;
-      const src = ac.createMediaStreamSource(stream);
-      const analyser = ac.createAnalyser(); analyser.fftSize = 1024;
-      src.connect(analyser);
-      const buf = new Uint8Array(analyser.fftSize);
-      const startedAt = Date.now();
-      let speechStarted = false;
-      let lastVoiceAt = Date.now();
-      monitorRef.current = setInterval(() => {
-        if (!openRef.current) return;
-        analyser.getByteTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
-        const rms = Math.sqrt(sum / buf.length);
-        setLevel(Math.min(1, rms * 6));
-        const now = Date.now();
-        if (rms > VOICE_THRESHOLD) { speechStarted = true; lastVoiceAt = now; }
-        // End the call if the user never speaks for a while
-        if (!speechStarted && now - startedAt > MAX_IDLE_MS) { endCall(); return; }
-        // Auto-send once the user has spoken and then goes silent
-        if (speechStarted && now - lastVoiceAt > SILENCE_AFTER_SPEECH_MS) {
-          if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
-          try { mr.state !== "inactive" && mr.stop(); } catch (e) {}
-        }
-      }, 120);
-    } catch (e) { setStatus("idle"); }
-  };
-
-  useEffect(() => { startListening(); /* auto start */ /* eslint-disable-next-line */ }, []);
-
-  const sendNow = () => { if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; } try { recRef.current?.state !== "inactive" && recRef.current?.stop(); } catch (e) {} };
-  const label = {
-    idle: "Menyiapkan mikrofon...",
-    listening: "Mendengarkan — bicara, saya kirim otomatis saat Anda berhenti",
-    thinking: "Memproses...",
-    speaking: "Berbicara...",
-  }[status];
-
-  const ringScale = status === "listening" ? 1 + level * 0.18 : 1;
-
-  return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center p-4" data-testid="call-mode-overlay">
-      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
-      <div className="relative w-full max-w-sm rounded-3xl border border-[#E7ECF3] bg-white p-6 text-center shadow-2xl fade-up sm:p-8">
-        <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-[#10B981]">Panggilan suara</p>
-        <div className={`mx-auto mb-5 h-28 w-28 overflow-hidden rounded-full transition-transform ${status === "listening" ? "glow-ring" : ""}`} style={{ border: "3px solid #10B981", transform: `scale(${ringScale})` }}>
-          {member.portrait ? <img src={member.portrait} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-3xl font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(member.name || "?")[0]}</span>}
-        </div>
-        <h2 className="truncate text-2xl font-bold text-slate-900">{member.name}</h2>
-        <p className="mx-auto mt-2 min-h-[2.5rem] max-w-[17rem] text-sm text-slate-500">{label}</p>
-        <div className="mt-6 flex items-center justify-center gap-6">
-          <button onClick={sendNow} disabled={status !== "listening"} data-testid="call-send-turn" title="Kirim sekarang" className="flex h-14 w-14 items-center justify-center rounded-full bg-[#2F6BFF] text-white transition disabled:opacity-40"><Send size={22} /></button>
-          <button onClick={() => { openRef.current = false; cleanupAudio(); onClose(); }} data-testid="call-hangup" title="Akhiri panggilan" className="flex h-16 w-16 items-center justify-center rounded-full bg-[#EF4444] text-white transition hover:brightness-105"><PhoneOff size={26} /></button>
-        </div>
-      </div>
     </div>
   );
 }

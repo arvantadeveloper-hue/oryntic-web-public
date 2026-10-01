@@ -132,11 +132,14 @@ async def generate_image(prompt: str, reference_b64: Optional[str] = None) -> Op
     return None
 
 
-async def transcribe_audio(data: bytes, filename: str = "audio.webm") -> str:
+async def transcribe_audio(data: bytes, filename: str = "audio.webm", language: str = "id") -> str:
     stt = OpenAISpeechToText(api_key=EMERGENT_LLM_KEY)
     f = io.BytesIO(data)
     f.name = filename
-    resp = await stt.transcribe(file=f, model="whisper-1", response_format="json")
+    kwargs = {"file": f, "model": "whisper-1", "response_format": "json", "temperature": 0}
+    if language:
+        kwargs["language"] = language
+    resp = await stt.transcribe(**kwargs)
     return (getattr(resp, "text", None) or "").strip()
 
 

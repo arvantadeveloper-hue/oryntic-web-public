@@ -14,6 +14,7 @@ VOICES = ["alloy", "nova", "shimmer", "echo", "fable", "onyx", "coral", "sage", 
 class TranscribeIn(BaseModel):
     audio_b64: str
     filename: str = "audio.webm"
+    language: str | None = None
 
 
 class TTSIn(BaseModel):
@@ -28,9 +29,10 @@ async def voices():
 
 @router.post("/transcribe")
 async def transcribe(x: TranscribeIn, u: dict = Depends(current_user)):
+    lang = x.language or (u.get("settings", {}) or {}).get("conversation_language") or "id"
     try:
         data = base64.b64decode(x.audio_b64.split(",")[-1])
-        text = await transcribe_audio(data, x.filename)
+        text = await transcribe_audio(data, x.filename, language=lang)
     except Exception as e:
         raise HTTPException(502, f"Transcription failed: {str(e)[:120]}")
     await record_usage(u["id"], "voice_stt", STT_CREDITS, {})

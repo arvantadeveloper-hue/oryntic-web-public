@@ -60,7 +60,7 @@ function Tile({ name, portrait, status, isMe, isMod, micLevel = 0, reaction }) {
   );
 }
 
-export function VideoRoom({ conv, cid, onClose, onRefresh }) {
+export function VideoRoom({ conv, cid, onClose, onRefresh, isPrivate = false }) {
   const members = conv.members || [];
   const [statusMap, setStatusMap] = useState({});
   const [reactionMap, setReactionMap] = useState({});
@@ -220,6 +220,15 @@ export function VideoRoom({ conv, cid, onClose, onRefresh }) {
   };
 
   const endMeeting = async () => {
+    if (isPrivate) {
+      openRef.current = false;
+      try { recRef.current?.stop(); } catch (e) {}
+      try { audioRef.current?.pause(); } catch (e) {}
+      cleanupMic();
+      toast.message("Panggilan diakhiri");
+      onClose();
+      return;
+    }
     setPhase("ending");
     try { recRef.current?.stop(); } catch (e) {}
     try { audioRef.current?.pause(); } catch (e) {}
@@ -255,7 +264,7 @@ export function VideoRoom({ conv, cid, onClose, onRefresh }) {
 
   const leaveNoSummary = () => { openRef.current = false; try { recRef.current?.stop(); } catch (e) {} try { audioRef.current?.pause(); } catch (e) {} cleanupMic(); onClose(); };
 
-  const tiles = [{ id: ME, isMe: true }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait })), { id: MOD, isMod: true, name: "Moderator" }];
+  const tiles = [{ id: ME, isMe: true }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait })), ...(isPrivate ? [] : [{ id: MOD, isMod: true, name: "Moderator" }])];
   const phaseLabel = { connecting: "Menyambungkan...", listening: "Mendengarkan Anda — bicara, otomatis terkirim saat berhenti", thinking: "Asisten sedang berpikir...", speaking: "Sedang berbicara...", ending: "Moderator merangkum rapat..." }[phase];
 
   return (
@@ -265,7 +274,7 @@ export function VideoRoom({ conv, cid, onClose, onRefresh }) {
         <span className="flex h-9 items-center gap-2 rounded-full bg-white/10 px-3 text-sm font-semibold backdrop-blur">
           <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /> {conv.title}
         </span>
-        <span className="hidden text-xs text-white/60 sm:block">{members.length} asisten + Moderator</span>
+        <span className="hidden text-xs text-white/60 sm:block">{isPrivate ? "Panggilan suara" : `${members.length} asisten + Moderator`}</span>
         <span className="ml-auto truncate text-xs text-white/70">{phaseLabel}</span>
       </div>
 
@@ -305,12 +314,14 @@ export function VideoRoom({ conv, cid, onClose, onRefresh }) {
         <button onClick={endMeeting} disabled={phase === "ending"} data-testid="vr-end-save"
           className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-5 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-60">
           {phase === "ending" ? <Loader2 size={20} className="animate-spin" /> : <PhoneOff size={20} />}
-          <span className="hidden sm:inline">Akhiri & Simpan Notulen</span>
+          <span className="hidden sm:inline">{isPrivate ? "Akhiri Panggilan" : "Akhiri & Simpan Notulen"}</span>
         </button>
-        <button onClick={leaveNoSummary} data-testid="vr-leave" title="Keluar tanpa menyimpan"
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20">
-          <PhoneOff size={20} />
-        </button>
+        {!isPrivate && (
+          <button onClick={leaveNoSummary} data-testid="vr-leave" title="Keluar tanpa menyimpan"
+            className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20">
+            <PhoneOff size={20} />
+          </button>
+        )}
       </div>
     </div>
   );
