@@ -59,9 +59,9 @@ export default function Chat() {
   }, [id]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, liveMap]);
 
-  const openModal = () => {
+  const openModal = (m = "group") => {
     if (personas.length === 0) { toast.message("Buat persona dulu untuk memulai percakapan"); nav("/personas/new"); return; }
-    setPicked([]); setMode("group"); setShowModal(true);
+    setPicked([]); setMode(m); setShowModal(true);
   };
   const togglePick = (pid) => setPicked((p) => p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid]);
   const startConv = async () => {
@@ -148,7 +148,8 @@ export default function Chat() {
 
   const convListInner = (mobile) => (
     <div className="flex h-full flex-col p-4">
-      <button onClick={() => { openModal(); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-chat-btn-mobile" : "new-chat-btn"} className="btn-grad mb-4 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm"><Plus size={16} /> {t("chat.new")}</button>
+      <button onClick={() => { openModal(); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-chat-btn-mobile" : "new-chat-btn"} className="btn-grad mb-2 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm"><Plus size={16} /> {t("chat.new")}</button>
+      <button onClick={() => { openModal("meeting"); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-meeting-btn-mobile" : "new-meeting-btn"} className="mb-4 flex items-center justify-center gap-2 rounded-xl border border-[#2F6BFF]/40 py-2.5 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Gavel size={16} /> Adakan Meeting</button>
       <div className="relative mb-3">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input className="input-dark py-2 pl-9" placeholder={t("common.search")} value={q} onChange={(e) => { setQ(e.target.value); loadConvs(e.target.value); }} data-testid={mobile ? "chat-search-mobile" : "chat-search"} />
@@ -209,7 +210,10 @@ export default function Chat() {
               <Bot size={44} className="mb-4 text-[#2F6BFF]" />
               <h3 className="text-lg font-bold text-slate-900">Mulai percakapan dengan tim Anda</h3>
               <p className="mt-1 max-w-sm text-sm text-slate-500">Pilih satu asisten untuk chat privat, beberapa untuk grup, atau adakan meeting.</p>
-              <button onClick={openModal} className="btn-grad mt-5 rounded-xl px-6 py-3 text-sm">+ Mulai Chat</button>
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+                <button onClick={() => openModal()} data-testid="empty-new-chat-btn" className="btn-grad rounded-xl px-6 py-3 text-sm">+ Mulai Chat</button>
+                <button onClick={() => openModal("meeting")} data-testid="empty-new-meeting-btn" className="flex items-center gap-2 rounded-xl border border-[#2F6BFF]/40 px-6 py-3 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Gavel size={16} /> Adakan Meeting</button>
+              </div>
             </div>
           )}
           {messages.map((m, i) => (
@@ -286,8 +290,8 @@ export default function Chat() {
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowModal(false)} />
           <div className="relative w-full max-w-md rounded-3xl border border-[#E7ECF3] bg-white p-6 shadow-2xl fade-up" data-testid="new-chat-modal">
             <button onClick={() => setShowModal(false)} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
-            <h3 className="text-lg font-bold text-slate-900">Mulai Percakapan</h3>
-            <p className="mt-1 text-sm text-slate-500">Pilih 1 asisten untuk privat, atau beberapa untuk grup/meeting.</p>
+            <h3 className="text-lg font-bold text-slate-900">{mode === "meeting" ? "Adakan Meeting" : "Mulai Percakapan"}</h3>
+            <p className="mt-1 text-sm text-slate-500">{mode === "meeting" ? "Pilih minimal 2 asisten untuk rapat dengan Moderator." : "Pilih 1 asisten untuk privat, atau beberapa untuk grup/meeting."}</p>
             <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
               {personas.map((p) => {
                 const on = picked.includes(p.id);
