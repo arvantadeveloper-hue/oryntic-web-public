@@ -60,7 +60,16 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **UI Responsif**: Chat punya drawer daftar percakapan di mobile (tombol `mobile-conv-btn` → `mobile-conv-drawer`), header chat truncate + tombol Panggil ikon-saja di layar kecil. Testid drawer dinamai terpisah (`new-chat-btn-mobile`, `conv-m-*`).
 - Tested: testing agent iteration_2 — backend /api/files auth 4/4, frontend 3/3 (voice picker, mobile drawer, call overlay). VAD mic tidak diuji otomatis (tanpa mikrofon di headless).
 
+## Update 2026-06 (e) — Ruang Video Call ala Zoom (grup/meeting) + moderator notulen
+- **VideoRoom** (`frontend/src/components/VideoRoom.jsx`): overlay full-screen gaya Zoom (tema gelap imersif) untuk percakapan **grup/meeting**. Grid tile: **Anda** + tiap persona + **Moderator**. Tile "hidup": potret, cincin berdenyut + waveform saat bicara, status mendengar/berpikir/bicara. Tombol buka: `video-call-btn` di header chat (tampil bila type != private).
+- **Hands-free suara**: pakai VAD (deteksi diam) — Anda bicara → auto-kirim saat berhenti → tiap persona menjawab bergiliran lewat TTS suara masing-masing (hanya satu bicara pada satu waktu via playback queue). Caption langsung di bawah. Kontrol: mute mic, kirim sekarang, toggle caption, keluar. (Alur mic tak bisa diuji otomatis — tanpa mikrofon di headless.)
+- **Moderator & Notulen**: saat tekan **"Akhiri & Simpan Notulen"** (`vr-end-save`) → `POST /api/conversations/{cid}/summary` membuat ringkasan Moderator (poin, kesepakatan, action items), menyimpannya sebagai pesan + **task `meeting_notes` di Ruang Kerja**, lalu Moderator "membacakan" ringkasan (TTS suara onyx, dibatasi 25s agar tak menggantung) dan ruang ditutup. Endpoint ditolak (400) untuk percakapan privat.
+- **Flag moderator per-giliran**: `POST /conversations/{cid}/send` menerima `moderator:false` (dipakai VideoRoom) agar moderator TIDAK merangkum tiap giliran; ringkasan hanya di akhir. Perilaku chat meeting teks lama tetap (default `moderator:true`).
+- `streamChatWithAtt` dipindah ke `lib/api.js` (mendukung extra body) untuk dipakai Chat + VideoRoom tanpa circular import.
+- Tested: testing agent iteration_3 — backend 4/4 (summary membuat meeting_notes, flag moderator true/false, 400 privat), frontend 100% (tombol, overlay, semua tile + kontrol, caption toggle, end+save → task notulen muncul di Ruang Kerja). Fix pasca-tes: timeout 25s pada pemutaran TTS akhir + guard privat + label tile fallback.
+
 ## Next tasks
-- Konfirmasi endpoint id Seedance via satu run video nyata end-to-end (eksekusi + simpan permanen).
+- (Opsional) Avatar wajah bergerak + lip-sync (HeyGen/D-ID) — butuh integrasi berbayar (P3 backlog).
+- Konfirmasi endpoint Seedance via satu run video nyata end-to-end.
 - True token-by-token streaming.
 - (Backlog P1) Real payment gateway menggantikan top-up simulasi.

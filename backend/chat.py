@@ -241,6 +241,8 @@ async def meeting_summary(cid: str, u: dict = Depends(current_user)):
     conv = await db.conversations.find_one({"id": cid, "user_id": u["id"]})
     if not conv:
         raise HTTPException(404, "Conversation not found")
+    if conv.get("type") == "private":
+        raise HTTPException(400, "Notulen hanya untuk percakapan grup atau meeting")
     history = await _history_text(cid, limit=40)
     if not history.strip():
         raise HTTPException(400, "Belum ada diskusi untuk diringkas")
