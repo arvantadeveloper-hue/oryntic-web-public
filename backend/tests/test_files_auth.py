@@ -6,7 +6,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ai-companion-test-5.
 API = f"{BASE_URL}/api"
 
 DEMO_EMAIL = "demo@aivora.ai"
-DEMO_PASSWORD = "demo123456"
+DEMO_PASSWORD = os.environ.get("TEST_DEMO_PASSWORD", os.environ.get("TEST_ADMIN_PASSWORD", "demo123456"))
 DEMO_USER_ID = "fb1a64ce-ff1c-4376-b090-e90b286a5024"
 DEMO_PATH = f"aivora/videos/{DEMO_USER_ID}/demo.mp4"
 

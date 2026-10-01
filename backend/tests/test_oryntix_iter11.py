@@ -11,8 +11,8 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ai-companion-test-5.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
-ADMIN = ("demo@aivora.ai", "demo123456")
-USER = ("budi@aivora.ai", "budi123456")
+ADMIN = ("demo@aivora.ai", os.environ.get("TEST_ADMIN_PASSWORD", "demo123456"))
+USER = ("budi@aivora.ai", os.environ.get("TEST_BUDI_PASSWORD", "budi123456"))
 
 
 def _login(email, pw):

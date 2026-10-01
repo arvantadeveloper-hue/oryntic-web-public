@@ -18,7 +18,7 @@ BASE_URL = BASE_URL.rstrip("/")
 API = f"{BASE_URL}/api"
 
 DEMO_EMAIL = "demo@aivora.ai"
-DEMO_PASSWORD = "demo123456"
+DEMO_PASSWORD = os.environ.get("TEST_DEMO_PASSWORD", os.environ.get("TEST_ADMIN_PASSWORD", "demo123456"))
 
 ID_TEXT = "Halo, apa kabar hari ini? Aku ingin bercerita tentang pekerjaanku."
 ID_KEYWORDS = ["halo", "apa", "kabar", "hari", "aku", "ingin", "tentang"]

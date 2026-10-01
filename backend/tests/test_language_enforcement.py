@@ -9,7 +9,6 @@ Tests for Indonesian (Bahasa Indonesia) language enforcement across:
 import os
 import re
 import json
-import time
 import pytest
 import requests
 
@@ -17,7 +16,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 assert BASE_URL, "REACT_APP_BACKEND_URL must be set"
 
 EMAIL = "demo@aivora.ai"
-PASSWORD = "demo123456"
+PASSWORD = os.environ.get("TEST_PASSWORD", os.environ.get("TEST_ADMIN_PASSWORD", "demo123456"))
 PRIVATE_CID = "ca8b4741-ebde-49f2-8ccc-eea69af65869"
 GROUP_CID = "04d5c2c9-9b26-4d80-bc7e-2f1a15da7d1d"
 

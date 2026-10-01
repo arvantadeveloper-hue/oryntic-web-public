@@ -1,15 +1,14 @@
 """Iteration 13 tests: Moderator interjection endpoint + Admin usage report."""
 import os
 import time
-import json
 import requests
 import pytest
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ai-companion-test-5.preview.emergentagent.com").rstrip("/")
 API = BASE_URL + "/api"
 
-ADMIN = {"email": "demo@aivora.ai", "password": "demo123456"}
-BUDI = {"email": "budi@aivora.ai", "password": "budi123456"}
+ADMIN = {"email": "demo@aivora.ai", "password": os.environ.get("TEST_ADMIN_PASSWORD", "demo123456")}
+BUDI = {"email": "budi@aivora.ai", "password": os.environ.get("TEST_BUDI_PASSWORD", "budi123456")}
 
 
 def _login(creds):

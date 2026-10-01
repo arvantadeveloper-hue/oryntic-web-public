@@ -24,9 +24,9 @@ API = f"{BASE_URL}/api"
 WS_BASE = BASE_URL.replace("https://", "wss://").replace("http://", "ws://") + "/api/ws/"
 
 ADMIN_EMAIL = "demo@aivora.ai"
-ADMIN_PW = "demo123456"
+ADMIN_PW = os.environ.get("TEST_ADMIN_PASSWORD", "demo123456")
 BUDI_EMAIL = "budi@aivora.ai"
-BUDI_PW = "budi123456"
+BUDI_PW = os.environ.get("TEST_BUDI_PASSWORD", "budi123456")
 
 
 # ---------------- helpers ----------------

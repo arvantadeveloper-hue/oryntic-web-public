@@ -96,6 +96,24 @@ async def _get_personas(ids, wid=None):
 
 
 # ---------- conversations ----------
+def _conv_title(ctype: str, personas: list) -> str:
+    names = ", ".join(p["name"] for p in personas)
+    if ctype == "meeting":
+        return "Meeting: " + names
+    if ctype == "group":
+        return "Grup: " + names
+    return f"Chat dengan {personas[0]['name']}"
+
+
+async def _resolve_participants(u: dict, ids: list) -> list:
+    """Creator + invited humans from the same workspace (deduplicated)."""
+    participants = [u["id"]]
+    if ids:
+        valid = await db.users.find({"id": {"$in": ids}, "owner_id": workspace_id(u)}, {"_id": 0, "id": 1}).to_list(50)
+        participants += [v["id"] for v in valid if v["id"] not in participants]
+    return participants
+
+
 @router.post("/conversations")
 async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
     personas = await _get_personas(x.persona_ids, workspace_id(u))
@@ -103,31 +121,15 @@ async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
         raise HTTPException(400, "Pilih minimal satu persona untuk memulai percakapan")
     multi = x.type in ("group", "meeting") and (len(personas) > 1 or x.type == "meeting")
     ctype = x.type if multi else "private"
-    title = x.title
-    if not title:
-        if ctype == "meeting":
-            title = "Meeting: " + ", ".join(p["name"] for p in personas)
-        elif ctype == "group":
-            title = "Grup: " + ", ".join(p["name"] for p in personas)
-        else:
-            title = f"Chat dengan {personas[0]['name']}"
-    cid = new_id()
-    # resolve invited human participants (must be in the same workspace)
-    participants = [u["id"]]
-    if x.participant_ids and ctype == "meeting":
-        wid = workspace_id(u)
-        valid = await db.users.find({"id": {"$in": x.participant_ids}, "owner_id": wid}, {"_id": 0, "id": 1}).to_list(50)
-        for v in valid:
-            if v["id"] not in participants:
-                participants.append(v["id"])
+    participants = await _resolve_participants(u, x.participant_ids if ctype == "meeting" else [])
     doc = {
-        "id": cid, "user_id": u["id"], "workspace_id": workspace_id(u),
+        "id": new_id(), "user_id": u["id"], "workspace_id": workspace_id(u),
         "participants": participants,
         "type": ctype,
         "persona_ids": [p["id"] for p in personas],
         "persona_id": personas[0]["id"],
         "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")} for p in personas],
-        "title": title, "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
+        "title": x.title or _conv_title(ctype, personas), "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
     }
     await db.conversations.insert_one(dict(doc))
     return clean(doc)
@@ -315,9 +317,8 @@ async def _history_text(cid: str, limit=14) -> str:
     return "\n".join(lines)
 
 
-@router.post("/conversations/{cid}/send")
-async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
-    await rate_limit(u, "chat")
+async def _load_ai_conv(cid: str, u: dict):
+    """Access + quota + persona checks shared by the AI endpoints. Returns (conv, personas)."""
     conv = await db.conversations.find_one({"id": cid})
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
@@ -327,7 +328,52 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     personas = await _get_personas(conv.get("persona_ids", []))
     if not personas:
         raise HTTPException(400, "Percakapan ini tidak memiliki persona")
+    return conv, personas
 
+
+def _mentioned(content: str, personas: list) -> list:
+    """@mention routing: personas explicitly named with @ in the message."""
+    lower = content.lower()
+    return [p for p in personas if ("@" + p["name"].lower().replace(" ", "")) in lower.replace(" ", "") or ("@" + p["name"].lower()) in lower]
+
+
+async def _persona_reply(cid: str, u: dict, persona: dict, roster, prompt: str, voice_mode: bool, meta_extra: dict):
+    """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
+    meta = {"persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}
+    yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
+    system = await _persona_system(persona, u, roster, voice_mode=voice_mode)
+    try:
+        full = await llm_text(system, prompt, persona.get("model"))
+    except Exception:
+        full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
+    for i, w in enumerate(full.split(" ")):
+        yield f"data: {json.dumps({**meta, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
+        await asyncio.sleep(0.01)
+    used = text_credits(prompt, full)
+    await record_usage(u["id"], "chat", used, {"conversation_id": cid, "persona_id": persona["id"], **meta_extra})
+    ai_msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": full,
+              "persona_id": persona["id"], "persona_name": persona["name"],
+              "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso()}
+    await db.messages.insert_one(dict(ai_msg))
+    yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full})}\n\n"
+    await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
+    yield used
+
+
+async def _finish_stream(cid: str, u: dict, total: int, last_message: str):
+    bal = (await db.users.find_one({"id": u["id"]}))["credits"]
+    await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso(), "last_message": last_message[:120]}})
+    return f"data: {json.dumps({'done': True, 'credits_used': total, 'credits': bal})}\n\ndata: [DONE]\n\n"
+
+
+def _sse(gen):
+    return StreamingResponse(gen, media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/conversations/{cid}/send")
+async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
+    await rate_limit(u, "chat")
+    conv, personas = await _load_ai_conv(cid, u)
     attach_text, attach_meta = await _process_attachments(x.attachments, u["id"])
     user_msg = {"id": new_id(), "conversation_id": cid, "role": "user", "content": x.content,
                 "attachments": attach_meta, "sender_user_id": u["id"], "sender_name": u.get("name") or "User",
@@ -335,49 +381,23 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     await db.messages.insert_one(dict(user_msg))
     await notify(cid, {"type": "message", "role": "user", "sender_name": user_msg["sender_name"]})
 
-    # @mention routing: if the user names specific personas, only they respond
-    lower = x.content.lower()
-    mentioned = [p for p in personas if ("@" + p["name"].lower().replace(" ", "")) in lower.replace(" ", "")
-                 or ("@" + p["name"].lower()) in lower]
-    responders = mentioned if mentioned else personas
-    roster = [p["name"] for p in personas]
-    ctype = conv.get("type", "private")
+    responders = _mentioned(x.content, personas) or personas
+    roster = [p["name"] for p in personas] if len(personas) > 1 else None
+    extra = (f"\n\n[Lampiran dari user]:\n{attach_text}" if attach_text else "")
+    if x.interrupted:
+        extra += "\n[Catatan: user baru saja menyela saat asisten sedang berbicara. Tanggapi langsung apa yang user katakan.]"
 
     async def stream():
         total = 0
         for persona in responders:
-            meta = {"persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}
-            yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
-            system = await _persona_system(persona, u, roster if len(personas) > 1 else None, voice_mode=x.voice_mode)
-            history = await _history_text(cid)
-            prompt = history
-            if attach_text:
-                prompt += f"\n\n[Lampiran dari user]:\n{attach_text}"
-            if x.interrupted:
-                prompt += "\n[Catatan: user baru saja menyela saat asisten sedang berbicara. Tanggapi langsung apa yang user katakan.]"
-            prompt += f"\n{persona['name']}:"
-            try:
-                full = await llm_text(system, prompt, persona.get("model"))
-            except Exception:
-                full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
-            words = full.split(" ")
-            for i, w in enumerate(words):
-                chunk = w if i == 0 else " " + w
-                yield f"data: {json.dumps({**meta, 'delta': chunk})}\n\n"
-                await asyncio.sleep(0.01)
-            used = text_credits(prompt, full)
-            total += used
-            await record_usage(u["id"], "chat", used, {"conversation_id": cid, "persona_id": persona["id"]})
-            ai_msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": full,
-                      "persona_id": persona["id"], "persona_name": persona["name"],
-                      "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso()}
-            await db.messages.insert_one(dict(ai_msg))
-            yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full})}\n\n"
-            await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
-
-        # meeting: the Moderator only steps in when the discussion is stuck (disagreement / going in circles);
-        # the full notulen is produced on demand via POST /conversations/{cid}/summary
-        if ctype == "meeting" and len(responders) > 1:
+            prompt = (await _history_text(cid)) + extra + f"\n{persona['name']}:"
+            async for ev in _persona_reply(cid, u, persona, roster, prompt, x.voice_mode, {}):
+                if isinstance(ev, int):
+                    total += ev
+                else:
+                    yield ev
+        # meeting: the Moderator only steps in when the discussion is stuck; notulen is on demand via /summary
+        if conv.get("type") == "meeting" and len(responders) > 1:
             user_turns = await db.messages.count_documents({"conversation_id": cid, "role": "user"})
             if user_turns >= 2 and await _is_stuck(cid):
                 async for ev in _moderator_interject(cid, u, roster, "stuck"):
@@ -385,14 +405,9 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
                         total += ev
                     else:
                         yield ev
+        yield await _finish_stream(cid, u, total, x.content)
 
-        bal = (await db.users.find_one({"id": u["id"]}))["credits"]
-        await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso(), "last_message": x.content[:120]}})
-        yield f"data: {json.dumps({'done': True, 'credits_used': total, 'credits': bal})}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return _sse(stream())
 
 
 MOD_META = {"persona_id": "__moderator__", "persona_name": "Moderator", "portrait": None, "is_moderator": True, "moderator_kind": "interject", "voice": "onyx"}
@@ -403,6 +418,7 @@ async def _is_stuck(cid: str) -> bool:
     history = await _history_text(cid, limit=10)
     sys = ("You are a silent meeting observer. Decide if the discussion is STUCK: participants clearly disagree without "
            "converging, keep repeating the same points, or talk past the user's question. Answer with exactly one word: YES or NO.")
+    ans = ""
     try:
         ans = (await llm_text(sys, f"Diskusi:\n{history}\n\nStuck?")).strip().upper()
     except Exception:
@@ -459,21 +475,12 @@ class ModerateIn(BaseModel):
 async def moderate(cid: str, x: ModerateIn, u: dict = Depends(current_user)):
     """Realtime meeting: Moderator speaks only when stuck (LLM check) or after long silence. Returns text (or null)."""
     await rate_limit(u, "chat")
-    conv = await db.conversations.find_one({"id": cid})
-    if not _can_access(conv, u):
-        raise HTTPException(404, "Conversation not found")
+    conv, personas = await _load_ai_conv(cid, u)
     if conv.get("type") == "private":
         raise HTTPException(400, "Moderator hanya untuk meeting")
-    over = await quota_exceeded(u)
-    if over:
-        raise HTTPException(402, "Kuota kredit harian Anda habis")
-    personas = await _get_personas(conv.get("persona_ids", []))
-    if len(personas) < 2:
-        return {"content": None, "voice": "onyx"}
     user_turns = await db.messages.count_documents({"conversation_id": cid, "role": "user"})
-    if x.reason == "stuck" and (user_turns < 2 or not await _is_stuck(cid)):
-        return {"content": None, "voice": "onyx"}
-    if x.reason == "silence" and user_turns < 1:
+    needed = 2 if x.reason == "stuck" else 1
+    if len(personas) < 2 or user_turns < needed or (x.reason == "stuck" and not await _is_stuck(cid)):
         return {"content": None, "voice": "onyx"}
     text, used = await _moderator_text(cid, u, [p["name"] for p in personas], x.reason)
     return {"content": text or None, "voice": "onyx", "credits_used": used}
@@ -483,58 +490,28 @@ async def moderate(cid: str, x: ModerateIn, u: dict = Depends(current_user)):
 async def nudge(cid: str, u: dict = Depends(current_user)):
     """Silence in a live meeting/call: Moderator (meeting) or the persona (private) gently checks in. Streams SSE."""
     await rate_limit(u, "chat")
-    conv = await db.conversations.find_one({"id": cid})
-    if not _can_access(conv, u):
-        raise HTTPException(404, "Conversation not found")
-    over = await quota_exceeded(u)
-    if over:
-        raise HTTPException(402, "Kuota kredit harian Anda habis")
-    personas = await _get_personas(conv.get("persona_ids", []))
-    if not personas:
-        raise HTTPException(400, "Percakapan ini tidak memiliki persona")
+    conv, personas = await _load_ai_conv(cid, u)
     history = await _history_text(cid, limit=12)
     if not history.strip():
         raise HTTPException(400, "Belum ada percakapan")
     roster = [p["name"] for p in personas]
     use_mod = conv.get("type") == "meeting" and len(personas) > 1
+    persona = personas[0]
+    prompt = (f"{history}\n[Catatan: user terdiam cukup lama. Sapa dengan hangat dalam satu kalimat pendek: tanyakan apakah masih ada, "
+              f"atau tawarkan bantuan lanjutan. Jangan mengulang jawaban sebelumnya.]\n{persona['name']}:")
 
     async def stream():
         total = 0
-        if use_mod:
-            async for ev in _moderator_interject(cid, u, roster, "silence"):
-                if isinstance(ev, int):
-                    total += ev
-                else:
-                    yield ev
-        else:
-            persona = personas[0]
-            meta = {"persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}
-            yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
-            system = await _persona_system(persona, u, roster if len(personas) > 1 else None, voice_mode=True)
-            prompt = (f"{history}\n[Catatan: user terdiam cukup lama. Sapa dengan hangat dalam satu kalimat pendek: tanyakan apakah masih ada, "
-                      f"atau tawarkan bantuan lanjutan. Jangan mengulang jawaban sebelumnya.]\n{persona['name']}:")
-            try:
-                full = await llm_text(system, prompt, persona.get("model"))
-            except Exception:
-                full = ""
-            if full.strip():
-                for i, w in enumerate(full.split(" ")):
-                    yield f"data: {json.dumps({**meta, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
-                    await asyncio.sleep(0.008)
-                used = text_credits(prompt, full)
-                total += used
-                await record_usage(u["id"], "chat", used, {"conversation_id": cid, "persona_id": persona["id"], "reason": "silence"})
-                ai_msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": full,
-                          "persona_id": persona["id"], "persona_name": persona["name"],
-                          "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso()}
-                await db.messages.insert_one(dict(ai_msg))
-                await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
-                yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full})}\n\n"
-        yield f"data: {json.dumps({'done': True, 'credits_used': total})}\n\n"
-        yield "data: [DONE]\n\n"
+        gen = _moderator_interject(cid, u, roster, "silence") if use_mod else \
+            _persona_reply(cid, u, persona, roster if len(personas) > 1 else None, prompt, True, {"reason": "silence"})
+        async for ev in gen:
+            if isinstance(ev, int):
+                total += ev
+            else:
+                yield ev
+        yield f"data: {json.dumps({'done': True, 'credits_used': total})}\n\ndata: [DONE]\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return _sse(stream())
 
 
 @router.post("/conversations/{cid}/summary")

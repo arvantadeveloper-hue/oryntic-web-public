@@ -1,4 +1,4 @@
-import asyncio, json, os, subprocess, sys
+import asyncio, json, os, subprocess
 import websockets
 
 API = "https://ai-companion-test-5.preview.emergentagent.com/api"
@@ -15,8 +15,8 @@ def login(email, pw):
 
 async def main():
     cid = open("/tmp/mcid.txt").read().strip()
-    admin = login("demo@aivora.ai", "demo123456")
-    budi = login("budi@aivora.ai", "budi123456")
+    admin = login("demo@aivora.ai", os.environ.get("TEST_ADMIN_PASSWORD", "demo123456"))
+    budi = login("budi@aivora.ai", os.environ.get("TEST_BUDI_PASSWORD", "budi123456"))
     url = f"{WS_BASE}{cid}?token={budi}"
     async with websockets.connect(url, open_timeout=15) as ws:
         print("budi WS connected")

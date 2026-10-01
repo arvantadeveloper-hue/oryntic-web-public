@@ -22,12 +22,12 @@ if not BASE_URL:
 API = f"{BASE_URL}/api"
 
 ADMIN_EMAIL = "admin@aivora.ai"
-ADMIN_PASSWORD = "Aivora!Admin2026"
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "Aivora!Admin2026")
 
 # unique test user per run
 RUN_ID = uuid.uuid4().hex[:8]
 TEST_EMAIL = f"TEST_user_{RUN_ID}@aivora.ai"
-TEST_PASSWORD = "Testpass123!"
+TEST_PASSWORD = os.environ.get("TEST_TEST_PASSWORD", "Testpass123!")
 
 
 # ---------- shared state ----------

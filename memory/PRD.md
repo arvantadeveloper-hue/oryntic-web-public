@@ -124,6 +124,13 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **Laporan Pemakaian** (`GET /api/admin/usage-report?days=7|30|90`, `components/UsageReport.jsx` di halaman Team): total, rata-rata/hari, aktivitas, paling boros; grafik per anggota (bar, atribusi `meta.actor_id`), per fitur (donut + legenda label Indonesia `FEATURE_LABELS`), tren harian (area). Recharts.
 - Tested: iteration_13 — backend 10/10, FE 100%. Uji suara nyata (sela, sebut nama, Moderator menyela) tetap perlu mikrofon user.
 
+## Update 2026-06 (m) — Code quality fixes (laporan code review)
+- Variabel dalam `try` diinisialisasi/`raise ... from exc` (voice.py, personas.py, files.py, chat.py `_is_stuck`).
+- Kredensial uji di `backend/tests/*.py` dibaca dari env `TEST_ADMIN_PASSWORD` / `TEST_BUDI_PASSWORD` (default tetap untuk lokal).
+- Refactor kompleksitas: `chat.py` → `_load_ai_conv`, `_mentioned`, `_persona_reply` (generator SSE dipakai send & nudge), `_finish_stream`, `_sse`, `_conv_title`, `_resolve_participants`; `realtime_voice.py` → `_call_personas`, `_ensure_affordable`, `_close_stale_calls`, `_session_instructions`; `admin.py` → `_aggregate_usage`. `agents._orchestrate` sengaja tidak disentuh (risiko regresi, tidak ada bug).
+- Temuan `is None` adalah idiom Python yang benar (false positive) — tidak diubah.
+- Regresi: pytest iter10 + iter13 (21 passed) + curl send/nudge/moderate/realtime/usage-report OK.
+
 ## Next tasks
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
 - (P3) CORS pin untuk produksi; rate limit lintas-instance (Redis) bila dideploy multi-replica.

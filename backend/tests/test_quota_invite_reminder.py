@@ -1,15 +1,14 @@
 """Backend tests for iteration 8: reminder-call voice response, daily quota enforce+display, invite link."""
 import os
 import uuid
-import time
 import pytest
 import requests
 
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE}/api"
 
-ADMIN = {"email": "demo@aivora.ai", "password": "demo123456"}
-BUDI = {"email": "budi@aivora.ai", "password": "budi123456"}
+ADMIN = {"email": "demo@aivora.ai", "password": os.environ.get("TEST_ADMIN_PASSWORD", "demo123456")}
+BUDI = {"email": "budi@aivora.ai", "password": os.environ.get("TEST_BUDI_PASSWORD", "budi123456")}
 
 
 def _login(creds):

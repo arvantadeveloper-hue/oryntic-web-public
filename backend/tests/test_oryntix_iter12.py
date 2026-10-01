@@ -13,8 +13,8 @@ def _load_base():
     raise RuntimeError("REACT_APP_BACKEND_URL not set")
 
 BASE = _load_base()
-ADMIN = {"email": "demo@aivora.ai", "password": "demo123456"}
-BUDI = {"email": "budi@aivora.ai", "password": "budi123456"}
+ADMIN = {"email": "demo@aivora.ai", "password": os.environ.get("TEST_ADMIN_PASSWORD", "demo123456")}
+BUDI = {"email": "budi@aivora.ai", "password": os.environ.get("TEST_BUDI_PASSWORD", "budi123456")}
 
 
 def _login(creds):

@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Header, Query
 from fastapi.responses import Response
 
 from auth import JWT_SECRET, JWT_ISSUER
-from db import db
 from storage import get_object
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -14,11 +13,11 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 
 def _verify(token: str) -> str:
     try:
-        p = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], issuer=JWT_ISSUER,
-                       options={"require": ["sub", "exp", "iat", "iss"]})
-    except jwt.InvalidTokenError:
-        raise HTTPException(401, "Invalid or expired token")
-    return p["sub"]
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], issuer=JWT_ISSUER,
+                             options={"require": ["sub", "exp", "iat", "iss"]})
+        return payload["sub"]
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(401, "Invalid or expired token") from exc
 
 
 @router.get("/{path:path}")
@@ -39,6 +38,6 @@ async def serve_file(path: str, authorization: Optional[str] = Header(None), aut
         raise HTTPException(403, "Forbidden")
     try:
         data, content_type = await asyncio.to_thread(get_object, path)
-    except Exception:
-        raise HTTPException(404, "File not found")
+    except Exception as exc:
+        raise HTTPException(404, "File not found") from exc
     return Response(content=data, media_type=content_type)

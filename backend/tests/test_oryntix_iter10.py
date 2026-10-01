@@ -21,9 +21,9 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ai-companion-test-5.
 API = f"{BASE_URL}/api"
 
 ADMIN_EMAIL = "demo@aivora.ai"
-ADMIN_PASS = "demo123456"
+ADMIN_PASS = os.environ.get("TEST_ADMIN_PASSWORD", "demo123456")
 BUDI_EMAIL = "budi@aivora.ai"
-BUDI_PASS = "budi123456"
+BUDI_PASS = os.environ.get("TEST_BUDI_PASSWORD", "budi123456")
 
 
 # ---------- fixtures ----------

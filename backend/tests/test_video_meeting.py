@@ -16,7 +16,7 @@ LEGACY_MEETING_CID = "dba6c41f-ca3b-4cf6-b7e9-bfab1f47e40d"
 
 @pytest.fixture(scope="module")
 def token():
-    r = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": "demo123456"})
+    r = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": os.environ.get("TEST_ADMIN_PASSWORD", "demo123456")})
     assert r.status_code == 200, r.text
     j = r.json()
     return j.get("access_token") or j.get("token")

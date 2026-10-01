@@ -150,29 +150,32 @@ FEATURE_LABELS = {"chat": "Chat", "meeting_moderation": "Moderator", "meeting_su
                   "persona_profile": "Profil Persona", "persona_portrait": "Potret Persona", "persona_edit": "Edit Persona", "profile_generation": "Profil Persona", "video_generation": "Video", "multi_agent_task": "Tugas Agen", "task": "Tugas"}
 
 
+def _aggregate_usage(events: list, wid: str):
+    by_user, by_feature, daily = {}, {}, {}
+    for e in events:
+        actor = (e.get("meta") or {}).get("actor_id") or wid
+        feat = e.get("feature") or "lainnya"
+        c = int(e.get("credits") or 0)
+        by_user[actor] = by_user.get(actor, 0) + c
+        by_feature[feat] = by_feature.get(feat, 0) + c
+        d = (e.get("created_at") or "")[:10]
+        daily[d] = daily.get(d, 0) + c
+    return by_user, by_feature, daily
+
+
 @router.get("/usage-report")
 async def usage_report(days: int = 30, admin: dict = Depends(require_admin)):
     from datetime import datetime, timezone, timedelta
     days = max(1, min(days, 365))
     wid = workspace_id(admin)
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(days=days)).isoformat()
     events = await db.usage_events.find({"user_id": wid, "created_at": {"$gte": since}}, {"_id": 0, "feature": 1, "credits": 1, "meta": 1, "created_at": 1}).to_list(50000)
     members = await db.users.find({"$or": [{"id": wid}, {"owner_id": wid}]}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}).to_list(500)
     names = {m["id"]: m for m in members}
-    by_user, by_feature, daily = {}, {}, {}
-    for e in events:
-        actor = (e.get("meta") or {}).get("actor_id") or wid
-        c = int(e.get("credits") or 0)
-        by_user[actor] = by_user.get(actor, 0) + c
-        by_feature[e.get("feature") or "lainnya"] = by_feature.get(e.get("feature") or "lainnya", 0) + c
-        d = (e.get("created_at") or "")[:10]
-        daily[d] = daily.get(d, 0) + c
+    by_user, by_feature, daily = _aggregate_usage(events, wid)
     users_out = sorted([{"user_id": uid, "name": names.get(uid, {}).get("name") or "Pengguna terhapus", "email": names.get(uid, {}).get("email"),
                          "role": names.get(uid, {}).get("role") or "user", "credits": c} for uid, c in by_user.items()], key=lambda x: -x["credits"])
     feat_out = sorted([{"feature": f, "label": FEATURE_LABELS.get(f, f.replace("_", " ").title()), "credits": c} for f, c in by_feature.items()], key=lambda x: -x["credits"])
-    day_list = []
-    for i in range(days - 1, -1, -1):
-        d = (datetime.now(timezone.utc) - timedelta(days=i)).date().isoformat()
-        day_list.append({"date": d, "credits": daily.get(d, 0)})
-    total = sum(by_user.values())
-    return {"days": days, "total": total, "events": len(events), "by_user": users_out, "by_feature": feat_out, "daily": day_list}
+    day_list = [{"date": d, "credits": daily.get(d, 0)} for d in ((now - timedelta(days=i)).date().isoformat() for i in range(days - 1, -1, -1))]
+    return {"days": days, "total": sum(by_user.values()), "events": len(events), "by_user": users_out, "by_feature": feat_out, "daily": day_list}

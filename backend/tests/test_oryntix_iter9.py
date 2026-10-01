@@ -1,13 +1,12 @@
 """Iteration 9 — Oryntix: voice_mode, meeting-with-1-persona, nudge, moderator interject gating."""
 import os
 import json
-import time
 import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
 ADMIN_EMAIL = "demo@aivora.ai"
-ADMIN_PASSWORD = "demo123456"
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "demo123456")
 
 
 # ---------- fixtures ----------
@@ -174,7 +173,7 @@ class TestNudge:
     def test_nudge_404_for_other_user(self, personas):
         # login as regular user and try to nudge admin's conv
         r = requests.post(f"{BASE_URL}/api/auth/login",
-                          json={"email": "budi@aivora.ai", "password": "budi123456"}, timeout=20)
+                          json={"email": "budi@aivora.ai", "password": os.environ.get("TEST_BUDI_PASSWORD", "budi123456")}, timeout=20)
         if r.status_code != 200:
             pytest.skip("budi user not available")
         tok = r.json()["access_token"]
