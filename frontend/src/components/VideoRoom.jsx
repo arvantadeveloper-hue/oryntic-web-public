@@ -6,6 +6,18 @@ import { api, API_BASE, getToken, streamChatWithAtt } from "../lib/api";
 const ME = "__me__";
 const MOD = "__moderator__";
 
+const FALLBACK_REACTIONS = ["💬", "✨", "👍", "💡", "🙌", "😄"];
+function reactionFor(text) {
+  const t = (text || "").toLowerCase();
+  if (/(haha|wkwk|lucu|😂|ngakak|kocak)/.test(t)) return "😂";
+  if (/(terima kasih|makasih|apresiasi)/.test(t)) return "🙏";
+  if (/(ide|gagasan|bagaimana kalau|usul|saran)/.test(t)) return "💡";
+  if (/(wow|hebat|luar biasa|keren banget|mantap banget)/.test(t)) return "🎉";
+  if (/(setuju|mantap|bagus|keren|oke|sip|betul|sepakat)/.test(t)) return "👍";
+  if (/(\?\s*$)|(bagaimana|apakah|kenapa|gimana)/.test(t)) return "🤔";
+  return FALLBACK_REACTIONS[Math.floor(Math.random() * FALLBACK_REACTIONS.length)];
+}
+
 function Waveform({ active, color = "#10B981" }) {
   if (!active) return null;
   return (
@@ -17,7 +29,7 @@ function Waveform({ active, color = "#10B981" }) {
   );
 }
 
-function Tile({ name, portrait, status, isMe, isMod, micLevel = 0 }) {
+function Tile({ name, portrait, status, isMe, isMod, micLevel = 0, reaction }) {
   const speaking = status === "speaking";
   const thinking = status === "thinking";
   const ring = isMe ? 1 + micLevel * 0.08 : 1;
@@ -43,6 +55,7 @@ function Tile({ name, portrait, status, isMe, isMod, micLevel = 0 }) {
         {thinking && <Loader2 size={14} className="animate-spin text-amber-300" />}
       </div>
       {speaking && <span className="absolute left-3 top-3 flex items-center gap-1 rounded-full bg-emerald-500/90 px-2 py-0.5 text-[10px] font-bold text-white"><Radio size={10} /> BICARA</span>}
+      {reaction && <span key={reaction.k} className="vr-reaction pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 text-4xl drop-shadow-lg" data-testid="vr-reaction">{reaction.e}</span>}
     </div>
   );
 }
@@ -50,6 +63,7 @@ function Tile({ name, portrait, status, isMe, isMod, micLevel = 0 }) {
 export function VideoRoom({ conv, cid, onClose, onRefresh }) {
   const members = conv.members || [];
   const [statusMap, setStatusMap] = useState({});
+  const [reactionMap, setReactionMap] = useState({});
   const [caption, setCaption] = useState(null); // {name, text}
   const [showCaption, setShowCaption] = useState(true);
   const [muted, setMuted] = useState(false);
@@ -72,6 +86,11 @@ export function VideoRoom({ conv, cid, onClose, onRefresh }) {
 
   const setStatus = (id, s) => setStatusMap((m) => ({ ...m, [id]: s }));
   const clearStatuses = () => setStatusMap({});
+  const fireReaction = (id, text) => {
+    const e = reactionFor(text);
+    setReactionMap((m) => ({ ...m, [id]: { e, k: Date.now() } }));
+    setTimeout(() => setReactionMap((m) => { const n = { ...m }; delete n[id]; return n; }), 2600);
+  };
 
   const cleanupMic = () => {
     if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
@@ -155,9 +174,9 @@ export function VideoRoom({ conv, cid, onClose, onRefresh }) {
     streamDoneRef.current = false;
     try {
       await streamChatWithAtt(cid, text, [], (ev) => {
-        if (ev.persona_id && ev.start && !ev.is_moderator) setStatus(ev.persona_id, "thinking");
-        if (ev.persona_id && ev.final && ev.content && !ev.is_moderator) {
-          queueRef.current.push({ id: ev.persona_id, name: ev.persona_name, voice: ev.voice || "nova", content: ev.content });
+        if (ev.persona_id && ev.start) setStatus(ev.persona_id, "thinking");
+        if (ev.persona_id && ev.final && ev.content) {
+          queueRef.current.push({ id: ev.persona_id, name: ev.persona_name, voice: ev.voice || (ev.is_moderator ? "onyx" : "nova"), content: ev.content, isMod: !!ev.is_moderator });
           drainQueue();
         }
       }, { moderator: false });
@@ -178,6 +197,7 @@ export function VideoRoom({ conv, cid, onClose, onRefresh }) {
     playingRef.current = true;
     const item = queueRef.current.shift();
     clearStatuses(); setStatus(item.id, "speaking"); setPhase("speaking");
+    fireReaction(item.id, item.content);
     setCaption({ name: item.name, text: item.content });
     try {
       const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: item.content.slice(0, 1500), voice: item.voice }) });
@@ -253,7 +273,7 @@ export function VideoRoom({ conv, cid, onClose, onRefresh }) {
       <div className="flex-1 overflow-y-auto px-4 pb-2 sm:px-6">
         <div className="mx-auto grid max-w-5xl gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
           {tiles.map((tl) => (
-            <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? micLevel : 0} />
+            <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? micLevel : 0} reaction={reactionMap[tl.id]} />
           ))}
         </div>
       </div>

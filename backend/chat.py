@@ -226,6 +226,30 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
             })
             yield f"data: {json.dumps({**mod_meta, 'final': True, 'message_id': msg['id'], 'content': summary})}\n\n"
 
+        # video-room: occasional live Moderator facilitation (every 2nd user turn), no notulen task
+        elif ctype == "meeting" and len(responders) > 1 and not x.moderator:
+            user_turns = await db.messages.count_documents({"conversation_id": cid, "role": "user"})
+            if user_turns % 2 == 0:
+                mod_meta = {"persona_id": "__moderator__", "persona_name": "Moderator", "portrait": None, "is_moderator": True, "moderator_kind": "interject", "voice": "onyx"}
+                yield f"data: {json.dumps({**mod_meta, 'start': True})}\n\n"
+                history = await _history_text(cid, limit=12)
+                sys = ("You are the meeting Moderator facilitating a LIVE discussion. In 1-2 short sentences only, gently "
+                       "steer the conversation: acknowledge a key point, ask one sharp follow-up question, or invite a "
+                       "specific participant to respond by name. Warm, concise, natural. Do NOT summarize everything. "
+                       "Reply in the user's language (Indonesian by default).")
+                inter = await llm_text(sys, f"Peserta: {', '.join(roster)}\n\nDiskusi terakhir:\n{history}\n\nModerator (singkat):")
+                for i, w in enumerate(inter.split(" ")):
+                    yield f"data: {json.dumps({**mod_meta, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
+                    await asyncio.sleep(0.008)
+                used = text_credits(history, inter)
+                total += used
+                await record_usage(u["id"], "meeting_moderation", used, {"conversation_id": cid})
+                imsg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": inter,
+                        "persona_id": "__moderator__", "persona_name": "Moderator", "is_moderator": True,
+                        "portrait": None, "credits": used, "created_at": now_iso()}
+                await db.messages.insert_one(dict(imsg))
+                yield f"data: {json.dumps({**mod_meta, 'final': True, 'message_id': imsg['id'], 'content': inter})}\n\n"
+
         bal = (await db.users.find_one({"id": u["id"]}))["credits"]
         await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso(), "last_message": x.content[:120]}})
         yield f"data: {json.dumps({'done': True, 'credits_used': total, 'credits': bal})}\n\n"
