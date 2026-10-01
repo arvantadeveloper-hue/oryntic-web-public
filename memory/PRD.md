@@ -136,7 +136,16 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - `migrate_workspace()` saat startup: semua akun dengan `owner_id == id` dipromosikan ke admin (idempoten; berlaku juga di produksi).
 - Verified via curl: register → role admin, akses /api/admin/workspace-users 200; budi tetap user.
 
+## Update 2026-06 (o) — Paket percobaan 7 hari, mesin tarif platform (margin 30%), pemisahan Platform Admin
+- **Trial**: register → `plan:"trial"`, kredit 700, `daily_credit_limit` 100, `trial_ends_at` +7 hari (konfigurasi `config.trial_config` via `PUT /api/admin/trial`). `quota_exceeded` berlaku untuk owner trial (kuota harian; lewat `trial_ends_at` → 402 "Masa percobaan ... berakhir"). Topup (simulasi) → `plan:"paid"`, limit 0. `TrialBanner` di Home & Kredit.
+- **Mesin tarif** (`backend/pricing.py`): satu config `platform_pricing` (margin 30%, PPN 11%, kurs, nilai kredit, biaya provider USD per fitur). `RATES` (cache 30 dtk, refresh paksa saat PUT) dipakai `text_credits`, `rate("image"|"profile"|"stt"|"tts")`, dan realtime `credits_per_min`. Default dikalibrasi ke tarif lama (2/1k char, 25, 8, 5, 4, 75). Admin: `GET/PUT /api/admin/pricing`, kartu "Tarif & Margin Platform".
+- **Platform Admin** = `ADMIN_EMAIL` (admin@aivora.ai): `require_platform_admin` untuk overview/users/tasks/pricing/trial/realtime-pricing/rate-limits; `public_user.is_platform_admin`; nav/route `/admin` hanya untuk platform admin. Pemilik workspace lain tetap Team/Kredit/usage-report (scoped).
+- Email verification: **ditunda** atas permintaan user (butuh penyedia email).
+- Tested: iteration_14 — backend 10/10, FE 100%.
+
 ## Next tasks
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
+- Verifikasi email saat daftar (ditunda; perlu Resend/SendGrid key).
+- Re-publish agar trial/platform-admin aktif di produksi; set ADMIN_EMAIL/ADMIN_PASSWORD produksi.
 - (P3) CORS pin untuk produksi; rate limit lintas-instance (Redis) bila dideploy multi-replica.
 - (Backlog P1) Payment gateway nyata; (P2) kamera WebRTC antar-manusia (ditunda);

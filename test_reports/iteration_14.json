@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 14 validated the Trial plan + Platform-admin separation + Pricing/Trial admin APIs end-to-end. All 10 backend pytest cases pass. Frontend flows verified: fresh self-register → onboarding (onboard-agree + 'Mulai menggunakan Oryntix') → Home shows trial-banner with 'Paket percobaan · 7 hari lagi' and 'Kuota 100 kredit/hari', trial-upgrade-btn navigates to /wallet where the banner also renders; sidebar shows 'Workspace Owner · Trial'; nav-admin hidden, nav-team visible. Demo (workspace admin) login: nav-admin hidden and direct /admin redirects to /home. Platform admin login: nav-admin visible, /admin → Pricing tab exposes platform-pricing-card (10 pp-* inputs + pp-rates + pp-save), trial-card (trial-trial_days/daily_limit/credits + trial-save), realtime-pricing-card, rate-limits-card; editing trial_credits=800 → save shows toast 'Paket percobaan disimpan' and persists after reload; restored to 700. Smoke: demo /home and /chat render cleanly.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_oryntix_iter14.py",
+    "/app/test_reports/pytest/iter14_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "pricing.py compute_rates: realtime_per_min at margin 50 yields ceil(85.84)=86, but spec example says 87. The code's ceil math is correct; the spec note is slightly off (minor). Test accepts {86,87}.",
+    "auth.py register: trial defaults are hydrated from get_trial() each time — good; new users immediately pick up PUT /admin/trial changes.",
+    "llm.quota_exceeded: admins on non-trial plan bypass all limits (returns None). Trial admin whose trial_ends_at has passed is correctly blocked with trial_expired flag → quota_message yields the Indonesian 'Masa percobaan workspace Anda telah berakhir...' string as required.",
+    "wallet.topup: forces plan='paid' and daily_credit_limit=0 for any package — intended behavior for simulated topup; after topup trial expiry check is bypassed because plan!=trial.",
+    "admin.py require_platform_admin applied to /overview /users /tasks /pricing (GET+PUT) /trial /rate-limits /realtime-pricing — correctly gates demo@aivora.ai with 403 while leaving /workspace-users and /usage-report accessible to any workspace admin."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_oryntix_iter14.py"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (all targeted flows verified)"},
+  "test_credentials": "demo@aivora.ai/demo123456 (workspace admin), admin@aivora.ai/Aivora!Admin2026 (platform admin). Trial users created on the fly via /api/auth/register with uuid-prefixed emails; module-level cleanup fixture deletes trial_*@aivora.ai docs.",
+  "seed_data_creation": "Created transient trial users (prefix trial_) + 1 persona + 1 private conversation per expiry test; cleaned by autouse session fixture that drops trial_*@aivora.ai from users collection.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 14 covers: trial registration (role admin, plan trial, 700/100/7d), platform-admin guards on /api/admin/overview|users|tasks|pricing|rate-limits|realtime-pricing + PUT /trial, GET /admin/pricing shape + rate recomputation via margin bump, PUT /admin/trial affects new registrations, trial expiry 402 'Masa percobaan' then simulated topup → plan paid daily_limit 0. Frontend: TrialBanner, nav-admin visibility, Admin Pricing tab cards (platform-pricing-card, trial-card, realtime-pricing-card, rate-limits-card). Onboarding submit requires data-testid=onboard-agree click BEFORE clicking 'Mulai menggunakan Oryntix' button (there is no data-testid on that button; use text selector).",
+  "rca of the issue": "N/A — no bugs found."
+}

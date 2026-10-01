@@ -8,7 +8,7 @@ from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpee
 import io
 from datetime import datetime, timezone
 
-from pricing import RATES, rate
+from pricing import RATES
 from db import db, now_iso, new_id
 
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]

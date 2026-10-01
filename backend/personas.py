@@ -4,7 +4,8 @@ from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
 from auth import current_user, require_admin, workspace_id
-from llm import llm_json, generate_image, record_usage, text_credits, rate, MODEL_CATALOG, DEFAULT_MODEL_KEY
+from llm import llm_json, generate_image, record_usage, text_credits, MODEL_CATALOG, DEFAULT_MODEL_KEY
+from pricing import rate
 from ratelimit import rate_limit
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])

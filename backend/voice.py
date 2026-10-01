@@ -4,7 +4,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from auth import current_user
-from llm import transcribe_audio, synthesize_speech, record_usage, rate
+from llm import transcribe_audio, synthesize_speech, record_usage
+from pricing import rate
 from ratelimit import rate_limit
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
