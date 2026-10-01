@@ -119,7 +119,12 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Fix: transkrip agen di-flush saat keluar/hangup (RealtimeCall & RealtimeMeeting) + fallback `response.done`; fallback kembali ke "mendengarkan" bila VAD terpicu tanpa transkrip (7 dtk).
 - Tested: iteration_12 — backend 6/6, FE 100% (meeting 2 agen tersambung nyata, Rio menyapa dalam Bahasa Indonesia; billing 2 sesi). **Belum bisa diuji otomatis**: kualitas sela & giliran multi-agen dengan ucapan nyata (butuh mikrofon user).
 
+## Update 2026-06 (l) — Moderator bersuara di Realtime Meeting, Laporan Pemakaian
+- **Moderator Realtime** (TTS, bukan sesi Realtime tambahan → hemat): `POST /api/conversations/{cid}/moderate {reason: silence|stuck}` → `_moderator_text()` (dipakai juga oleh `_moderator_interject`) → `{content|null, voice:"onyx"}`. `stuck` hanya bila user_turns ≥ 2 dan `_is_stuck()` YES; `silence` bila user_turns ≥ 1. Di `RealtimeMeeting.jsx`: tile Moderator; setelah semua agen selesai menjawab (giliran ≥ 2) → cek `stuck`; hening 20 dtk → `silence` (sekali per periode hening); teks Moderator disuntikkan ke semua sesi agen sebagai `[Moderator]: ...`; user bicara → audio Moderator dihentikan.
+- **Laporan Pemakaian** (`GET /api/admin/usage-report?days=7|30|90`, `components/UsageReport.jsx` di halaman Team): total, rata-rata/hari, aktivitas, paling boros; grafik per anggota (bar, atribusi `meta.actor_id`), per fitur (donut + legenda label Indonesia `FEATURE_LABELS`), tren harian (area). Recharts.
+- Tested: iteration_13 — backend 10/10, FE 100%. Uji suara nyata (sela, sebut nama, Moderator menyela) tetap perlu mikrofon user.
+
 ## Next tasks
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
 - (P3) CORS pin untuk produksi; rate limit lintas-instance (Redis) bila dideploy multi-replica.
-- (Backlog P1) Payment gateway nyata; (P2) kamera WebRTC antar-manusia (ditunda); Moderator "buntu"/hening untuk RealtimeMeeting.
+- (Backlog P1) Payment gateway nyata; (P2) kamera WebRTC antar-manusia (ditunda);

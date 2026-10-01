@@ -33,10 +33,13 @@ export function UsageReport() {
           <h2 className="text-lg font-bold text-slate-900">Laporan Pemakaian Kredit</h2>
           <p className="text-xs text-slate-500">Siapa dan fitur apa yang paling banyak memakai kredit workspace.</p>
         </div>
-        <div className="flex gap-1 rounded-xl border border-[#E6EAF2] bg-white p-1">
+        <div className="flex items-center gap-2">
+          {loading && data && <Loader2 size={14} className="animate-spin text-[#2F6BFF]" data-testid="usage-loading" />}
+          <div className="flex gap-1 rounded-xl border border-[#E6EAF2] bg-white p-1">
           {[7, 30, 90].map((d) => (
             <button key={d} onClick={() => setDays(d)} data-testid={`usage-range-${d}`} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${days === d ? "bg-[#2F6BFF] text-white" : "text-slate-600 hover:bg-slate-50"}`}>{d} hari</button>
           ))}
+          </div>
         </div>
       </div>
 
