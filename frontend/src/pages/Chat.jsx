@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff } from "lucide-react";
+import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { api, streamChat, API_BASE, getToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -41,6 +41,7 @@ export default function Chat() {
   const [recording, setRecording] = useState(false);
   const [speaker, setSpeaker] = useState(false);
   const [callOpen, setCallOpen] = useState(false);
+  const [showConvList, setShowConvList] = useState(false);
   const endRef = useRef(null);
   const fileRef = useRef(null);
   const recRef = useRef(null);
@@ -143,38 +144,57 @@ export default function Chat() {
 
   const isMulti = conv && conv.type !== "private";
 
+  const convListInner = (onNavigate) => (
+    <div className="flex h-full flex-col p-4">
+      <button onClick={() => { openModal(); onNavigate && onNavigate(); }} data-testid="new-chat-btn" className="btn-grad mb-4 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm"><Plus size={16} /> {t("chat.new")}</button>
+      <div className="relative mb-3">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input className="input-dark py-2 pl-9" placeholder={t("common.search")} value={q} onChange={(e) => { setQ(e.target.value); loadConvs(e.target.value); }} data-testid="chat-search" />
+      </div>
+      <div className="flex-1 space-y-1 overflow-y-auto">
+        {convs.map((c) => (
+          <div key={c.id} onClick={() => { nav(`/chat/${c.id}`); onNavigate && onNavigate(); }} data-testid={`conv-${c.id}`}
+            className={`group flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${c.id === id ? "bg-[#EEF3FF] text-[#2F6BFF]" : "text-slate-600 hover:bg-slate-50"}`}>
+            {c.type === "meeting" ? <Gavel size={15} className="shrink-0" /> : c.type === "group" ? <Users size={15} className="shrink-0" /> : <User size={15} className="shrink-0" />}
+            <span className="flex-1 truncate">{c.title}</span>
+            <button onClick={(e) => delConv(c, e)} className="text-slate-400 transition hover:text-[#EF4444] md:opacity-0 md:group-hover:opacity-100"><Trash2 size={13} /></button>
+          </div>
+        ))}
+        {convs.length === 0 && <p className="px-2 py-4 text-center text-xs text-slate-400">Belum ada percakapan.</p>}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex h-[calc(100vh-4rem)]" data-testid="chat-page">
-      <div className="hidden w-72 shrink-0 flex-col border-r border-[#E7ECF3] bg-white p-4 md:flex">
-        <button onClick={openModal} data-testid="new-chat-btn" className="btn-grad mb-4 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm"><Plus size={16} /> {t("chat.new")}</button>
-        <div className="relative mb-3">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input className="input-dark py-2 pl-9" placeholder={t("common.search")} value={q} onChange={(e) => { setQ(e.target.value); loadConvs(e.target.value); }} data-testid="chat-search" />
-        </div>
-        <div className="flex-1 space-y-1 overflow-y-auto">
-          {convs.map((c) => (
-            <div key={c.id} onClick={() => nav(`/chat/${c.id}`)} data-testid={`conv-${c.id}`}
-              className={`group flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${c.id === id ? "bg-[#EEF3FF] text-[#2F6BFF]" : "text-slate-600 hover:bg-slate-50"}`}>
-              {c.type === "meeting" ? <Gavel size={15} className="shrink-0" /> : c.type === "group" ? <Users size={15} className="shrink-0" /> : <User size={15} className="shrink-0" />}
-              <span className="flex-1 truncate">{c.title}</span>
-              <button onClick={(e) => delConv(c, e)} className="opacity-0 transition group-hover:opacity-100 text-slate-400 hover:text-[#EF4444]"><Trash2 size={13} /></button>
-            </div>
-          ))}
-        </div>
+      <div className="hidden w-72 shrink-0 border-r border-[#E7ECF3] bg-white md:block">
+        {convListInner()}
       </div>
 
-      <div className="flex flex-1 flex-col bg-[#F8FAFC]">
-        <div className="flex items-center gap-3 border-b border-[#E7ECF3] bg-white px-5 py-3">
+      {/* mobile conversations drawer */}
+      {showConvList && (
+        <div className="fixed inset-0 z-[88] md:hidden" data-testid="mobile-conv-drawer">
+          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowConvList(false)} />
+          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl">
+            <button className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-500 shadow" onClick={() => setShowConvList(false)}><X size={16} /></button>
+            {convListInner(() => setShowConvList(false))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col bg-[#F8FAFC]">
+        <div className="flex items-center gap-2 border-b border-[#E7ECF3] bg-white px-3 py-3 sm:gap-3 sm:px-5">
+          <button onClick={() => setShowConvList(true)} data-testid="mobile-conv-btn" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#E7ECF3] text-slate-500 md:hidden"><MessageSquare size={17} /></button>
           {conv ? (
             <>
               <div className="flex -space-x-2">{(conv.members || []).slice(0, 4).map((m) => <div key={m.id} className="rounded-full ring-2 ring-white"><Avatar name={m.name} portrait={m.portrait} size={32} /></div>)}</div>
-              <div><p className="text-sm font-bold text-slate-900">{conv.title}</p>
-                <p className="text-xs text-slate-400">{conv.type === "meeting" ? `Meeting · ${conv.members?.length} asisten + Moderator` : conv.type === "group" ? `Grup · ${conv.members?.length} asisten` : "Chat privat"}</p></div>
+              <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{conv.title}</p>
+                <p className="truncate text-xs text-slate-400">{conv.type === "meeting" ? `Meeting · ${conv.members?.length} asisten + Moderator` : conv.type === "group" ? `Grup · ${conv.members?.length} asisten` : "Chat privat"}</p></div>
             </>
-          ) : <p className="text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
+          ) : <p className="truncate text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
           {conv && (
-            <div className="ml-auto flex items-center gap-2">
-              {conv.type === "private" && <button onClick={() => setCallOpen(true)} title="Mode panggilan suara" data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-3 text-xs font-semibold text-white"><Phone size={15} /> Panggil</button>}
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              {conv.type === "private" && <button onClick={() => setCallOpen(true)} title="Mode panggilan suara" data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil</span></button>}
               <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
             </div>
           )}
@@ -320,19 +340,53 @@ async function streamChatWithAtt(cid, content, attachments, onEvent) {
 function CallMode({ conv, cid, onClose, onRefresh }) {
   const member = (conv.members || [])[0] || {};
   const [status, setStatus] = useState("idle"); // idle | listening | thinking | speaking
+  const [level, setLevel] = useState(0); // live mic level 0..1 for the visualizer
   const recRef = useRef(null);
   const audioRef = useRef(null);
   const openRef = useRef(true);
+  const acRef = useRef(null);
+  const monitorRef = useRef(null);
+  const streamRef = useRef(null);
 
-  useEffect(() => { openRef.current = true; return () => { openRef.current = false; try { recRef.current?.stop(); } catch (e) {} try { audioRef.current?.pause(); } catch (e) {} }; }, []);
+  const VOICE_THRESHOLD = 0.045;      // RMS above this = speaking
+  const SILENCE_AFTER_SPEECH_MS = 1400; // auto-send after this much silence following speech
+  const MAX_IDLE_MS = 12000;          // no speech at all for this long -> end call
+
+  const cleanupAudio = () => {
+    if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
+    try { acRef.current?.close(); } catch (e) {}
+    acRef.current = null;
+    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch (e) {}
+    streamRef.current = null;
+  };
+
+  useEffect(() => {
+    openRef.current = true;
+    return () => {
+      openRef.current = false;
+      try { recRef.current?.stop(); } catch (e) {}
+      try { audioRef.current?.pause(); } catch (e) {}
+      cleanupAudio();
+    };
+  }, []);
+
+  const endCall = () => { openRef.current = false; try { recRef.current?.stop(); } catch (e) {} cleanupAudio(); toast.message("Panggilan diakhiri (tidak ada suara)."); onClose(); };
 
   const startListening = async () => {
+    if (!openRef.current) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       const mr = new MediaRecorder(stream); recRef.current = mr; const chunks = [];
       mr.ondataavailable = (ev) => chunks.push(ev.data);
       mr.onstop = async () => {
+        if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
+        try { acRef.current?.close(); } catch (e) {}
+        acRef.current = null;
         stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        setLevel(0);
+        if (!openRef.current) return;
         setStatus("thinking");
         const blob = new Blob(chunks, { type: "audio/webm" });
         const reader = new FileReader();
@@ -356,27 +410,62 @@ function CallMode({ conv, cid, onClose, onRefresh }) {
         reader.readAsDataURL(blob);
       };
       mr.start(); setStatus("listening");
+
+      // --- Voice Activity Detection on the same stream ---
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const ac = new AC(); acRef.current = ac;
+      const src = ac.createMediaStreamSource(stream);
+      const analyser = ac.createAnalyser(); analyser.fftSize = 1024;
+      src.connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+      const startedAt = Date.now();
+      let speechStarted = false;
+      let lastVoiceAt = Date.now();
+      monitorRef.current = setInterval(() => {
+        if (!openRef.current) return;
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
+        const rms = Math.sqrt(sum / buf.length);
+        setLevel(Math.min(1, rms * 6));
+        const now = Date.now();
+        if (rms > VOICE_THRESHOLD) { speechStarted = true; lastVoiceAt = now; }
+        // End the call if the user never speaks for a while
+        if (!speechStarted && now - startedAt > MAX_IDLE_MS) { endCall(); return; }
+        // Auto-send once the user has spoken and then goes silent
+        if (speechStarted && now - lastVoiceAt > SILENCE_AFTER_SPEECH_MS) {
+          if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
+          try { mr.state !== "inactive" && mr.stop(); } catch (e) {}
+        }
+      }, 120);
     } catch (e) { setStatus("idle"); }
   };
 
   useEffect(() => { startListening(); /* auto start */ /* eslint-disable-next-line */ }, []);
 
-  const stopTurn = () => { try { recRef.current?.stop(); } catch (e) {} };
-  const label = { idle: "Menyiapkan...", listening: "Mendengarkan — bicara lalu tekan Kirim", thinking: "Memproses...", speaking: "Berbicara..." }[status];
+  const sendNow = () => { if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; } try { recRef.current?.state !== "inactive" && recRef.current?.stop(); } catch (e) {} };
+  const label = {
+    idle: "Menyiapkan mikrofon...",
+    listening: "Mendengarkan — bicara, saya kirim otomatis saat Anda berhenti",
+    thinking: "Memproses...",
+    speaking: "Berbicara...",
+  }[status];
+
+  const ringScale = status === "listening" ? 1 + level * 0.18 : 1;
 
   return (
     <div className="fixed inset-0 z-[95] flex items-center justify-center p-4" data-testid="call-mode-overlay">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
-      <div className="relative w-full max-w-sm rounded-3xl border border-[#E7ECF3] bg-white p-8 text-center shadow-2xl fade-up">
+      <div className="relative w-full max-w-sm rounded-3xl border border-[#E7ECF3] bg-white p-6 text-center shadow-2xl fade-up sm:p-8">
         <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-[#10B981]">Panggilan suara</p>
-        <div className={`mx-auto mb-5 h-28 w-28 overflow-hidden rounded-full ${status === "listening" ? "glow-ring" : ""}`} style={{ border: "3px solid #10B981" }}>
+        <div className={`mx-auto mb-5 h-28 w-28 overflow-hidden rounded-full transition-transform ${status === "listening" ? "glow-ring" : ""}`} style={{ border: "3px solid #10B981", transform: `scale(${ringScale})` }}>
           {member.portrait ? <img src={member.portrait} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-3xl font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(member.name || "?")[0]}</span>}
         </div>
-        <h2 className="text-2xl font-bold text-slate-900">{member.name}</h2>
-        <p className="mt-2 text-sm text-slate-500">{label}</p>
-        <div className="mt-8 flex items-center justify-center gap-6">
-          <button onClick={stopTurn} disabled={status !== "listening"} data-testid="call-send-turn" className="flex h-14 w-14 items-center justify-center rounded-full bg-[#2F6BFF] text-white disabled:opacity-40"><Send size={22} /></button>
-          <button onClick={onClose} data-testid="call-hangup" className="flex h-16 w-16 items-center justify-center rounded-full bg-[#EF4444] text-white"><PhoneOff size={26} /></button>
+        <h2 className="truncate text-2xl font-bold text-slate-900">{member.name}</h2>
+        <p className="mx-auto mt-2 min-h-[2.5rem] max-w-[17rem] text-sm text-slate-500">{label}</p>
+        <div className="mt-6 flex items-center justify-center gap-6">
+          <button onClick={sendNow} disabled={status !== "listening"} data-testid="call-send-turn" title="Kirim sekarang" className="flex h-14 w-14 items-center justify-center rounded-full bg-[#2F6BFF] text-white transition disabled:opacity-40"><Send size={22} /></button>
+          <button onClick={() => { openRef.current = false; cleanupAudio(); onClose(); }} data-testid="call-hangup" title="Akhiri panggilan" className="flex h-16 w-16 items-center justify-center rounded-full bg-[#EF4444] text-white transition hover:brightness-105"><PhoneOff size={26} /></button>
         </div>
       </div>
     </div>

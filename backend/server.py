@@ -15,6 +15,8 @@ from wallet import router as wallet_router
 from admin import router as admin_router
 from models import router as models_router
 from voice import router as voice_router
+from files import router as files_router
+from storage import init_storage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("aivora")
@@ -36,6 +38,7 @@ app.include_router(wallet_router)
 app.include_router(admin_router)
 app.include_router(models_router)
 app.include_router(voice_router)
+app.include_router(files_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,6 +64,11 @@ async def _scheduler_loop():
 async def startup():
     await ensure_indexes()
     await seed_admin()
+    try:
+        await asyncio.to_thread(init_storage)
+        logger.info("Object storage initialized")
+    except Exception as e:
+        logger.error(f"Object storage init failed: {e}")
     global _scheduler_task
     _scheduler_task = asyncio.create_task(_scheduler_loop())
     logger.info("Aivora API started")

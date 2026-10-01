@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Sparkles, Image as ImageIcon, Layers, ArrowLeft, Upload, Wand2, Check } from "lucide-react";
+import { Sparkles, Image as ImageIcon, Layers, ArrowLeft, Upload, Wand2, Check, Volume2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../lib/api";
+import { api, API_BASE, getToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 
@@ -11,6 +11,13 @@ const METHODS = [
   { id: "photo", icon: ImageIcon, title: "Upload a Photo", desc: "Unggah foto sebagai referensi penampilan." },
   { id: "combine", icon: Layers, title: "Combine Both", desc: "Foto + instruksi teks untuk kontrol penuh." },
 ];
+
+const VOICE_LABELS = {
+  alloy: "Netral & seimbang", nova: "Hangat & ramah", shimmer: "Lembut & cerah",
+  echo: "Tenang & jernih", fable: "Ekspresif & bercerita", onyx: "Dalam & berwibawa",
+  coral: "Ceria & bersahabat", sage: "Bijak & menenangkan", ash: "Mantap & percaya diri",
+};
+const VOICE_SAMPLE = "Halo, senang berkenalan dengan Anda. Saya siap membantu kapan saja.";
 
 export default function CreatePersona() {
   const nav = useNavigate();
@@ -25,8 +32,30 @@ export default function CreatePersona() {
   const [busy, setBusy] = useState(false);
   const [models, setModels] = useState([]);
   const [modelKey, setModelKey] = useState("gpt-terra");
+  const [voices, setVoices] = useState([]);
+  const [voice, setVoice] = useState("nova");
+  const [previewing, setPreviewing] = useState(null);
+  const previewAudioRef = useRef(null);
 
   useEffect(() => { api.get("/models").then((r) => { setModels(r.data.models); setModelKey(r.data.default); }).catch(() => {}); }, []);
+  useEffect(() => { api.get("/voice/voices").then((r) => setVoices(r.data.voices || [])).catch(() => {}); }, []);
+  useEffect(() => () => { try { previewAudioRef.current?.pause(); } catch (e) {} }, []);
+
+  const previewVoice = async (v) => {
+    try { previewAudioRef.current?.pause(); } catch (e) {}
+    setPreviewing(v);
+    try {
+      const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: VOICE_SAMPLE, voice: v }) });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const a = new Audio(URL.createObjectURL(blob));
+      previewAudioRef.current = a;
+      a.onended = () => setPreviewing(null);
+      a.onerror = () => setPreviewing(null);
+      await a.play();
+      refreshUser();
+    } catch (e) { setPreviewing(null); toast.error("Gagal memutar contoh suara"); }
+  };
 
   const onFile = (e) => {
     const f = e.target.files?.[0];
@@ -59,7 +88,7 @@ export default function CreatePersona() {
   const saveAndPortrait = async () => {
     setBusy(true);
     try {
-      const r = await api.post("/personas", { profile, reference_photo: photo || null, model: modelKey });
+      const r = await api.post("/personas", { profile, reference_photo: photo || null, model: modelKey, voice });
       const pid = r.data.id;
       toast.success("Persona disimpan, membuat potret...");
       try {
@@ -147,6 +176,31 @@ export default function CreatePersona() {
                     <span><span className="block text-sm font-bold text-slate-900">{m.label}</span>
                       <span className="block text-xs text-slate-400">{m.tagline}</span></span>
                   </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Suara Persona (TTS)</label>
+            <p className="mb-2 text-xs text-slate-400">Pilih suara untuk jawaban audio & mode panggilan. Tekan ikon untuk mendengar contoh.</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {voices.map((v) => {
+                const on = voice === v;
+                return (
+                  <div key={v} data-testid={`voice-${v}`}
+                    className={`flex items-center gap-2 rounded-xl border p-3 transition ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3] hover:bg-slate-50"}`}>
+                    <button type="button" onClick={() => setVoice(v)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${on ? "btn-grad border-transparent" : "border-slate-300"}`}>{on && <Check size={10} />}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-bold capitalize text-slate-900">{v}</span>
+                        <span className="block truncate text-xs text-slate-400">{VOICE_LABELS[v] || "Suara"}</span>
+                      </span>
+                    </button>
+                    <button type="button" onClick={() => previewVoice(v)} data-testid={`voice-preview-${v}`}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#E7ECF3] text-[#2F6BFF] hover:bg-[#EEF3FF]" title="Dengar contoh">
+                      {previewing === v ? <Loader2 size={15} className="animate-spin" /> : <Volume2 size={15} />}
+                    </button>
+                  </div>
                 );
               })}
             </div>

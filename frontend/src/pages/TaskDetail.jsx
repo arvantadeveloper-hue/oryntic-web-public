@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Download, Copy, CheckCircle2, Loader2, Clock, XCircle } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../lib/api";
+import { api, API_BASE, getToken } from "../lib/api";
 import { Markdown } from "../components/Markdown";
 import { Mark } from "../components/Logo";
 
@@ -79,8 +79,8 @@ export default function TaskDetail() {
               <button onClick={exportMd} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600" data-testid="export-output"><Download size={13} /> Ekspor .md</button>
             </div>
           </div>
-          {task.video_url && (
-            <video src={task.video_url} controls className="mb-3 w-full rounded-2xl border border-[#E7ECF3]" data-testid="task-video" />
+          {(task.video_path || task.video_url) && (
+            <video src={task.video_path ? `${API_BASE}/files/${task.video_path}?auth=${getToken()}` : task.video_url} controls className="mb-3 w-full rounded-2xl border border-[#E7ECF3]" data-testid="task-video" />
           )}
           <div className="aivora-card p-6" data-testid="final-output"><Markdown content={task.final_output} /></div>
           <p className="mt-3 text-right text-xs text-slate-500">Total: {task.credits_used} kredit</p>
