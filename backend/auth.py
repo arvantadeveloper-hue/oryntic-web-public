@@ -1,0 +1,185 @@
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Optional
+
+import bcrypt
+import jwt
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, EmailStr, Field
+
+from db import db, now_iso, new_id
+
+JWT_SECRET = os.environ["JWT_SECRET"]
+JWT_ISSUER = "aivora-api"
+ACCESS_DAYS = 7
+STARTING_CREDITS = 500
+
+router = APIRouter(prefix="/api/auth", tags=["auth"])
+bearer = HTTPBearer(auto_error=False)
+
+
+# ---------- helpers ----------
+def pw_hash(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+
+
+def pw_ok(password: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
+def make_token(user_id: str, role: str) -> str:
+    t = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "sub": user_id,
+            "role": role,
+            "iss": JWT_ISSUER,
+            "iat": t,
+            "exp": t + timedelta(days=ACCESS_DAYS),
+        },
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+
+
+def public_user(u: dict) -> dict:
+    return {
+        "id": u["id"],
+        "email": u["email"],
+        "name": u.get("name"),
+        "role": u.get("role", "user"),
+        "onboarded": u.get("onboarded", False),
+        "settings": u.get("settings", {}),
+        "credits": u.get("credits", 0),
+    }
+
+
+# ---------- models ----------
+class RegisterIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=72)
+    name: Optional[str] = None
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=72)
+
+
+class OnboardIn(BaseModel):
+    name: Optional[str] = None
+    app_language: str = "id"
+    conversation_language: str = "id"
+    timezone: str = "Asia/Jakarta"
+    voice: Optional[str] = None
+    interests: Optional[str] = None
+
+
+# ---------- dependency ----------
+async def current_user(
+    creds: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer)]
+) -> dict:
+    if not creds:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        p = jwt.decode(
+            creds.credentials,
+            JWT_SECRET,
+            algorithms=["HS256"],
+            issuer=JWT_ISSUER,
+            options={"require": ["sub", "exp", "iat", "iss"]},
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(401, "Invalid or expired token")
+    u = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
+    if not u:
+        raise HTTPException(401, "User not found")
+    return u
+
+
+async def require_admin(u: dict = Depends(current_user)) -> dict:
+    if u.get("role") != "admin":
+        raise HTTPException(403, "Admin access required")
+    return u
+
+
+# ---------- routes ----------
+@router.post("/register")
+async def register(x: RegisterIn):
+    email = str(x.email).lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(409, "Email already registered")
+    uid = new_id()
+    doc = {
+        "id": uid,
+        "email": email,
+        "password_hash": pw_hash(x.password),
+        "name": x.name or email.split("@")[0],
+        "role": "user",
+        "onboarded": False,
+        "verified": True,
+        "credits": STARTING_CREDITS,
+        "settings": {
+            "app_language": "id",
+            "conversation_language": "id",
+            "timezone": "Asia/Jakarta",
+            "theme": "dark",
+        },
+        "created_at": now_iso(),
+    }
+    await db.users.insert_one(doc)
+    await db.credit_transactions.insert_one({
+        "id": new_id(), "user_id": uid, "type": "grant", "amount": STARTING_CREDITS,
+        "balance_after": STARTING_CREDITS, "description": "Welcome bonus", "created_at": now_iso(),
+    })
+    return {"access_token": make_token(uid, "user"), "user": public_user(doc)}
+
+
+@router.post("/login")
+async def login(x: LoginIn):
+    u = await db.users.find_one({"email": str(x.email).lower()})
+    if not u or not pw_ok(x.password, u["password_hash"]):
+        raise HTTPException(401, "Incorrect email or password")
+    return {"access_token": make_token(u["id"], u.get("role", "user")), "user": public_user(u)}
+
+
+@router.get("/me")
+async def me(u: dict = Depends(current_user)):
+    return public_user(u)
+
+
+@router.post("/onboard")
+async def onboard(x: OnboardIn, u: dict = Depends(current_user)):
+    settings = u.get("settings", {})
+    settings.update({
+        "app_language": x.app_language,
+        "conversation_language": x.conversation_language,
+        "timezone": x.timezone,
+        "voice": x.voice,
+        "interests": x.interests,
+    })
+    update = {"onboarded": True, "settings": settings}
+    if x.name:
+        update["name"] = x.name
+    await db.users.update_one({"id": u["id"]}, {"$set": update})
+    u2 = await db.users.find_one({"id": u["id"]}, {"_id": 0})
+    return public_user(u2)
+
+
+async def seed_admin():
+    email = os.environ["ADMIN_EMAIL"].lower()
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        return
+    uid = new_id()
+    await db.users.insert_one({
+        "id": uid, "email": email, "password_hash": pw_hash(os.environ["ADMIN_PASSWORD"]),
+        "name": "Aivora Admin", "role": "admin", "onboarded": True, "verified": True,
+        "credits": 100000,
+        "settings": {"app_language": "en", "conversation_language": "en", "timezone": "Asia/Jakarta", "theme": "dark"},
+        "created_at": now_iso(),
+    })

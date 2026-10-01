@@ -1,0 +1,57 @@
+import axios from "axios";
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+export const API_BASE = `${BACKEND_URL}/api`;
+
+export const api = axios.create({ baseURL: API_BASE });
+
+export function setAuthToken(token) {
+  if (token) {
+    api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+    localStorage.setItem("aivora_token", token);
+  } else {
+    delete api.defaults.headers.common["Authorization"];
+    localStorage.removeItem("aivora_token");
+  }
+}
+
+const saved = localStorage.getItem("aivora_token");
+if (saved) api.defaults.headers.common["Authorization"] = `Bearer ${saved}`;
+
+export function getToken() {
+  return localStorage.getItem("aivora_token");
+}
+
+// Streaming chat via fetch (SSE)
+export async function streamChat(conversationId, content, onDelta, onDone) {
+  const res = await fetch(`${API_BASE}/conversations/${conversationId}/send`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok || !res.body) throw new Error("stream failed");
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split("\n\n");
+    buffer = events.pop();
+    for (const ev of events) {
+      const line = ev.split("\n").find((l) => l.startsWith("data: "));
+      if (!line) continue;
+      const data = line.slice(6);
+      if (data === "[DONE]") continue;
+      try {
+        const obj = JSON.parse(data);
+        if (obj.delta !== undefined) onDelta(obj.delta);
+        if (obj.done) onDone && onDone(obj);
+      } catch (e) {}
+    }
+  }
+}

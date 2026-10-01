@@ -1,0 +1,126 @@
+{
+  "project_info": {
+    "name": "Aivora",
+    "product_name": "Persona AI",
+    "tagline": "Your AI, in your corner.",
+    "theme": "Premium Dark Mode (Deep Navy Base) with Blue to Purple Gradient Accents + Light Theme support",
+    "languages": ["English", "Indonesian"],
+    "brand_logos": {
+      "horizontal_light": "https://customer-assets-cm19k8pv.emergentagent.net/job_ai-companion-test-5/artifacts/qokjecym_Aivora_Horizontal_Light_Logo.png",
+      "primary_dark": "https://customer-assets-cm19k8pv.emergentagent.net/job_ai-companion-test-5/artifacts/zfh3gxgw_Aivora_Primary_Dark_Logo.png",
+      "logo_variations": "https://customer-assets-cm19k8pv.emergentagent.net/job_ai-companion-test-5/artifacts/i3ngo81h_Aivora_Logo_Variations.png",
+      "standalone_mark": "https://customer-assets-cm19k8pv.emergentagent.net/job_ai-companion-test-5/artifacts/7x1kdqac_Aivora_Standalone_Mark.png",
+      "color_palette_guide": "https://customer-assets-cm19k8pv.emergentagent.net/job_ai-companion-test-5/artifacts/fctb6041_Aivora_Color_Palette_and_Typography.png"
+    }
+  },
+  "colors": {
+    "primary_dark_bg": "#0B132B",
+    "secondary_dark_bg": "#111C3A",
+    "surface_card": "#162244",
+    "surface_card_hover": "#1C2D5A",
+    "surface_border": "rgba(0, 209, 255, 0.15)",
+    "surface_border_active": "rgba(124, 58, 237, 0.4)",
+    "aivora_blue": "#00D1FF",
+    "aivora_purple": "#7C3AED",
+    "aivora_cyan": "#06B6D4",
+    "slate_text": "#94A3B8",
+    "soft_blue": "#E0F2FE",
+    "light_bg": "#F8FAFC",
+    "light_card": "#FFFFFF",
+    "gradient_primary": "linear-gradient(135deg, #00D1FF 0%, #7C3AED 100%)",
+    "gradient_glow": "radial-gradient(circle at 50% 0%, rgba(0, 209, 255, 0.18) 0%, rgba(124, 58, 237, 0.05) 50%, transparent 80%)",
+    "status": {
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "error": "#EF4444",
+      "info": "#00D1FF",
+      "running": "#8B5CF6"
+    }
+  },
+  "typography": {
+    "heading_font": "Plus Jakarta Sans, Outfit, sans-serif",
+    "body_font": "Plus Jakarta Sans, sans-serif",
+    "mono_font": "JetBrains Mono, monospace",
+    "scale": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight",
+      "h3": "text-xl sm:text-2xl font-semibold",
+      "h4": "text-lg sm:text-xl font-semibold",
+      "body": "text-sm sm:text-base leading-relaxed text-slate-300",
+      "caption": "text-xs font-medium text-slate-400 uppercase tracking-wider"
+    }
+  },
+  "layout_and_spacing": {
+    "container_padding": "p-4 sm:p-6 md:p-8 lg:p-12",
+    "card_padding": "p-5 sm:p-6",
+    "grid_gap": "gap-4 sm:gap-6 lg:gap-8",
+    "bento_grid": "grid grid-cols-1 md:grid-cols-8 lg:grid-cols-12 gap-6",
+    "nav_height": "h-16 sm:h-20",
+    "border_radius": "rounded-2xl"
+  },
+  "media_assets": {
+    "hero_network_bg": "https://images.unsplash.com/photo-1644088379091-d574269d422f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTV8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGZ1dHVyaXN0aWMlMjBnbG93aW5nJTIwY3lhbiUyMGJsdWUlMjBiYWNrZ3JvdW5kJTIwbmV0d29ya3xlbnwwfHx8fDE3OTA4Mzc4MTR8MA&ixlib=rb-4.1.0&q=85",
+    "wavy_dots_bg": "https://images.unsplash.com/photo-1758073519996-6d3c63b4922c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTV8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMGZ1dHVyaXN0aWMlMjBnbG93aW5nJTIwY3lhbiUyMGJsdWUlMjBiYWNrZ3JvdW5kJTIwbmV0d29ya3xlbnwwfHx8fDE3OTA4Mzc4MTR8MA&ixlib=rb-4.1.0&q=85",
+    "avatars": {
+      "aivora_core": "https://customer-assets-cm19k8pv.emergentagent.net/job_ai-companion-test-5/artifacts/7x1kdqac_Aivora_Standalone_Mark.png",
+      "researcher": "https://images.unsplash.com/photo-1559828801-04565cd31e27?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHw0fHxmdXR1cmlzdGljJTIwQUklMjBhdmF0YXIlMjBjeWJlcnB1bmslMjBwb3J0cmFpdCUyMG5lb258ZW58MHx8fHwxNzkwODM3ODA3fDA&ixlib=rb-4.1.0&q=85",
+      "writer": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwxfHxmdXR1cmlzdGljJTIwQUklMjBhdmF0YXIlMjBjeWJlcnB1bmslMjBwb3J0cmFpdCUyMG5lb258ZW58MHx8fHwxNzkwODM3ODA3fDA&ixlib=rb-4.1.0&q=85",
+      "analyst": "https://images.unsplash.com/flagged/photo-1579451443170-44b3963c3341?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwzfHxmdXR1cmlzdGljJTIwQUklMjBhdmF0YXIlMjBjeWJlcnB1bmslMjBwb3J0cmFpdCUyMG5lb258ZW58MHx8fHwxNzkwODM3ODA3fDA&ixlib=rb-4.1.0&q=85",
+      "reviewer": "https://images.unsplash.com/flagged/photo-1579451442952-f0365f3f0aed?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwyfHxmdXR1cmlzdGljJTIwQUklMjBhdmF0YXIlMjBjeWJlcnB1bmslMjBwb3J0cmFpdCUyMG5lb258ZW58MHx8fHwxNzkwODM3ODA3fDA&ixlib=rb-4.1.0&q=85",
+      "custom_persona_1": "https://images.unsplash.com/photo-1581841064838-a470c740e8ee?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjAzZCUyMGF2YXRhciUyMHBvcnRyYWl0JTIwbWluaW1hbGlzdHxlbnwwfHx8fDE3OTA4Mzc4MTR8MA&ixlib=rb-4.1.0&q=85",
+      "custom_persona_2": "https://images.unsplash.com/photo-1740252117013-4fb21771e7ca?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjAzZCUyMGF2YXRhciUyMHBvcnRyYWl0JTIwbWluaW1hbGlzdHxlbnwwfHx8fDE3OTA4Mzc4MTR8MA&ixlib=rb-4.1.0&q=85"
+    }
+  },
+  "screen_guidance": {
+    "landing_and_auth": {
+      "features": ["Hero Banner with glowing gradient ribbon", "Interactive persona creation preview", "Auth modal (Email + Password + ID/EN language switch)", "Onboarding wizard (Choose default persona role & goals)"],
+      "key_components": ["Glassmorphic Auth Card", "Language Switcher (ID/EN)", "Demo Persona Selector"]
+    },
+    "home_dashboard": {
+      "features": ["Dynamic Greeting with current user & persona status", "Quick Actions (New Persona, Multi-agent Delegation, Reminders)", "Active Multi-Agent Swarm Telemetry", "Recent AI Workspace Documents", "Credit Wallet Summary Card"],
+      "layout": "Bento Grid with asymmetric spans (`col-span-8` primary, `col-span-4` sidebar)"
+    },
+    "create_persona_studio": {
+      "creation_methods": [
+        "Method A: Describe with AI Prompt (Natural Language -> Struct Profile)",
+        "Method B: Upload Photo / Concept Art (Vision analysis)",
+        "Method C: Combine existing persona skills & traits"
+      ],
+      "tabs": ["Structured Profile (JSON & Form)", "Portrait Generator (Gemini Prompt/Styles)", "Voice & Behavioral Attributes", "Memory Index"],
+      "key_components": ["Portrait Generation Preview Canvas", "System Prompt Customizer", "Trait Sliders"]
+    },
+    "streaming_chat": {
+      "features": ["Streaming text with markdown parser & code highlighter", "File attachments (PDF, Code, Images)", "Per-persona long-term memory inspector drawer", "Audio call trigger for persona", "Chat history drawer/sidebar with search"],
+      "design_details": ["Glass floating header", "Glowing message bubble accents", "Interactive action chips for follow-up prompts"]
+    },
+    "multi_agent_task_view": {
+      "coordinator": "Aivora Central Coordinator",
+      "sub_agents": ["Research Agent", "Writing Agent", "Analyst Agent", "Reviewer Agent"],
+      "ui_elements": ["Interactive Execution Flow Graph", "Subtask status chips (Pending, In-Progress, Reviewing, Completed)", "Live execution console log", "Merged final deliverable view"]
+    },
+    "workspace_and_documents": {
+      "features": ["Filter by persona / agent / doc type", "Markdown viewer & export (PDF, MD, Copy)", "Version history & status tags"],
+      "layout": "High-density data grid with direct preview side-drawer"
+    },
+    "reminders_and_incoming_call": {
+      "features": ["Scheduled proactive reminders list", "Full screen / Modal 'Incoming Persona Call' with animated pulsing ring", "Accept / Decline voice interaction simulation", "Notification tone chime"],
+      "key_components": ["Incoming Call Overlay with glass backdrop blur", "Accept (Green glowing pill) / Decline (Red pill) buttons"]
+    },
+    "credit_wallet": {
+      "features": ["Live balance counter", "Usage breakdown chart (Chat vs Multi-agent vs Portrait generation)", "Simulated top-up packages with instant balance update"],
+      "key_components": ["Recharts area/bar chart for credit burn", "Package selection cards with 'Best Value' glowing badge"]
+    },
+    "admin_console": {
+      "features": ["User management table", "Global agent request telemetry", "Token cost and latency metrics", "System health indicators"],
+      "layout": "Dense data dashboard with compact filters and status badges"
+    }
+  },
+  "instructions_to_main_agent": {
+    "data_testid": "MANDATORY: Every interactive element (buttons, links, form fields, cards, tabs, modal controls) MUST have `data-testid` attributes in kebab-case format.",
+    "theme_support": "Implement dark theme as default (using Deep Navy #0B132B base and custom dark classes). Provide smooth theme toggle switch for Light Theme variant.",
+    "language_toggle": "Provide global state or context for English and Indonesian (Bahasa Indonesia) translations across all screens.",
+    "component_usage": "Use Shadcn components for dialogs, tabs, dropdowns, and form elements. Always override default Shadcn height restrictions (e.g., `h-auto` on TabList). Use Sonner for toast notifications.",
+    "no_transparent_header": "Header and overlay surfaces MUST use backdrop blur with background opacity (e.g. `backdrop-blur-xl bg-[#0B132B]/80`), never 100% transparent backgrounds.",
+    "animations": "Use Framer Motion for smooth tab transitions, incoming call pulsing rings, and multi-agent task flow progress."
+  }
+}

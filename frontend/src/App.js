@@ -1,0 +1,69 @@
+import "@/App.css";
+import React from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Toaster } from "sonner";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import { I18nProvider } from "./i18n";
+import { AppLayout } from "./components/AppLayout";
+import Auth from "./pages/Auth";
+import Onboarding from "./pages/Onboarding";
+import Home from "./pages/Home";
+import Personas from "./pages/Personas";
+import CreatePersona from "./pages/CreatePersona";
+import PersonaDetail from "./pages/PersonaDetail";
+import Chat from "./pages/Chat";
+import Workspace from "./pages/Workspace";
+import TaskDetail from "./pages/TaskDetail";
+import Reminders from "./pages/Reminders";
+import WalletPage from "./pages/Wallet";
+import Profile from "./pages/Profile";
+import Admin from "./pages/Admin";
+
+function Protected({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="flex min-h-screen items-center justify-center mesh-bg text-slate-400">Loading...</div>;
+  if (!user) return <Navigate to="/" replace />;
+  if (!user.onboarded) return <Navigate to="/onboarding" replace />;
+  return children;
+}
+
+function Gate() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="flex min-h-screen items-center justify-center mesh-bg text-slate-400">Loading...</div>;
+  if (user) return <Navigate to={user.onboarded ? "/home" : "/onboarding"} replace />;
+  return <Auth />;
+}
+
+function App() {
+  return (
+    <div className="App">
+      <I18nProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <Toaster position="top-center" theme="dark" richColors />
+            <Routes>
+              <Route path="/" element={<Gate />} />
+              <Route path="/onboarding" element={<Onboarding />} />
+              <Route element={<Protected><AppLayout /></Protected>}>
+                <Route path="/home" element={<Home />} />
+                <Route path="/personas" element={<Personas />} />
+                <Route path="/personas/new" element={<CreatePersona />} />
+                <Route path="/personas/:id" element={<PersonaDetail />} />
+                <Route path="/chat" element={<Chat />} />
+                <Route path="/chat/:id" element={<Chat />} />
+                <Route path="/workspace" element={<Workspace />} />
+                <Route path="/workspace/:id" element={<TaskDetail />} />
+                <Route path="/reminders" element={<Reminders />} />
+                <Route path="/wallet" element={<WalletPage />} />
+                <Route path="/profile" element={<Profile />} />
+                <Route path="/admin" element={<Admin />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </AuthProvider>
+      </I18nProvider>
+    </div>
+  );
+}
+
+export default App;
