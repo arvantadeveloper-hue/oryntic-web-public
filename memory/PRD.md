@@ -84,7 +84,14 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **Frontend gating**: user biasa — nav tanpa Agen AI/Kredit/Tim/Admin, tanpa badge kredit & kartu Upgrade, Home tanpa kartu kredit; route /personas,/wallet,/team,/admin redirect ke /home. Admin melihat semua + halaman **Tim** (buat/hapus user) + tombol **Undang** di meeting.
 - Tested: testing agent iteration_7 — backend 20/20, frontend 100% (gating, redirect, CRUD tim, shared wallet, WS auth + broadcast). Tanpa bug.
 
+## Update 2026-06 (h) — Panggilan pengingat bersuara, kuota kredit harian, tautan undangan sekali klik
+- **Bug fix — Panggilan Pengingat bersuara**: saat panggilan pengingat diterima, asisten kini **berbicara** mengingatkan (TTS suara persona, nada ramah, bahasa sesuai setelan) lalu **lanjut jadi panggilan suara normal** (membuka VideoRoom isPrivate hands-free). `reminders.respond(accept)` mengembalikan `message` + `persona{voice}` + `conversation`, dan menyimpan pesan pembuka di percakapan. (`IncomingCall.jsx`)
+- **Kuota kredit harian per anggota**: admin set `daily_credit_limit` tiap user biasa di halaman **Tim** (PATCH `/api/admin/users/{id}`). Jika pemakaian hari ini (UTC) ≥ limit → kirim AI diblokir **402** sampai reset tengah malam. `workspace-users` menampilkan `today_usage` + limit. 0 = tanpa batas. Admin tak pernah diblokir. (`llm.user_today_usage/quota_exceeded`, `chat.send_message`)
+- **Tautan undangan sekali klik**: admin buat tautan meeting (`POST /conversations/{cid}/invite-link` → `/join/{token}`). Halaman publik `/join/:token`: user lama (workspace sama) langsung **Gabung**; orang baru **daftar instan** (akun user biasa dibuat di workspace lalu masuk meeting). Endpoint: `GET /api/invites/{token}`, `/join`, `/register`. Tombol salin di modal Undang chat.
+- **Kamera di meeting**: DITUNDA atas permintaan user (butuh WebRTC + TURN).
+- Tested: testing agent iteration_8 — backend 12/12, frontend 100% core. Fix pasca-tes: daftar percakapan refetch saat auth berubah (sidebar langsung muncul setelah guest join).
+
 ## Next tasks
-- (Opsional) VideoRoom multi-manusia: tampilkan tile manusia lain + status bicara real-time di Zoom view (saat ini multi-human ada di chat meeting teks + real-time).
-- (Opsional) Avatar wajah bergerak + lip-sync (HeyGen/D-ID) — integrasi berbayar (P3).
+- (Opsional) Kamera/video 2-arah antar-manusia (WebRTC + TURN) — ditunda.
+- (Opsional) VideoRoom multi-manusia: tile manusia lain + status bicara real-time.
 - (Backlog P1) Real payment gateway menggantikan top-up simulasi.

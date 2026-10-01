@@ -55,7 +55,7 @@ export default function Chat() {
   useEffect(() => { streamingRef.current = streaming; }, [streaming]);
 
   const loadConvs = (query = "") => api.get(`/conversations${query ? `?q=${encodeURIComponent(query)}` : ""}`).then((r) => setConvs(r.data)).catch(() => {});
-  useEffect(() => { loadConvs(); api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {}); }, []);
+  useEffect(() => { loadConvs(); api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {}); }, [user?.id]);
   useEffect(() => {
     if (id) api.get(`/conversations/${id}/messages`).then((r) => { setConv(r.data.conversation); setMessages(r.data.messages); }).catch(() => {});
     else { setConv(null); setMessages([]); }
