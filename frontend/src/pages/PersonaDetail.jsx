@@ -15,6 +15,11 @@ export default function PersonaDetail() {
   const [busy, setBusy] = useState(false);
   const [mems, setMems] = useState([]);
   const [newMem, setNewMem] = useState("");
+  const [models, setModels] = useState([]);
+
+  useEffect(() => { api.get("/models").then((r) => setModels(r.data.models)).catch(() => {}); }, []);
+  const modelLabel = (key) => (models.find((m) => m.id === key) || {}).label || key;
+  const changeModel = async (key) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, model: key }); setP(r.data); toast.success("Model diperbarui"); };
 
   const load = () => api.get(`/personas/${id}`).then((r) => setP(r.data)).catch(() => toast.error("Tidak ditemukan"));
   const loadMem = () => api.get(`/memory?persona_id=${id}`).then((r) => setMems(r.data)).catch(() => {});
@@ -37,7 +42,7 @@ export default function PersonaDetail() {
   };
 
   const startChat = async () => {
-    const r = await api.post("/conversations", { persona_id: id, title: `Chat dengan ${p.name}` });
+    const r = await api.post("/conversations", { persona_ids: [id], type: "private" });
     nav(`/chat/${r.data.id}`);
   };
 
@@ -65,8 +70,14 @@ export default function PersonaDetail() {
             </div>
             <div className="p-4">
               <h1 className="text-xl font-bold text-slate-900">{p.name}</h1>
-              <p className="text-xs text-slate-500">v{p.version} · {p.model}</p>
+              <p className="text-xs text-slate-500">v{p.version} · {modelLabel(p.model)}</p>
             </div>
+          </div>
+          <div className="mt-3">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Otak Persona (Model AI)</label>
+            <select className="input-dark py-2.5" value={p.model} onChange={(e) => changeModel(e.target.value)} data-testid="persona-model-select">
+              {models.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.tagline}</option>)}
+            </select>
           </div>
           <div className="mt-3 space-y-2">
             <button onClick={startChat} data-testid="persona-start-chat" className="btn-grad flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm"><MessageSquare size={16} /> Mulai Chat</button>

@@ -29,7 +29,7 @@ export function IncomingCall() {
   if (!call) return null;
   const persona = call.persona;
   const portrait = persona?.portrait;
-  const name = persona?.name || "Aivora";
+  const name = persona?.name || "Asisten";
 
   const decline = async () => {
     dismissed.current.add(call.id);

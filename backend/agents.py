@@ -32,7 +32,7 @@ async def _orchestrate(task_id: str, user_id: str, goal: str):
 
         # 1. Coordinator plans
         plan_sys = (
-            "You are Aivora, the coordinator of a team of AI agents. Break the user's goal into 2-4 concrete "
+            "You are the orchestration coordinator of a team of AI agents. Break the user's goal into 2-4 concrete "
             "subtasks. For each subtask choose one role from: Research, Planning, Writing, Analyst, Coding. "
             'Respond JSON: {"plan_summary": str, "subtasks": [{"role": str, "title": str, "instruction": str}]}'
         )
@@ -76,7 +76,7 @@ async def _orchestrate(task_id: str, user_id: str, goal: str):
 
         # 3. Coordinator + Reviewer merge
         merge_sys = (
-            "You are Aivora the coordinator with a Reviewer. Combine the agents' outputs into a single, "
+            "You are the orchestration coordinator with a Reviewer. Combine the agents' outputs into a single, "
             "coherent, well-structured final deliverable in markdown. Remove redundancy, ensure consistency, "
             "and add a short executive summary at the top."
         )

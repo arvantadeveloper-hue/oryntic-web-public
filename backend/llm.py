@@ -12,6 +12,32 @@ EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 GPT_MODEL = os.environ.get("GPT_MODEL", "gpt-5.4")
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-3.1-flash-image-preview")
 
+# Model catalog — the selectable "brain" for each persona.
+MODEL_CATALOG = [
+    {"id": "gpt-astra", "label": "GPT Astra", "provider": "openai", "model": "gpt-6-astra",
+     "tagline": "Paling cerdas untuk tugas kompleks", "accent": "#7C3AED"},
+    {"id": "gpt-luna", "label": "GPT Luna", "provider": "openai", "model": "gpt-6-luna",
+     "tagline": "Seimbang, kreatif & ekspresif", "accent": "#2F6BFF"},
+    {"id": "gpt-terra", "label": "GPT Terra", "provider": "openai", "model": "gpt-5.6-terra",
+     "tagline": "Cepat & efisien untuk harian", "accent": "#22B8FF"},
+    {"id": "claude-sonnet", "label": "Claude Sonnet", "provider": "anthropic", "model": "claude-sonnet-5-5",
+     "tagline": "Penulisan & analisis mendalam", "accent": "#F59E0B"},
+    {"id": "gemini-pro", "label": "Gemini Pro", "provider": "gemini", "model": "gemini-3.1-pro-preview",
+     "tagline": "Multimodal & reasoning kuat", "accent": "#10B981"},
+]
+DEFAULT_MODEL_KEY = "gpt-terra"
+_MODEL_BY_ID = {m["id"]: m for m in MODEL_CATALOG}
+
+
+def resolve_model(model_key: str | None):
+    m = _MODEL_BY_ID.get(model_key or DEFAULT_MODEL_KEY) or _MODEL_BY_ID[DEFAULT_MODEL_KEY]
+    return m["provider"], m["model"]
+
+
+def model_label(model_key: str | None) -> str:
+    m = _MODEL_BY_ID.get(model_key or DEFAULT_MODEL_KEY) or _MODEL_BY_ID[DEFAULT_MODEL_KEY]
+    return m["label"]
+
 # credit metering (credits are usage units, not money)
 TEXT_CREDITS_PER_1K_CHARS = 2.0   # applied on input+output chars
 IMAGE_CREDITS = 25
@@ -50,19 +76,20 @@ async def record_usage(user_id: str, feature: str, credits: int, meta: dict | No
     return new_balance
 
 
-async def llm_text(system_message: str, user_text: str, model: str | None = None) -> str:
+async def llm_text(system_message: str, user_text: str, model_key: str | None = None) -> str:
+    provider, model = resolve_model(model_key)
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=new_id(),
         system_message=system_message,
-    ).with_model("openai", model or GPT_MODEL)
+    ).with_model(provider, model)
     resp = await chat.send_message(UserMessage(text=user_text))
     return _extract_text(resp).strip()
 
 
-async def llm_json(system_message: str, user_text: str, model: str | None = None) -> dict:
+async def llm_json(system_message: str, user_text: str, model_key: str | None = None) -> dict:
     sys = system_message + "\n\nYou MUST respond with ONLY valid JSON. No markdown fences, no commentary."
-    raw = await llm_text(sys, user_text, model)
+    raw = await llm_text(sys, user_text, model_key)
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.strip("`")

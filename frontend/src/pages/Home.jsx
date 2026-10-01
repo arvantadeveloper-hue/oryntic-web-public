@@ -3,17 +3,16 @@ import { useNavigate } from "react-router-dom";
 import { MessageSquare, FileText, BarChart3, Calendar, Lightbulb, Settings2, Send, ArrowRight, FileCheck2, Clock, Bot, Users, Sparkles } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { AIVORA_HERO } from "../components/Logo";
 
 const QUICK = [
-  { icon: MessageSquare, title: "Chat dengan Aivora", desc: "Tanyakan apa saja, dapatkan jawaban instan", to: "/chat", c: "#2F6BFF" },
+  { icon: MessageSquare, title: "Chat dengan Tim", desc: "Mulai percakapan privat atau grup", to: "/chat", c: "#2F6BFF" },
   { icon: FileText, title: "Buat Dokumen", desc: "Buat proposal, laporan, atau dokumen", to: "/workspace", c: "#7C3AED" },
   { icon: BarChart3, title: "Analisis Data", desc: "Minta insight dari data Anda", to: "/workspace", c: "#22B8FF" },
   { icon: Calendar, title: "Jadwalkan Meeting", desc: "Atur pengingat & notulen otomatis", to: "/reminders", c: "#F59E0B" },
   { icon: Lightbulb, title: "Riset & Insight", desc: "Cari informasi & analisis mendalam", to: "/workspace", c: "#10B981" },
   { icon: Settings2, title: "Otomatisasi Tugas", desc: "Delegasikan tugas ke agen AI", to: "/workspace", c: "#EC4899" },
 ];
-const CAPS = ["Diskusi dengan berbagai agen AI", "Buat, analisis & ringkas dokumen", "Pengingat & jadwal otomatis", "Riset dan insight", "Otomatisasi tugas"];
+const CAPS = ["Diskusi dengan berbagai agen AI", "Buat, analisis & ringkas dokumen", "Pengingat & jadwal otomatis", "Riset dan insight", "Otomatisasi tugas"]; // eslint-disable-line no-unused-vars
 const statusColor = { completed: "#10B981", running: "#7C3AED", queued: "#F59E0B", failed: "#EF4444", cancelled: "#94A3B8" };
 
 function progress(tk) {
@@ -29,11 +28,13 @@ export default function Home() {
   const nav = useNavigate();
   const [tasks, setTasks] = useState([]);
   const [reminders, setReminders] = useState([]);
+  const [personas, setPersonas] = useState([]);
   const [ask, setAsk] = useState("");
 
   useEffect(() => {
     api.get("/tasks").then((r) => setTasks(r.data)).catch(() => {});
     api.get("/reminders").then((r) => setReminders(r.data)).catch(() => {});
+    api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {});
   }, []);
 
   const projects = tasks.slice(0, 4);
@@ -41,7 +42,9 @@ export default function Home() {
   const upcoming = reminders.filter((r) => ["scheduled", "ringing"].includes(r.status)).slice(0, 5);
 
   const submitAsk = async () => {
-    const r = await api.post("/conversations", { title: ask.slice(0, 40) || "New conversation" });
+    if (personas.length === 0) { nav("/personas/new"); return; }
+    if (ask.trim()) sessionStorage.setItem("aivora_prefill", ask);
+    const r = await api.post("/conversations", { persona_ids: [personas[0].id], type: "private" });
     nav(`/chat/${r.data.id}`);
   };
 
@@ -71,18 +74,26 @@ export default function Home() {
                 ))}
               </div>
             </div>
-            <div className="hidden items-end gap-4 md:flex">
-              <div className="w-44 self-stretch overflow-hidden rounded-2xl">
-                <img src={AIVORA_HERO} alt="Aivora" className="h-full w-full object-cover" />
-              </div>
-              <div className="w-52 self-center rounded-2xl border border-white bg-white/80 p-4 backdrop-blur">
-                <p className="text-xs font-bold text-slate-900">Saya Aivora, siap membantu Anda & tim hari ini.</p>
-                <div className="mt-3 space-y-2">
-                  {CAPS.map((c) => (
-                    <div key={c} className="flex items-start gap-2 text-[11px] text-slate-500"><span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[#2F6BFF]" /> {c}</div>
-                  ))}
-                </div>
-              </div>
+            <div className="hidden w-64 shrink-0 self-center rounded-2xl border border-white bg-white/80 p-4 backdrop-blur md:block">
+              <p className="text-xs font-bold text-slate-900">{personas.length ? "Tim Asisten Anda" : "Belum ada asisten"}</p>
+              {personas.length === 0 ? (
+                <>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-500">Buat asisten AI pertama Anda, lalu ajak satu untuk chat privat atau beberapa untuk diskusi grup.</p>
+                  <button onClick={() => nav("/personas/new")} data-testid="home-create-persona" className="btn-grad mt-3 w-full rounded-xl py-2 text-xs">+ Buat Asisten</button>
+                </>
+              ) : (
+                <>
+                  <div className="mt-3 space-y-1.5">
+                    {personas.slice(0, 4).map((p) => (
+                      <button key={p.id} onClick={() => nav(`/personas/${p.id}`)} className="flex w-full items-center gap-2 rounded-lg p-1.5 text-left hover:bg-slate-50" data-testid={`home-persona-${p.id}`}>
+                        {p.portrait ? <img src={p.portrait} alt="" className="h-7 w-7 rounded-full object-cover" /> : <span className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{p.name[0]}</span>}
+                        <span className="truncate text-xs font-semibold text-slate-700">{p.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={() => nav("/chat")} data-testid="home-team-chat" className="btn-grad mt-3 w-full rounded-xl py-2 text-xs">Mulai Chat / Grup</button>
+                </>
+              )}
             </div>
           </div>
         </section>

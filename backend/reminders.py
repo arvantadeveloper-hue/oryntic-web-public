@@ -93,7 +93,7 @@ async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
         await db.reminders.update_one({"id": rid}, {"$set": {"status": "declined"}})
         return {"status": "declined"}
     # accept -> generate reminder message from real data only
-    persona_name = "Aivora"
+    persona_name = "Asisten"
     if r.get("persona_id"):
         p = await db.personas.find_one({"id": r["persona_id"]})
         if p:

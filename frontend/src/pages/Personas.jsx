@@ -15,7 +15,7 @@ export default function Personas() {
 
   const startChat = async (p, e) => {
     e.stopPropagation();
-    const r = await api.post("/conversations", { persona_id: p.id, title: `Chat dengan ${p.name}` });
+    const r = await api.post("/conversations", { persona_ids: [p.id], type: "private" });
     nav(`/chat/${r.data.id}`);
   };
 

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sparkles, Image as ImageIcon, Layers, ArrowLeft, Upload, Wand2, Check } from "lucide-react";
 import { toast } from "sonner";
@@ -23,6 +23,10 @@ export default function CreatePersona() {
   const [consent, setConsent] = useState(false);
   const [profile, setProfile] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [models, setModels] = useState([]);
+  const [modelKey, setModelKey] = useState("gpt-terra");
+
+  useEffect(() => { api.get("/models").then((r) => { setModels(r.data.models); setModelKey(r.data.default); }).catch(() => {}); }, []);
 
   const onFile = (e) => {
     const f = e.target.files?.[0];
@@ -55,7 +59,7 @@ export default function CreatePersona() {
   const saveAndPortrait = async () => {
     setBusy(true);
     try {
-      const r = await api.post("/personas", { profile, reference_photo: photo || null });
+      const r = await api.post("/personas", { profile, reference_photo: photo || null, model: modelKey });
       const pid = r.data.id;
       toast.success("Persona disimpan, membuat potret...");
       try {
@@ -131,6 +135,22 @@ export default function CreatePersona() {
             <Field label="Bahasa utama" value={profile.language?.primary || ""} onChange={(v) => setPath("language", "primary", v)} testid="rev-lang" />
           </div>
           <FieldArea label="Instruksi sistem" value={profile.system_instructions || ""} onChange={(v) => setProfile((p) => ({ ...p, system_instructions: v }))} testid="rev-sysinstr" />
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Otak Persona (Model AI)</label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {models.map((m) => {
+                const on = modelKey === m.id;
+                return (
+                  <button key={m.id} type="button" onClick={() => setModelKey(m.id)} data-testid={`model-${m.id}`}
+                    className={`flex items-start gap-3 rounded-xl border p-3 text-left transition ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3] hover:bg-slate-50"}`}>
+                    <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: m.accent }} />
+                    <span><span className="block text-sm font-bold text-slate-900">{m.label}</span>
+                      <span className="block text-xs text-slate-400">{m.tagline}</span></span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <button onClick={saveAndPortrait} disabled={busy} data-testid="save-persona-btn" className="btn-grad flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm">
             <Sparkles size={18} /> {busy ? "Menyimpan & membuat potret..." : "Simpan & Buat Potret"}
           </button>

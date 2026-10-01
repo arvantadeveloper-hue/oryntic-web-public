@@ -6,15 +6,15 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
-from auth import current_user, JWT_SECRET, JWT_ISSUER
-from llm import llm_text, record_usage, text_credits, GPT_MODEL
-import jwt as _jwt
+from auth import current_user
+from llm import llm_text, record_usage, text_credits
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
 class ConvIn(BaseModel):
-    persona_id: Optional[str] = None
+    persona_ids: list = []
+    type: str = "private"  # private | group
     title: Optional[str] = None
 
 
@@ -28,16 +28,35 @@ class MemIn(BaseModel):
     content: str = Field(min_length=1, max_length=1000)
 
 
+async def _get_personas(ids):
+    out = []
+    for pid in ids:
+        p = await db.personas.find_one({"id": pid}, {"_id": 0})
+        if p:
+            out.append(p)
+    return out
+
+
 # ---------- conversations ----------
 @router.post("/conversations")
 async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
+    personas = await _get_personas(x.persona_ids)
+    if not personas:
+        raise HTTPException(400, "Pilih minimal satu persona untuk memulai percakapan")
+    is_group = x.type == "group" and len(personas) > 1
+    title = x.title
+    if not title:
+        title = "Grup: " + ", ".join(p["name"] for p in personas) if is_group else f"Chat dengan {personas[0]['name']}"
     cid = new_id()
     doc = {
-        "id": cid, "user_id": u["id"], "persona_id": x.persona_id,
-        "title": x.title or "New conversation", "created_at": now_iso(), "updated_at": now_iso(),
-        "last_message": "",
+        "id": cid, "user_id": u["id"],
+        "type": "group" if is_group else "private",
+        "persona_ids": [p["id"] for p in personas],
+        "persona_id": personas[0]["id"],
+        "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait")} for p in personas],
+        "title": title, "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
     }
-    await db.conversations.insert_one(doc)
+    await db.conversations.insert_one(dict(doc))
     return clean(doc)
 
 
@@ -46,8 +65,7 @@ async def list_conv(q: Optional[str] = None, u: dict = Depends(current_user)):
     query = {"user_id": u["id"]}
     if q:
         query["$or"] = [{"title": {"$regex": q, "$options": "i"}}, {"last_message": {"$regex": q, "$options": "i"}}]
-    items = await db.conversations.find(query, {"_id": 0}).sort("updated_at", -1).to_list(200)
-    return items
+    return await db.conversations.find(query, {"_id": 0}).sort("updated_at", -1).to_list(200)
 
 
 @router.get("/conversations/{cid}/messages")
@@ -66,35 +84,31 @@ async def del_conv(cid: str, u: dict = Depends(current_user)):
     return {"ok": True}
 
 
-async def _build_context(conv: dict, user: dict) -> str:
-    parts = []
-    persona = None
-    if conv.get("persona_id"):
-        persona = await db.personas.find_one({"id": conv["persona_id"]})
-    if persona:
-        prof = persona.get("profile", {})
-        parts.append(f"You are '{persona['name']}', an AI persona. {prof.get('system_instructions','')}")
-        pers = prof.get("personality", {})
-        parts.append(f"Communication style: {pers.get('communication_style','')}. Formality: {pers.get('formality','')}. Attitude: {pers.get('attitude','')}.")
-        parts.append("You are an AI and must not claim to have real human feelings or needs. Be warm but honest.")
-        # memory
-        mems = await db.memory_items.find({"user_id": user["id"], "persona_id": persona["id"], "enabled": True}).to_list(50)
-        if mems:
-            parts.append("Relevant saved memory about the user: " + "; ".join(m["content"] for m in mems))
-    else:
-        parts.append("You are Aivora, a helpful, concise AI personal assistant.")
+async def _persona_system(persona, user, roster=None):
+    prof = persona.get("profile", {})
+    parts = [f"You are '{persona['name']}', an AI persona. {prof.get('system_instructions','')}"]
+    pers = prof.get("personality", {})
+    parts.append(f"Communication style: {pers.get('communication_style','')}. Formality: {pers.get('formality','')}. Attitude: {pers.get('attitude','')}.")
+    parts.append("You are an AI and must not claim to have real human feelings or needs. Be warm but honest.")
+    mems = await db.memory_items.find({"user_id": user["id"], "persona_id": persona["id"], "enabled": True}).to_list(50)
+    if mems:
+        parts.append("Saved memory about the user: " + "; ".join(m["content"] for m in mems))
+    if roster:
+        others = [n for n in roster if n != persona["name"]]
+        if others:
+            parts.append(f"You are in a group conversation with the user and other AI assistants: {', '.join(others)}. "
+                         f"Respond only as {persona['name']}, keep it concise, build on what others said without repeating them, and do not speak for the others.")
     lang = user.get("settings", {}).get("conversation_language", "id")
     parts.append(f"Default conversation language: {lang} (follow the user's language if they switch).")
     return "\n".join(parts)
 
 
-async def _history_text(cid: str) -> str:
+async def _history_text(cid: str, limit=14) -> str:
     msgs = await db.messages.find({"conversation_id": cid}, {"_id": 0}).sort("created_at", 1).to_list(1000)
-    recent = msgs[-12:]
     lines = []
-    for m in recent:
-        role = "User" if m["role"] == "user" else "Assistant"
-        lines.append(f"{role}: {m['content']}")
+    for m in msgs[-limit:]:
+        who = "User" if m["role"] == "user" else (m.get("persona_name") or "Assistant")
+        lines.append(f"{who}: {m['content']}")
     return "\n".join(lines)
 
 
@@ -103,43 +117,43 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     conv = await db.conversations.find_one({"id": cid, "user_id": u["id"]})
     if not conv:
         raise HTTPException(404, "Conversation not found")
+    personas = await _get_personas(conv.get("persona_ids", []))
+    if not personas:
+        raise HTTPException(400, "Percakapan ini tidak memiliki persona")
 
-    user_msg = {
-        "id": new_id(), "conversation_id": cid, "role": "user", "content": x.content,
-        "attachments": x.attachments, "created_at": now_iso(),
-    }
+    user_msg = {"id": new_id(), "conversation_id": cid, "role": "user", "content": x.content,
+                "attachments": x.attachments, "created_at": now_iso()}
     await db.messages.insert_one(dict(user_msg))
-
-    system = await _build_context(conv, u)
-    history = await _history_text(cid)
-    prompt = f"{history}\nUser: {x.content}\nAssistant:"
+    roster = [p["name"] for p in personas]
 
     async def stream():
-        full = ""
-        try:
-            full = await llm_text(system, prompt, conv.get("model") or GPT_MODEL)
-        except Exception:
-            full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
-        # chunk-stream for UX
-        words = full.split(" ")
-        buf = ""
-        for i, w in enumerate(words):
-            buf = w if i == 0 else " " + w
-            yield f"data: {json.dumps({'delta': buf})}\n\n"
-            await asyncio.sleep(0.012)
-        used = text_credits(prompt, full)
-        bal = await record_usage(u["id"], "chat", used, {"conversation_id": cid})
-        ai_msg = {
-            "id": new_id(), "conversation_id": cid, "role": "assistant", "content": full,
-            "credits": used, "created_at": now_iso(),
-        }
-        await db.messages.insert_one(dict(ai_msg))
-        title = conv["title"]
-        set_fields = {"updated_at": now_iso(), "last_message": full[:120]}
-        if title == "New conversation":
-            set_fields["title"] = x.content[:40]
-        await db.conversations.update_one({"id": cid}, {"$set": set_fields})
-        yield f"data: {json.dumps({'done': True, 'message_id': ai_msg['id'], 'credits_used': used, 'credits': bal})}\n\n"
+        total = 0
+        for persona in personas:
+            system = await _persona_system(persona, u, roster if len(personas) > 1 else None)
+            history = await _history_text(cid)
+            prompt = f"{history}\n{persona['name']}:"
+            try:
+                full = await llm_text(system, prompt, persona.get("model"))
+            except Exception:
+                full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
+            meta = {"persona_id": persona["id"], "persona_name": persona["name"]}
+            words = full.split(" ")
+            for i, w in enumerate(words):
+                chunk = w if i == 0 else " " + w
+                yield f"data: {json.dumps({**meta, 'delta': chunk})}\n\n"
+                await asyncio.sleep(0.01)
+            used = text_credits(prompt, full)
+            total += used
+            await record_usage(u["id"], "chat", used, {"conversation_id": cid, "persona_id": persona["id"]})
+            ai_msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": full,
+                      "persona_id": persona["id"], "persona_name": persona["name"],
+                      "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso()}
+            await db.messages.insert_one(dict(ai_msg))
+            yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full, 'portrait': persona.get('portrait')})}\n\n"
+
+        bal = (await db.users.find_one({"id": u["id"]}))["credits"]
+        await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso(), "last_message": x.content[:120]}})
+        yield f"data: {json.dumps({'done': True, 'credits_used': total, 'credits': bal})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream",
@@ -151,19 +165,21 @@ async def regenerate(cid: str, mid: str, u: dict = Depends(current_user)):
     conv = await db.conversations.find_one({"id": cid, "user_id": u["id"]})
     if not conv:
         raise HTTPException(404, "Conversation not found")
+    old = await db.messages.find_one({"id": mid, "conversation_id": cid}, {"_id": 0})
+    if not old:
+        raise HTTPException(404, "Message not found")
+    persona = await db.personas.find_one({"id": old.get("persona_id")}, {"_id": 0})
+    if not persona:
+        persona = (await _get_personas(conv.get("persona_ids", [])))[0]
     await db.messages.delete_one({"id": mid, "conversation_id": cid})
-    # find last user message
-    msgs = await db.messages.find({"conversation_id": cid}, {"_id": 0}).sort("created_at", 1).to_list(1000)
-    last_user = next((m for m in reversed(msgs) if m["role"] == "user"), None)
-    if not last_user:
-        raise HTTPException(400, "Nothing to regenerate")
-    system = await _build_context(conv, u)
-    history = "\n".join(f"{'User' if m['role']=='user' else 'Assistant'}: {m['content']}" for m in msgs[-12:])
-    full = await llm_text(system, history + "\nAssistant:", conv.get("model") or GPT_MODEL)
+    system = await _persona_system(persona, u)
+    history = await _history_text(cid)
+    full = await llm_text(system, f"{history}\n{persona['name']}:", persona.get("model"))
     used = text_credits(history, full)
     bal = await record_usage(u["id"], "chat", used, {"conversation_id": cid, "regenerate": True})
     ai_msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": full,
-              "credits": used, "created_at": now_iso()}
+              "persona_id": persona["id"], "persona_name": persona["name"],
+              "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso()}
     await db.messages.insert_one(dict(ai_msg))
     return {"message": clean(ai_msg), "credits": bal}
 

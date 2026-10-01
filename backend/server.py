@@ -13,6 +13,7 @@ from agents import router as agents_router
 from reminders import router as reminders_router, scheduler_tick
 from wallet import router as wallet_router
 from admin import router as admin_router
+from models import router as models_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("aivora")
@@ -32,6 +33,7 @@ app.include_router(agents_router)
 app.include_router(reminders_router)
 app.include_router(wallet_router)
 app.include_router(admin_router)
+app.include_router(models_router)
 
 app.add_middleware(
     CORSMiddleware,

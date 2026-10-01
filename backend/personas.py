@@ -4,9 +4,14 @@ from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
 from auth import current_user
-from llm import llm_json, generate_image, record_usage, text_credits, PROFILE_CREDITS, IMAGE_CREDITS
+from llm import llm_json, generate_image, record_usage, text_credits, PROFILE_CREDITS, IMAGE_CREDITS, MODEL_CATALOG, DEFAULT_MODEL_KEY
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
+_MODEL_IDS = {m["id"] for m in MODEL_CATALOG}
+
+
+def _valid_model(key):
+    return key if key in _MODEL_IDS else DEFAULT_MODEL_KEY
 
 
 class GenerateProfileIn(BaseModel):
@@ -17,7 +22,7 @@ class GenerateProfileIn(BaseModel):
 
 class PersonaIn(BaseModel):
     profile: dict
-    model: str = "gpt-5.4"
+    model: str = DEFAULT_MODEL_KEY
     reference_photo: Optional[str] = None
 
 
@@ -76,7 +81,7 @@ async def create_persona(x: PersonaIn, u: dict = Depends(current_user)):
         "name": ident.get("name", "Untitled Persona"),
         "summary": ident.get("summary", ""),
         "profile": x.profile,
-        "model": x.model,
+        "model": _valid_model(x.model),
         "portrait": None,
         "reference_photo": x.reference_photo,
         "version": 1,
@@ -142,7 +147,7 @@ async def update_persona(pid: str, body: dict, u: dict = Depends(current_user)):
         "profile": new_profile,
         "name": ident.get("name", p["name"]),
         "summary": ident.get("summary", p.get("summary", "")),
-        "model": body.get("model", p.get("model")),
+        "model": _valid_model(body.get("model", p.get("model"))),
         "version": p.get("version", 1) + 1,
         "versions": versions[-10:],
         "updated_at": now_iso(),

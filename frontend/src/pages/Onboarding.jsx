@@ -34,8 +34,8 @@ export default function Onboarding() {
         name, app_language: appLang, conversation_language: convLang, timezone: tz,
       });
       setUser(r.data);
-      toast.success("Siap! Selamat datang di Aivora");
-      nav("/home");
+      toast.success("Siap! Buat asisten AI pertama Anda");
+      nav("/personas/new");
     } catch (e) { toast.error("Gagal menyimpan"); } finally { setBusy(false); }
   };
 
