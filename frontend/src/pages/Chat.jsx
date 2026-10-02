@@ -70,6 +70,7 @@ export default function Chat() {
   useEffect(() => { streamingRef.current = streaming; }, [streaming]);
 
   const PAGE = 20;
+  useEffect(() => { const h = () => { if (id) refreshMsgs(); }; window.addEventListener("oryntix:task-done", h); return () => window.removeEventListener("oryntix:task-done", h); /* eslint-disable-next-line */ }, [id]);
   const loadConvs = (query = "", more = false) => api.get(`/conversations?limit=${PAGE}&offset=${more ? convs.length : 0}${query ? `&q=${encodeURIComponent(query)}` : ""}`)
     .then((r) => { setConvs((prev) => (more ? [...prev, ...r.data] : r.data)); setConvHasMore(r.data.length === PAGE); }).catch(() => {});
   const applyPage = (data) => { setMessages(data.messages); setMsgHasMore(!!data.has_more); setArchivedCount(data.archived_count || 0); setSummaryRequest(!!data.long_chat); };

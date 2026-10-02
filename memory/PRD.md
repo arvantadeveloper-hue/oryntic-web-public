@@ -217,6 +217,14 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Frontend: `TaskDetail.jsx` (DiscussBar, ExportBar, versi, RevisePanel, MediaList), `TaskChatTools.jsx` (TaskContextCard, AddPersonaMenu) dipasang di `Chat.jsx`.
 - Tahap 2 (berikutnya): penugasan dari chat/meeting ("bahas satu per satu / terima beres"), jadwal `scheduled_at` + scheduler, tool `assign_task` di moderator Realtime, notifikasi selesai in-app. Tahap 3: Kalender, panel Presentasi di meeting.
 
+## Update 2026-06 (y) — Ruang Kerja Tahap 2+3: penugasan dari chat/meeting, jadwal, kalender, presentasi (iteration_21: BE 9/9, FE lulus)
+- `tools.py`: `TASK_RE`, `plan_task()` (llm_json: is_task/long/title/brief/scheduled_at dgn zona waktu user), `OFFER_TEXT`.
+- `chat.py`: `_task_offer_turn` — tawaran "bahas satu per satu / terima beres" (pesan `tool:task_offer` + `pending_task` di conversation); balasan teks dikenali `DELEGATE_RE`/`DISCUSS_RE`.
+- `assignments.py`: `create_assigned_task` (status scheduled bila waktu di masa depan, else queued → `execute_assigned_task` latar belakang: persona system + smart routing → markdown lengkap, record_usage "assigned_task", pesan `tool:task_done` ke chat), `tasks_tick()` dipanggil loop scheduler server (20 dtk; juga re-queue tugas basi >10 mnt), `POST /conversations/{cid}/tasks/accept {delegate|discuss}`, `POST /conversations/{cid}/tasks` (tool suara), `GET/POST /task-notifications(/ack)`, `POST/DELETE /events`, `GET /calendar?start&end` (tasks+reminders+meetings+events workspace).
+- `realtime_voice.py`: tool `assign_task` (solo+moderator), `update_task` bila conv.task_id, `PRESENT_STYLE` + TASK_CONTEXT masuk `_voice_context`.
+- Frontend: `TaskOfferButtons` + `TaskNotifier` (poll 20 dtk → toast + event `oryntix:task-done` → Chat refresh), `Calendar.jsx` (/calendar, grid bulan, panel hari, form event), `PresentationPanel.jsx` di stage RealtimeMeeting saat conv.task_id, `runVoiceTool()` di realtimeSession (dipakai RealtimeCall & RealtimeMeeting untuk assign_task/update_task).
+- Belum diuji dengan suara nyata: tool assign_task/update_task + panel presentasi di meeting (butuh mic).
+
 ## Backlog batch berikut
 - Google OAuth sendiri (Client ID/Secret dari user) → login Google.
 - Produksi: set secret SMTP_* seperti preview; JANGAN set `EMAIL_DEBUG_LINKS=true` di produksi (tautan verifikasi akan bocor di respons API).

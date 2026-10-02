@@ -88,6 +88,7 @@ export function TaskNotifier() {
         const r = await api.get("/task-notifications");
         if (stop || !r.data.length) return;
         r.data.forEach((t) => toast(t.status === "completed" ? `Tugas selesai: ${t.goal}` : `Tugas gagal: ${t.goal}`, { description: t.persona_name ? `oleh ${t.persona_name}` : undefined, action: { label: "Buka", onClick: () => nav(`/workspace/${t.id}`) }, duration: 12000 }));
+        window.dispatchEvent(new CustomEvent("oryntix:task-done", { detail: r.data }));
         await api.post("/task-notifications/ack");
       } catch (e) {}
     };
