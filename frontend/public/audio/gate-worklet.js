@@ -1,3 +1,4 @@
+/* global AudioWorkletProcessor, registerProcessor, sampleRate, currentTime */
 // Adaptive noise gate: passes only audio clearly above the room's noise floor (= the person near the mic).
 const PROFILES = {
   low: { margin: 18, attack: 120, hold: 500, floorMin: 0.04 },

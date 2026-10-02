@@ -159,6 +159,13 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Zoom/Meet/Teams: bot meeting (Recall.ai / Meeting BaaS) atau kamera+share screen WebRTC di ruang meeting Oryntix.
 - Avatar interaktif (Runway LiveKit / HeyGen-Simli / animasi 2.5D).
 
+## Update 2026-06 (r) — Panel Chat Meeting + mic ala ChatGPT Voice (noise gate adaptif, RNNoise, semantic VAD)
+- **Panel Chat Meeting** (`components/MeetingChatPanel.jsx`) di RealtimeMeeting, RealtimeCall, VideoRoom: panel kanan 360px (desktop, default terbuka) / bottom sheet 70vh (mobile, default tertutup); tombol 💬 dengan badge belum dibaca; preferensi di localStorage `aivora_meeting_chat_open`. Isi panel **hanya pesan teks/data** (`via:"meeting_chat"`), transkrip suara tetap di caption. User mengetik → asisten menjawab **hanya teks** (markdown tabel/kode/tautan; URL .mp4/.webm/gambar di-embed; `media[]` didukung untuk tool mendatang). Backend: `MsgIn.channel="meeting_chat"` → satu persona menjawab (atau yang di-@mention), tanpa Moderator, prompt `MEETING_CHAT_STYLE`; pesan tersimpan dengan `via`. Tanya-jawab panel disuntikkan ke sesi Realtime sebagai konteks `[Chat panel] ...`. `Markdown.jsx` kini merender tabel pipe.
+- **Mic**: `lib/micPipeline.js` — mic → RNNoise (WASM worklet, `public/audio/rnnoise-worklet.js`+wasm, paket `@sapphi-red/web-noise-suppressor`) → **noise gate adaptif** (`public/audio/gate-worklet.js`: noise floor adaptif, margin 18/12/6 dB untuk Rendah/Sedang/Tinggi, attack dengan look-ahead, hold) → MediaStream yang dikirim ke OpenAI/recorder. Suara orang jauh di bawah ambang → hening. Backend `vad_config()`: **semantic_vad** (eagerness = sensitivitas, via `?sensitivity=` atau `settings.mic_sensitivity`), `interrupt_response:false` — browser **mengonfirmasi sela** hanya bila gate terbuka ≥300 ms (`BARGE_CONFIRM_MS`) lalu `response.cancel`+`output_audio_buffer.clear`. Ubah sensitivitas saat panggilan → `session.update` live.
+- **Menu pengaturan mic** (`components/MicSettingsMenu.jsx`): ikon ⚙ di bar kontrol → popover: Sensitivitas (Rendah/Sedang/Tinggi), toggle Peredam bising (AI), meter level + garis ambang. Persist: localStorage `aivora_mic_prefs` + `PUT /api/auth/settings {mic_sensitivity, noise_suppression}`.
+- Tested: iteration_16 — backend 11/11, FE 100% (desktop, mobile, RealtimeCall, regresi). **Kualitas gate/RNNoise dengan suara nyata perlu uji manual user.**
+- Backlog: Tahap 2 tool-use & routing (Seedance video/gambar/dokumen dari chat meeting, model per topik) — hasil masuk `media[]` panel.
+
 ## Next tasks
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
 - Verifikasi email saat daftar (ditunda; perlu Resend/SendGrid key).

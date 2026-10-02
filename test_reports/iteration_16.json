@@ -1,0 +1,28 @@
+{
+  "summary": "Iter 16 verifies the new 'meeting_chat' side-channel + mic settings menu + realtime negotiate ?sensitivity. 11/11 backend pytest cases pass (TestSettings, TestMeetingChat, TestRealtime). Frontend: desktop RealtimeMeeting opens with meeting-chat-panel visible by default, existing meeting_chat messages render with a <table> element inside mc-msg-assistant bubbles (markdown pipe tables), send button disabled when empty, Enter sends → optimistic mc-msg-user, mc-live streaming bubble, then persisted mc-msg-assistant (count +1). Close hides the panel, localStorage key aivora_meeting_chat_open flips to '0', toggle re-opens. Mic settings popover shows mic-sens-low/medium/high + mic-noise-toggle + mic-meter; clicking mic-sens-high fires PUT /api/auth/settings and GET /api/auth/me reflects settings.mic_sensitivity='high'; toggle mic-noise-toggle persists noise_suppression. Private RealtimeCall (/chat/<private>) shows the same mic-settings-btn, meeting-chat-toggle and panel; rt-end closes. Mobile 390x844: panel hidden by default (toggle visible), toggle opens as bottom sheet, close hides. Regression: /chat regular chat-send-btn still works and 'Akhiri & Simpan Notulen' (rtm-end-save) closes meeting without JS errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_oryntix_iter16.py",
+    "/app/test_reports/pytest/iter16_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "chat.py MsgIn.channel uses pattern='^(meeting_chat)$' giving automatic 422 on unknown values — good. _persona_reply(via=x.channel) attaches via on BOTH user and assistant persisted docs; moderator branch is skipped when channel is set (`not x.channel`). Clean implementation.",
+    "chat.py: @mention routing still runs first via _mentioned() even for meeting_chat; only when no mention is found does it fall back to personas[:1]. Matches spec exactly.",
+    "realtime_voice.vad_config reads request.query_params['sensitivity'] with fallback to user settings; eagerness map covers all three values; interrupt_response=False as required.",
+    "auth.SettingsIn uses Pydantic pattern on mic_sensitivity + Optional[bool] for noise_suppression; update_settings merges only non-None fields so partial updates preserve previous mic_sensitivity (verified).",
+    "MeetingChatPanel: isChat filter correctly excludes voice transcripts (via='realtime' or no 'via') from the panel list; markdown table rendered with MD_DARK scoping so no leakage to the main chat.",
+    "Minor: Chat.jsx line 248 renders 'call-mode-btn' for private + 'video-call-btn' for group/meeting — testids differ from the task text which mentions video-call-btn generically; current code is correct and the integration still works end to end.",
+    "Minor: RealtimeMeeting cleanup effect on unmount calls hangup/endSessions which also fires once in StrictMode double-mount in dev — not an issue in prod, no stale OpenAI calls observed in logs.",
+    "Minor nit: streamChatWithAtt passes {channel:'meeting_chat'} alongside legacy flags; backend ignores unknown fields but keeping channel as the single source of truth is cleaner."
+  ],
+  "updated_files": ["/app/backend/tests/test_oryntix_iter16.py", "/app/test_reports/iteration_16.json"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% (desktop meeting + private realtime call + mic settings + mobile + regression)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (workspace admin). Meeting CID: bcf72bc8-1c0d-4c5f-bb3c-e7d15dbee9f6 (Meeting: Rio, Nova).",
+  "seed_data_creation": "A handful of real meeting_chat messages added to the demo 'Meeting: Rio, Nova' conversation during the Playwright run (prompts 'Buatkan tabel 3 paket harga', '@Nova sebutkan 1 ide singkat', 'Sebutkan 3 poin singkat tentang strategi harga', 'regresi: halo singkat'). Each costs <0.6 kredit of chat budget and is harmless.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests live in /app/backend/tests/test_oryntix_iter16.py. Playwright meeting UI needs browser context.grant_permissions(['microphone']) BEFORE navigating; without it RealtimeMeeting unmounts via toast when getUserMedia fails. Pre-seed localStorage.aivora_meeting_chat_open='1' to force the panel open regardless of previous session state. Meeting_chat SSE from /api/conversations/{cid}/send includes exactly ONE persona 'final' event (no __moderator__). @mention honors case-insensitive match on 'Nova'. Negotiate accepts ?sensitivity=low|medium|high query param and bubbles OpenAI 400s back as 502 (never 500). Realtime creates real OpenAI calls (~75 kredit/min) so test runs end with rt-end / rtm-leave / rtm-end-save to flush.",
+  "rca of the issue": "N/A — all new functionality works as specified; no regressions found."
+}
