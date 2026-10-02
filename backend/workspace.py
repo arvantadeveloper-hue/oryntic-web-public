@@ -143,7 +143,7 @@ async def discuss_task(tid: str, x: DiscussIn, u: dict = Depends(current_user)):
         conv = {"id": new_id(), "user_id": u["id"], "workspace_id": workspace_id(u), "participants": [u["id"]], "type": ctype,
                 "persona_ids": [p["id"] for p in personas], "persona_id": personas[0]["id"], "task_id": tid,
                 "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")} for p in personas],
-                "title": f"{'Meeting' if ctype == 'meeting' else 'Diskusi'}: {(t.get('goal') or '')[:60]}", "created_at": now_iso(), "updated_at": now_iso(), "last_message": ""}
+                "title": f"{'Panggilan' if ctype == 'meeting' else 'Diskusi'}: {(t.get('goal') or '')[:60]}", "created_at": now_iso(), "updated_at": now_iso(), "last_message": ""}
         await db.conversations.insert_one(dict(conv))
         await db.tasks.update_one({"id": tid}, {"$addToSet": {"conversation_ids": conv["id"]}})
     return {"conversation_id": conv["id"], "open_call": x.mode in ("call", "meeting")}

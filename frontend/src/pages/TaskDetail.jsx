@@ -63,7 +63,7 @@ function DiscussBar({ task, nav }) {
       <span className="flex items-center gap-1 text-xs text-slate-500"><Bot size={13} /> {task.persona_name ? `Asisten: ${task.persona_name}` : "Hubungi asisten"}</span>
       <B mode="chat" Icon={MessageSquare} label="Chat" cls="bg-[#0B132B]" />
       <B mode="call" Icon={Phone} label="Telepon" cls="bg-[#10B981]" />
-      <B mode="meeting" Icon={Video} label="Buat Meeting" cls="bg-[#2F6BFF]" />
+      <B mode="meeting" Icon={Video} label="Buat Panggilan" cls="bg-[#2F6BFF]" />
     </div>
   );
 }

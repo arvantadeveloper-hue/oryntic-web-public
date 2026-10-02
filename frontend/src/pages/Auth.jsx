@@ -10,13 +10,13 @@ import { useNavigate } from "react-router-dom";
 const CHIPS = [
   { icon: BarChart3, label: "Analisis data" },
   { icon: FileText, label: "Buat dokumen" },
-  { icon: Users, label: "Meeting & notulen" },
+  { icon: Users, label: "Panggilan & notulen" },
   { icon: Sparkles, label: "Riset & insight" },
 ];
 const CARDS = [
   { icon: MessageSquare, title: "Multi-Agen AI", desc: "Diskusi dengan berbagai agen AI sesuai kebutuhan Anda.", c: "#2F6BFF" },
   { icon: FileText, title: "Dokumen & Analisis", desc: "Buat, analisis, dan ringkas dokumen dengan AI.", c: "#7C3AED" },
-  { icon: Video, title: "Meeting Assistant", desc: "Pengingat, ringkasan, dan tindak lanjut otomatis.", c: "#22B8FF" },
+  { icon: Video, title: "Panggilan Assistant", desc: "Pengingat, ringkasan, dan tindak lanjut otomatis.", c: "#22B8FF" },
 ];
 
 export default function Auth() {
@@ -90,7 +90,7 @@ export default function Auth() {
               Intelligence, <span className="grad-text">Orchestrated.</span>
             </h1>
             <p className="mt-4 max-w-md text-base text-white/75">
-              Oryntix membantu Anda berdiskusi, menganalisis, membuat dokumen, hingga menyelesaikan pekerjaan bersama tim agen AI — lewat chat maupun meeting suara.
+              Oryntix membantu Anda berdiskusi, menganalisis, membuat dokumen, hingga menyelesaikan pekerjaan bersama tim agen AI — lewat chat maupun panggilan suara.
             </p>
             <div className="mt-6 flex items-center gap-3">
               <div className="flex flex-wrap gap-2">

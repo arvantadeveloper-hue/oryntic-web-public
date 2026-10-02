@@ -338,7 +338,7 @@ export function VideoRoom({ conv, cid, messages = [], onClose, onRefresh, isPriv
       api.post(`/conversations/${cid}/compact`).catch(() => {});
       const summary = r.data.summary || "";
       onRefresh && onRefresh();
-      toast.success("Notulen meeting tersimpan di Ruang Kerja");
+      toast.success("Notulen panggilan tersimpan di Ruang Kerja");
       if (summary) {
         setCaption({ name: "Moderator", text: summary });
         try {
@@ -353,7 +353,7 @@ export function VideoRoom({ conv, cid, messages = [], onClose, onRefresh, isPriv
         } catch (e) {}
       }
     } catch (e) {
-      toast.message(e?.response?.data?.detail || "Meeting diakhiri");
+      toast.message(e?.response?.data?.detail || "Panggilan diakhiri");
     }
     openRef.current = false; onClose();
   };
@@ -366,7 +366,7 @@ export function VideoRoom({ conv, cid, messages = [], onClose, onRefresh, isPriv
     listening: barged ? "Anda menyela — silakan lanjutkan, saya mendengarkan" : "Mendengarkan Anda — bicara saja, otomatis terkirim saat berhenti",
     thinking: "Asisten sedang berpikir... (bicara kapan saja untuk menyela)",
     speaking: "Sedang berbicara — Anda bisa menyela kapan saja",
-    ending: "Moderator merangkum meeting...",
+    ending: "Moderator merangkum panggilan...",
   }[phase];
 
   const participants = tiles.map((tl) => ({ ...tl, status: statusMap[tl.id] || "", level: tl.isMe ? micLevel : 0 }));
@@ -433,7 +433,7 @@ export function VideoRoom({ conv, cid, messages = [], onClose, onRefresh, isPriv
         <span className="flex h-9 items-center gap-2 rounded-full bg-white/10 px-3 text-sm font-semibold backdrop-blur">
           <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /> {conv.title}
         </span>
-        <span className="hidden text-xs text-white/60 sm:block">{isPrivate ? "Panggilan suara" : `Meeting · ${members.length} asisten${hasModerator ? " + Moderator" : ""}`}</span>
+        <span className="hidden text-xs text-white/60 sm:block">{isPrivate ? "Panggilan suara" : `Panggilan · ${members.length} asisten${hasModerator ? " + Moderator" : ""}`}</span>
         <span className="ml-auto truncate text-xs text-white/70" data-testid="vr-phase">{phaseLabel}</span>
       </div>
       <MeetingShell layout={layout} chatOpen={chat.open} stage={stage} caption={captionEl} controls={controls} participants={participants}

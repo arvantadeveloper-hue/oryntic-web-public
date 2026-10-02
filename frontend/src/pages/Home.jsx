@@ -60,7 +60,7 @@ export default function Home() {
   const upcoming = reminders.filter((r) => ["scheduled", "ringing"].includes(r.status)).slice(0, 4);
   const activity = [
     ...tasks.map((t) => ({ id: "t" + t.id, icon: FolderKanban, tint: "#7C3AED", text: `Tugas "${t.goal}" ${t.status === "completed" ? "selesai" : t.status === "running" ? "sedang dikerjakan" : t.status}`, at: t.updated_at || t.created_at, to: `/workspace/${t.id}` })),
-    ...convs.map((c) => ({ id: "c" + c.id, icon: c.type === "meeting" ? Video : MessageSquare, tint: c.type === "meeting" ? "#10B981" : "#2F6BFF", text: c.type === "meeting" ? `Meeting "${c.title}"` : `Percakapan "${c.title}"`, at: c.updated_at || c.created_at, to: `/chat/${c.id}` })),
+    ...convs.map((c) => ({ id: "c" + c.id, icon: c.type === "meeting" ? Video : MessageSquare, tint: c.type === "meeting" ? "#10B981" : "#2F6BFF", text: c.type === "meeting" ? `Panggilan "${c.title}"` : `Percakapan "${c.title}"`, at: c.updated_at || c.created_at, to: `/chat/${c.id}` })),
   ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 5);
 
   const now = new Date();
@@ -68,14 +68,14 @@ export default function Home() {
   const first = (user?.name || "").split(" ")[0];
   const QUICK = [
     { icon: Bot, title: "Agen Baru", desc: "Buat & atur agen AI", to: isAdmin ? "/personas/new" : "/chat", tint: "#2F6BFF" },
-    { icon: Video, title: "Meeting", desc: "Rapat suara dengan agen", to: "/chat", tint: "#10B981" },
+    { icon: Video, title: "Panggilan", desc: "Rapat suara dengan agen", to: "/chat", tint: "#10B981" },
     { icon: FolderKanban, title: "Tugas Baru", desc: "Delegasikan pekerjaan", to: "/workspace", tint: "#7C3AED" },
     { icon: Bell, title: "Pengingat", desc: "Jadwal & panggilan", to: "/reminders", tint: "#F59E0B" },
     { icon: Users, title: "Tim", desc: "Kelola anggota", to: isAdmin ? "/team" : "/profile", tint: "#EC4899" },
   ];
   const TOOLS = [
     { icon: MessageSquare, label: "Chat", to: "/chat", tint: "#2F6BFF" }, { icon: FileText, label: "Dokumen", to: "/workspace", tint: "#10B981" },
-    { icon: Video, label: "Meeting", to: "/chat", tint: "#7C3AED" }, { icon: Search, label: "Riset", to: "/workspace", tint: "#F59E0B" },
+    { icon: Video, label: "Panggilan", to: "/chat", tint: "#7C3AED" }, { icon: Search, label: "Riset", to: "/workspace", tint: "#F59E0B" },
     { icon: Mic, label: "Suara", to: "/chat", tint: "#22B8FF" }, { icon: Zap, label: "Otomasi", to: "/workspace", tint: "#EC4899" },
     { icon: Bell, label: "Pengingat", to: "/reminders", tint: "#F97316" }, { icon: MoreHorizontal, label: "Lainnya", to: "/profile", tint: "#64748B" },
   ];
@@ -92,7 +92,7 @@ export default function Home() {
             <p className="mt-3 max-w-md text-sm text-slate-600 md:text-base">Orkestrasikan agen AI, otomatiskan alur kerja, dan percepat bisnis Anda bersama Oryntix.</p>
             <div className="mt-5 flex flex-wrap gap-2.5">
               <button onClick={() => nav(isAdmin ? "/personas/new" : "/chat")} data-testid="home-create-persona" className="btn-primary"><Plus size={16} /> {isAdmin ? "Create New Agent" : "Mulai Chat"}</button>
-              <button onClick={() => nav("/chat")} data-testid="home-team-chat" className="btn-soft">Mulai Meeting</button>
+              <button onClick={() => nav("/chat")} data-testid="home-team-chat" className="btn-soft">Mulai Panggilan</button>
             </div>
           </div>
           <img src={BRAND_HERO} alt="" className="hero-float pointer-events-none absolute -right-6 top-1/2 hidden w-72 -translate-y-1/2 drop-shadow-2xl md:block lg:w-80" />
@@ -183,8 +183,8 @@ export default function Home() {
         <div className="rounded-2xl p-5 text-white" style={{ background: "linear-gradient(135deg,#2F6BFF 0%,#5B3DF5 100%)" }} data-testid="home-promo">
           <Sparkles size={22} />
           <p className="mt-2 text-sm font-bold">Boost your productivity with AI meetings</p>
-          <p className="mt-1 text-xs text-white/80">Ajak beberapa agen ke satu ruang meeting, bicara bebas, dan dapatkan notulen otomatis.</p>
-          <button onClick={() => nav("/chat")} className="mt-3 flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-2 text-xs font-bold text-[#2F6BFF]">Start Meeting <ArrowRight size={13} /></button>
+          <p className="mt-1 text-xs text-white/80">Ajak beberapa agen ke satu ruang panggilan, bicara bebas, dan dapatkan notulen otomatis.</p>
+          <button onClick={() => nav("/chat")} className="mt-3 flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-2 text-xs font-bold text-[#2F6BFF]">Mulai Panggilan <ArrowRight size={13} /></button>
         </div>
 
         <div className="aivora-card p-4">

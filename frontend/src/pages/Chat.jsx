@@ -227,7 +227,7 @@ export default function Chat() {
   const convListInner = (mobile) => (
     <div className="flex h-full flex-col p-4">
       <button onClick={() => { openModal(); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-chat-btn-mobile" : "new-chat-btn"} className="btn-grad mb-2 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm"><Plus size={16} /> {t("chat.new")}</button>
-      <button onClick={() => { openModal("meeting"); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-meeting-btn-mobile" : "new-meeting-btn"} className="mb-4 flex items-center justify-center gap-2 rounded-xl border border-[#2F6BFF]/40 py-2.5 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Video size={16} /> Meeting Baru</button>
+      <button onClick={() => { openModal("meeting"); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-meeting-btn-mobile" : "new-meeting-btn"} className="mb-4 flex items-center justify-center gap-2 rounded-xl border border-[#2F6BFF]/40 py-2.5 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Video size={16} /> Panggilan Baru</button>
       <div className="relative mb-3">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input className="input-dark py-2 pl-9" placeholder={t("common.search")} value={q} onChange={(e) => { setQ(e.target.value); loadConvs(e.target.value); }} data-testid={mobile ? "chat-search-mobile" : "chat-search"} />
@@ -271,13 +271,13 @@ export default function Chat() {
             <>
               <div className="flex -space-x-2">{(conv.members || []).slice(0, 4).map((m) => <div key={m.id} className="rounded-full ring-2 ring-white"><Avatar name={m.name} portrait={m.portrait} size={32} /></div>)}</div>
               <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{conv.title}</p>
-                <p className="truncate text-xs text-slate-400">{conv.type === "meeting" ? `Meeting · ${conv.members?.length} asisten${(conv.members?.length || 0) > 1 ? " · 1 moderator" : ""}` : conv.type === "group" ? `Chat grup · ${conv.members?.length} asisten` : "Chat privat"}</p></div>
+                <p className="truncate text-xs text-slate-400">{conv.type === "meeting" ? `Panggilan · ${conv.members?.length} asisten${(conv.members?.length || 0) > 1 ? " · 1 moderator" : ""}` : conv.type === "group" ? `Chat grup · ${conv.members?.length} asisten` : "Chat privat"}</p></div>
             </>
           ) : <p className="truncate text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
           {conv && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {conv.type === "private" && <button onClick={() => setVideoOpen(true)} title={rt.enabled ? "Panggilan suara realtime" : "Mode panggilan suara"} data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil{rt.enabled ? " · Realtime" : ""}</span></button>}
-              {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Masuk ruang meeting" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#2F6BFF] px-2.5 text-xs font-semibold text-white sm:px-3"><Video size={15} /> <span className="hidden sm:inline">Masuk Meeting</span></button>}
+              {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Masuk ruang panggilan" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#2F6BFF] px-2.5 text-xs font-semibold text-white sm:px-3"><Video size={15} /> <span className="hidden sm:inline">Masuk Panggilan</span></button>}
               {conv.type !== "private" && <button onClick={saveNotes} disabled={savingNotes} title="Buat & simpan notulen ke Ruang Kerja" data-testid="save-notes-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#E6EAF2] bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:px-3">{savingNotes ? <RefreshCw size={15} className="animate-spin" /> : <FileText size={15} />} <span className="hidden sm:inline">Notulen</span></button>}
               <AddPersonaMenu conv={conv} personas={personas || []} onAdded={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />
               {conv.type === "meeting" && isAdmin && <button onClick={openInvite} title="Undang pengguna" data-testid="invite-user-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2F6BFF]/40 px-2.5 text-xs font-semibold text-[#2F6BFF] sm:px-3"><UserPlus size={15} /> <span className="hidden sm:inline">Undang</span></button>}
@@ -294,10 +294,10 @@ export default function Chat() {
             <div className="flex h-full flex-col items-center justify-center text-center">
               <Bot size={44} className="mb-4 text-[#2F6BFF]" />
               <h3 className="text-lg font-bold text-slate-900">Mulai percakapan dengan tim Anda</h3>
-              <p className="mt-1 max-w-sm text-sm text-slate-500">Pilih satu atau beberapa asisten untuk chat teks, atau langsung masuk ruang meeting suara.</p>
+              <p className="mt-1 max-w-sm text-sm text-slate-500">Pilih satu atau beberapa asisten untuk chat teks, atau langsung masuk ruang panggilan suara.</p>
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                 <button onClick={() => openModal()} data-testid="empty-new-chat-btn" className="btn-grad rounded-xl px-6 py-3 text-sm">+ Mulai Chat</button>
-                <button onClick={() => openModal("meeting")} data-testid="empty-new-meeting-btn" className="flex items-center gap-2 rounded-xl border border-[#2F6BFF]/40 px-6 py-3 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Video size={16} /> Meeting Baru</button>
+                <button onClick={() => openModal("meeting")} data-testid="empty-new-meeting-btn" className="flex items-center gap-2 rounded-xl border border-[#2F6BFF]/40 px-6 py-3 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Video size={16} /> Panggilan Baru</button>
               </div>
             </div>
           )}
@@ -386,7 +386,7 @@ export default function Chat() {
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowInvite(false)} />
           <div className="relative w-full max-w-md rounded-3xl border border-[#E7ECF3] bg-white p-6 shadow-2xl fade-up" data-testid="invite-modal">
             <button onClick={() => setShowInvite(false)} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
-            <h3 className="text-lg font-bold text-slate-900">Undang ke Meeting</h3>
+            <h3 className="text-lg font-bold text-slate-900">Undang ke Panggilan</h3>
             <p className="mt-1 text-sm text-slate-500">Pilih pengguna workspace untuk bergabung ke rapat ini secara real-time.</p>
             <button onClick={async () => { try { const r = await api.post(`/conversations/${id}/invite-link`); const url = `${window.location.origin}${r.data.path}`; try { await navigator.clipboard.writeText(url); } catch (e) {} toast.success("Tautan undangan disalin"); } catch (e) { toast.error("Gagal membuat tautan"); } }} data-testid="copy-invite-link-btn" className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[#2F6BFF]/40 py-2.5 text-sm font-semibold text-[#2F6BFF] hover:bg-[#EEF3FF]"><LinkIcon size={15} /> Salin Tautan Undangan Sekali Klik</button>
             <div className="mt-4 max-h-80 space-y-2 overflow-y-auto">
@@ -412,8 +412,8 @@ export default function Chat() {
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowModal(false)} />
           <div className="relative w-full max-w-md rounded-3xl border border-[#E7ECF3] bg-white p-6 shadow-2xl fade-up" data-testid="new-chat-modal">
             <button onClick={() => setShowModal(false)} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
-            <h3 className="text-lg font-bold text-slate-900">{mode === "meeting" ? "Meeting Baru" : "Chat Baru"}</h3>
-            <p className="mt-1 text-sm text-slate-500">{mode === "meeting" ? "Pilih satu atau lebih asisten. Ruang meeting langsung terbuka setelah Anda menekan Mulai." : "Pilih satu atau lebih asisten untuk diajak chat."}</p>
+            <h3 className="text-lg font-bold text-slate-900">{mode === "meeting" ? "Panggilan Baru" : "Chat Baru"}</h3>
+            <p className="mt-1 text-sm text-slate-500">{mode === "meeting" ? "Pilih satu atau lebih asisten. Ruang panggilan langsung terbuka setelah Anda menekan Mulai." : "Pilih satu atau lebih asisten untuk diajak chat."}</p>
             <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
               {(personas || []).map((p) => {
                 const on = picked.includes(p.id);
@@ -427,8 +427,8 @@ export default function Chat() {
               })}
             </div>
             <div className="mt-4 flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500">{picked.length === 0 ? "Belum dipilih" : mode === "meeting" ? `Meeting · ${picked.length} asisten` : picked.length > 1 ? `Chat grup · ${picked.length} asisten` : "Chat privat"}</span>
-              <button onClick={startConv} className="btn-grad flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm" data-testid="start-conv-btn">{mode === "meeting" && <Video size={15} />} {mode === "meeting" ? "Mulai Meeting" : "Mulai"}</button>
+              <span className="text-xs font-semibold text-slate-500">{picked.length === 0 ? "Belum dipilih" : mode === "meeting" ? `Panggilan · ${picked.length} asisten` : picked.length > 1 ? `Chat grup · ${picked.length} asisten` : "Chat privat"}</span>
+              <button onClick={startConv} className="btn-grad flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm" data-testid="start-conv-btn">{mode === "meeting" && <Video size={15} />} {mode === "meeting" ? "Mulai Panggilan" : "Mulai"}</button>
             </div>
           </div>
         </div>

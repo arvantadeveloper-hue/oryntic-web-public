@@ -32,7 +32,7 @@ export function useMeetingChat(messages = []) {
 
 export function ChatToggleButton({ open, unread, onClick }) {
   return (
-    <button onClick={onClick} data-testid="meeting-chat-toggle" title="Chat meeting" className={`relative flex h-14 w-14 items-center justify-center rounded-full text-white transition ${open ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}>
+    <button onClick={onClick} data-testid="meeting-chat-toggle" title="Chat panggilan" className={`relative flex h-14 w-14 items-center justify-center rounded-full text-white transition ${open ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}>
       <MessageSquare size={22} />
       {unread > 0 && <span data-testid="meeting-chat-unread" className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#2F6BFF] px-1 text-[11px] font-bold">{unread}</span>}
     </button>
@@ -118,7 +118,7 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
       {side && <div className="flex items-center gap-2 px-4 py-3"><span className="mx-auto mb-1 block h-1 w-10 rounded-full bg-white/20 lg:hidden" /></div>}
       <div className={`${side ? "-mt-3" : "pt-3"} flex items-center gap-2 px-4 pb-3`}>
         <MessageSquare size={16} className="text-[#8FB0FF]" />
-        <span className="text-sm font-bold text-white">Chat Meeting</span>
+        <span className="text-sm font-bold text-white">Chat Panggilan</span>
         <span className="hidden text-[11px] text-white/40 sm:inline">teks, data, gambar & dokumen dari asisten</span>
         {side && <button onClick={onClose} data-testid="meeting-chat-close" className="ml-auto rounded-lg p-1.5 text-white/60 transition hover:bg-white/10 hover:text-white"><X size={16} /></button>}
       </div>

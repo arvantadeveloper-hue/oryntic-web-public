@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState } from "react";
 
 const DICT = {
   id: {
-    "nav.home": "Beranda", "nav.personas": "Persona", "nav.chat": "Chat & Meeting",
+    "nav.home": "Beranda", "nav.personas": "Persona", "nav.chat": "Chat & Panggilan",
     "nav.workspace": "Ruang Kerja", "nav.reminders": "Pengingat", "nav.wallet": "Kredit",
     "nav.profile": "Profil", "nav.admin": "Admin", "nav.logout": "Keluar",
     "common.loading": "Memuat...", "common.save": "Simpan", "common.cancel": "Batal",
@@ -25,7 +25,7 @@ const DICT = {
     "reminders.before": "Ingatkan sebelum", "common.minutes": "menit",
   },
   en: {
-    "nav.home": "Home", "nav.personas": "Personas", "nav.chat": "Chat & Meeting",
+    "nav.home": "Home", "nav.personas": "Personas", "nav.chat": "Chat & Panggilan",
     "nav.workspace": "Workspace", "nav.reminders": "Reminders", "nav.wallet": "Credits",
     "nav.profile": "Profile", "nav.admin": "Admin", "nav.logout": "Log out",
     "common.loading": "Loading...", "common.save": "Save", "common.cancel": "Cancel",

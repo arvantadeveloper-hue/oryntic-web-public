@@ -80,7 +80,7 @@ async def execute_assigned_task(tid: str):
                                                          "completed_at": now_iso(), "updated_at": now_iso(), "summary": f"Dikerjakan oleh {persona.get('name')}"}})
         for cid in t.get("conversation_ids") or []:
             await _save_ai_msg(cid, persona, f"Tugas **{t.get('goal')}** sudah selesai ✅ dan tersimpan di Ruang Kerja — [buka hasilnya](/workspace/{tid}).\n\n"
-                               f"Kalau mau, buat meeting dari Ruang Kerja dan saya paparkan hasilnya, atau minta revisi langsung di sini.", 0, "text",
+                               f"Kalau mau, buat panggilan dari Ruang Kerja dan saya paparkan hasilnya, atau minta revisi langsung di sini.", 0, "text",
                                {"tool": "task_done", "task_id": tid})
     except Exception as e:
         log.error("assigned task %s failed: %s", tid, e)
@@ -95,6 +95,7 @@ async def tasks_tick():
     async for t in db.tasks.find({"status": "scheduled", "scheduled_at": {"$lte": now}}, {"_id": 0, "id": 1}):
         await db.tasks.update_one({"id": t["id"]}, {"$set": {"status": "queued"}})
         asyncio.create_task(execute_assigned_task(t["id"]))
+    await digest_tick()
     stale = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
     async for t in db.tasks.find({"type": "assigned", "status": {"$in": ["queued", "running"]}, "updated_at": {"$lte": stale}}, {"_id": 0, "id": 1}):
         if t["id"] not in _running:
@@ -115,7 +116,7 @@ async def accept_pending(conv: dict, u: dict, mode: str) -> dict:
     if mode == "delegate":
         task = await create_assigned_task(u, persona, conv, plan, "chat")
         text = (f"Beres! Tugas **{task['goal']}** sudah masuk ke Ruang Kerja dan akan saya kerjakan {when_text(task.get('scheduled_at'), tz)}. "
-                f"Begitu selesai, saya kabari di sini — dan Anda bisa buat meeting dari Ruang Kerja supaya saya paparkan hasilnya. [Lihat di Ruang Kerja](/workspace/{task['id']})")
+                f"Begitu selesai, saya kabari di sini — dan Anda bisa buat panggilan dari Ruang Kerja supaya saya paparkan hasilnya. [Lihat di Ruang Kerja](/workspace/{task['id']})")
         return await _save_ai_msg(conv["id"], persona, text, 0, "text", {"tool": "task_assigned", "task_id": task["id"]})
     system = await _persona_system(persona, u, None)
     out = await llm_text(system + "\n\nThe user chose to work through the task together step by step. Propose a short plan (3-6 steps) and ask which step to start with. Keep it brief.",
@@ -205,6 +206,10 @@ async def calendar(start: str, end: str, u: dict = Depends(current_user)):
     s, e = _utc(start), _utc(end)
     if not s or not e:
         raise HTTPException(400, "Rentang tanggal tidak valid")
+    return await calendar_items(u, s, e)
+
+
+async def calendar_items(u: dict, s: str, e: str) -> list:
     wid = workspace_id(u)
     items = []
     async for t in db.tasks.find({"workspace_id": wid, "$or": [{"scheduled_at": {"$gte": s, "$lt": e}}, {"completed_at": {"$gte": s, "$lt": e}}]},
@@ -220,3 +225,98 @@ async def calendar(start: str, end: str, u: dict = Depends(current_user)):
         items.append({"kind": "event", "id": ev["id"], "title": ev["title"], "at": ev["start_at"], "end_at": ev.get("end_at"), "notes": ev.get("notes"), "mine": ev["user_id"] == u["id"]})
     items.sort(key=lambda i: i.get("at") or "")
     return items
+
+
+# ---------- daily digest ----------
+DIGEST_WINDOW_H = 3
+
+
+def _local_now(tz: str):
+    from zoneinfo import ZoneInfo
+    try:
+        return datetime.now(ZoneInfo(tz or "Asia/Jakarta"))
+    except Exception:
+        return datetime.now(ZoneInfo("Asia/Jakarta"))
+
+
+async def build_digest(u: dict, persona: dict) -> tuple:
+    """(markdown for chat, plain spoken text for calls, credits)."""
+    from zoneinfo import ZoneInfo
+    tz = (u.get("settings") or {}).get("timezone") or "Asia/Jakarta"
+    now = _local_now(tz)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
+    agenda = await calendar_items(u, day_start.astimezone(timezone.utc).isoformat(), day_end.astimezone(timezone.utc).isoformat())
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    done = await db.tasks.find({"workspace_id": workspace_id(u), "status": "completed", "completed_at": {"$gte": since}}, {"_id": 0, "goal": 1, "persona_name": 1}).to_list(20)
+    running = await db.tasks.count_documents({"workspace_id": workspace_id(u), "status": {"$in": ["queued", "running", "scheduled"]}})
+
+    def fmt(it):
+        t = datetime.fromisoformat(it["at"]).astimezone(ZoneInfo(tz)).strftime("%H:%M") if it.get("at") else "-"
+        return f"- {t} [{it['kind']}] {it['title']}" + (f" ({it.get('status')})" if it.get("status") else "")
+    data = (f"Date: {now.strftime('%A, %d %B %Y')} ({tz}). User: {u.get('name')}.\n"
+            f"TODAY'S AGENDA ({len(agenda)}):\n" + ("\n".join(fmt(i) for i in agenda) or "- (kosong)") +
+            f"\n\nTASKS COMPLETED IN THE LAST 24H ({len(done)}):\n" + ("\n".join(f"- {d['goal']} (oleh {d.get('persona_name') or 'asisten'})" for d in done) or "- (tidak ada)") +
+            f"\n\nTasks still in progress/scheduled: {running}.")
+    system = await _persona_system(persona, u, None) + ("\n\nWrite the user's DAILY DIGEST as a warm, concise morning briefing in markdown: greeting with the user's name, "
+                                                        "today's agenda in order (times), tasks completed since yesterday, what is still in progress, and ONE short encouraging closing line. "
+                                                        "Use ONLY the data given; never invent items. Max ~180 words.")
+    md = await llm_text(system, data)
+    used = text_credits(data, md)
+    await record_usage(u["id"], "daily_digest", used, {})
+    import re as _re
+    spoken = _re.sub(r"[#*_`>\[\]()]+", "", md)
+    return md, spoken, used
+
+
+async def send_digest(u: dict, force: bool = False) -> dict:
+    from reminders import _private_conv, _store_opening
+    cfg = (u.get("settings") or {}).get("daily_digest") or {}
+    if not (cfg.get("enabled") or force):
+        return {"sent": False, "reason": "disabled"}
+    wid = workspace_id(u)
+    persona = await db.personas.find_one({"id": cfg.get("persona_id"), "deleted": {"$ne": True}}, {"_id": 0}) if cfg.get("persona_id") else None
+    persona = persona or await db.personas.find_one({"user_id": wid, "deleted": {"$ne": True}}, {"_id": 0}, sort=[("created_at", 1)])
+    if not persona:
+        return {"sent": False, "reason": "no persona"}
+    md, spoken, used = await build_digest(u, persona)
+    channel = cfg.get("channel") or "chat"
+    out = {"sent": True, "channel": channel, "credits_used": used}
+    if channel in ("chat", "both"):
+        conv = await _private_conv(u, persona)
+        await _store_opening(conv, persona, md, used)
+        out["conversation_id"] = conv["id"]
+    if channel in ("call", "both"):
+        now = now_iso()
+        rem = {"id": new_id(), "user_id": u["id"], "title": "Ringkasan harian", "description": spoken[:1500], "start_at": now, "remind_minutes": 0,
+               "remind_at": now, "persona_id": persona["id"], "status": "ringing", "ringing_at": now, "message": "", "kind": "digest", "created_at": now}
+        await db.reminders.insert_one(dict(rem))
+        out["reminder_id"] = rem["id"]
+    await db.users.update_one({"id": u["id"]}, {"$set": {"digest_last_date": _local_now((u.get("settings") or {}).get("timezone")).strftime("%Y-%m-%d"), "digest_last_at": now_iso()}})
+    return out
+
+
+async def digest_tick():
+    async for u in db.users.find({"settings.daily_digest.enabled": True}, {"_id": 0, "password_hash": 0}):
+        cfg = u["settings"]["daily_digest"]
+        now = _local_now(u["settings"].get("timezone"))
+        today = now.strftime("%Y-%m-%d")
+        if u.get("digest_last_date") == today:
+            continue
+        try:
+            hh, mm = (cfg.get("time") or "07:00").split(":")
+            due = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+        except Exception:
+            continue
+        if due <= now < due + timedelta(hours=DIGEST_WINDOW_H):
+            try:
+                await send_digest(u)
+            except Exception as e:
+                log.error("digest for %s failed: %s", u.get("email"), e)
+                await db.users.update_one({"id": u["id"]}, {"$set": {"digest_last_date": today}})
+
+
+@router.post("/digest/send-now")
+async def digest_now(u: dict = Depends(current_user)):
+    """Preview/manual trigger from the Calendar settings card."""
+    return await send_digest(u, force=True)

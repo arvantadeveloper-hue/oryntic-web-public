@@ -33,7 +33,7 @@ export default function JoinMeeting() {
       const r = await api.post(`/invites/${token}/register`, form);
       setAuthToken(r.data.access_token);
       await refreshUser();
-      toast.success("Akun dibuat & bergabung ke meeting");
+      toast.success("Akun dibuat & bergabung ke panggilan");
       nav(`/chat/${r.data.conversation_id}`);
     } catch (e) { toast.error(e?.response?.data?.detail || "Gagal mendaftar"); } finally { setBusy(false); }
   };
@@ -48,7 +48,7 @@ export default function JoinMeeting() {
           <div className="flex items-center gap-2 text-slate-400"><Loader2 size={16} className="animate-spin" /> Memuat undangan...</div>
         ) : (
           <>
-            <span className="flex items-center gap-2 rounded-full bg-[#EEF3FF] px-3 py-1 text-xs font-semibold text-[#2F6BFF]"><Gavel size={13} /> Undangan Meeting</span>
+            <span className="flex items-center gap-2 rounded-full bg-[#EEF3FF] px-3 py-1 text-xs font-semibold text-[#2F6BFF]"><Gavel size={13} /> Undangan Panggilan</span>
             <h1 className="mt-3 text-2xl font-bold text-slate-900">{info.title}</h1>
             <p className="mt-1 text-sm text-slate-500">Workspace {info.workspace} · {info.members?.length || 0} asisten AI</p>
             <div className="mt-3 flex flex-wrap gap-2">

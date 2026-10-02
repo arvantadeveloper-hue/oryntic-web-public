@@ -287,7 +287,7 @@ async def revise_with_llm(task: dict, request: str, system: str, model_key: Opti
 TASK_RE = re.compile(r"\b(tolong|bisa|minta|buatkan|buatlah|kerjakan|susun(kan)?|siapkan|rancang|analisis|analisa|riset|teliti|rangkum|ringkas|terjemahkan|"
                      r"laporan|proposal|rencana|roadmap|strategi|artikel|esai|modul|kurikulum|presentasi|jadwalkan|nanti|besok|lusa|minggu depan|jam \d|pukul \d|deadline|tenggat)\b", re.I)
 OFFER_TEXT = ("Siap, {uname}! Tugas ini cukup besar: **{title}**.\n\nMau kita **bahas satu per satu** di sini, atau **terima beres** saja? "
-              "Kalau terima beres, tugas saya masukkan ke Ruang Kerja dan kerjakan {when}; setelah selesai saya kabari di chat ini, dan Anda bisa buat meeting supaya saya paparkan hasilnya.")
+              "Kalau terima beres, tugas saya masukkan ke Ruang Kerja dan kerjakan {when}; setelah selesai saya kabari di chat ini, dan Anda bisa buat panggilan supaya saya paparkan hasilnya.")
 
 
 async def plan_task(text: str, tz: str, history: str = "") -> dict:

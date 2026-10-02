@@ -264,7 +264,7 @@ async def set_moderator(cid: str, x: ModeratorIn, u: dict = Depends(current_user
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
     if x.persona_id not in (conv.get("persona_ids") or []):
-        raise HTTPException(400, "Persona bukan peserta meeting ini")
+        raise HTTPException(400, "Persona bukan peserta panggilan ini")
     await db.conversations.update_one({"id": cid}, {"$set": {"moderator_persona_id": x.persona_id, "updated_at": now_iso()}})
     return {"ok": True, "moderator_persona_id": x.persona_id}
 

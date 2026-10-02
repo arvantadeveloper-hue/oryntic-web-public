@@ -94,7 +94,7 @@ export default function Team() {
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-8" data-testid="team-page">
       <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Tim & Pengguna</h1>
-      <p className="mt-1 text-sm text-slate-500">Undang rekan lewat email. Mereka membuat kata sandi sendiri (atau menerima dari akun yang sudah ada) dan bisa chat & ikut meeting di workspace ini, tetapi tidak bisa mengubah setelan, kredit, atau persona.</p>
+      <p className="mt-1 text-sm text-slate-500">Undang rekan lewat email. Mereka membuat kata sandi sendiri (atau menerima dari akun yang sudah ada) dan bisa chat & ikut panggilan di workspace ini, tetapi tidak bisa mengubah setelan, kredit, atau persona.</p>
       <SmartRoutingToggle user={user} onSaved={refreshUser} />
 
       <form onSubmit={invite} className="aivora-card mt-6 flex flex-col gap-3 p-5 sm:flex-row" data-testid="invite-form">

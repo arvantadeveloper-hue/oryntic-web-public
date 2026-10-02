@@ -259,7 +259,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
       loop();
     } catch (e) {
       if (stale()) return;
-      toast.error(e?.response?.data?.detail || e?.message || "Gagal memulai meeting realtime");
+      toast.error(e?.response?.data?.detail || e?.message || "Gagal memulai panggilan realtime");
       hangupAll(false);
     }
   };
@@ -299,7 +299,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     if (withSummary && msgCountRef.current > 0) {
       setPhase("ending");
       try { await api.post(`/conversations/${cid}/summary`); await api.post(`/conversations/${cid}/compact`).catch(() => {}); toast.success("Notulen tersimpan di Ruang Kerja; transkrip lama diarsipkan"); }
-      catch (e) { toast.message(e?.response?.data?.detail || "Meeting diakhiri"); }
+      catch (e) { toast.message(e?.response?.data?.detail || "Panggilan diakhiri"); }
     }
     onRefresh && onRefresh();
     onClose();

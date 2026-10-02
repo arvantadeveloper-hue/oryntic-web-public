@@ -24,7 +24,7 @@ export function NotulenFormatCard({ user, onSaved }) {
     <div className="mt-4 aivora-card p-6" data-testid="notulen-format-card">
       <div className="flex items-center gap-3">
         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#2F6BFF]/10 text-[#2F6BFF]"><FileText size={18} /></span>
-        <div className="flex-1"><p className="text-sm font-bold text-slate-900">Format Notulen</p><p className="text-xs text-slate-500">Kolom yang harus ada di setiap notulen meeting. Kolom <b>wajib</b> dicek asisten sebelum meeting diakhiri.</p></div>
+        <div className="flex-1"><p className="text-sm font-bold text-slate-900">Format Notulen</p><p className="text-xs text-slate-500">Kolom yang harus ada di setiap notulen panggilan. Kolom <b>wajib</b> dicek asisten sebelum panggilan diakhiri.</p></div>
       </div>
       <div className="mt-4 space-y-2">
         {fields.map((f, i) => (

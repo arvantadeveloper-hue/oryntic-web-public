@@ -113,7 +113,7 @@ async def _get_personas(ids, wid=None):
 def _conv_title(ctype: str, personas: list) -> str:
     names = ", ".join(p["name"] for p in personas)
     if ctype == "meeting":
-        return "Meeting: " + names
+        return "Panggilan: " + names
     if ctype == "group":
         return "Grup: " + names
     return f"Chat dengan {personas[0]['name']}"
@@ -171,7 +171,7 @@ async def add_participants(cid: str, x: InviteIn, u: dict = Depends(current_user
     if conv.get("user_id") != u["id"] and u.get("role") != "admin":
         raise HTTPException(403, "Hanya pembuat atau admin yang bisa mengundang")
     if conv.get("type") == "private":
-        raise HTTPException(400, "Undangan hanya untuk grup atau meeting")
+        raise HTTPException(400, "Undangan hanya untuk grup atau panggilan")
     wid = workspace_id(u)
     allowed = set(await member_ids(wid))
     add = [i for i in dict.fromkeys(x.user_ids) if i in allowed]
@@ -188,7 +188,7 @@ async def create_invite_link(cid: str, u: dict = Depends(current_user)):
     if conv.get("user_id") != u["id"] and u.get("role") != "admin":
         raise HTTPException(403, "Hanya pembuat atau admin yang bisa membuat tautan")
     if conv.get("type") == "private":
-        raise HTTPException(400, "Tautan hanya untuk grup atau meeting")
+        raise HTTPException(400, "Tautan hanya untuk grup atau panggilan")
     token = conv.get("invite_token")
     exp = conv.get("invite_expires_at")
     if not token or not exp or exp < now_iso():
@@ -719,7 +719,7 @@ def _reply_extra(x: MsgIn, attach_text: str) -> str:
     if x.interrupted:
         notes.append("\n[Catatan: user baru saja menyela saat asisten sedang berbicara. Tanggapi langsung apa yang user katakan.]")
     if x.channel == "meeting_chat":
-        notes.append("\n[Catatan: pesan terakhir user DIKETIK di panel chat meeting; jawab dalam bentuk teks/markdown.]")
+        notes.append("\n[Catatan: pesan terakhir user DIKETIK di panel chat panggilan; jawab dalam bentuk teks/markdown.]")
     return "".join(notes)
 
 
@@ -835,7 +835,7 @@ async def moderate(cid: str, x: ModerateIn, u: dict = Depends(current_user)):
     await rate_limit(u, "chat")
     conv, personas = await _load_ai_conv(cid, u)
     if conv.get("type") == "private":
-        raise HTTPException(400, "Moderator hanya untuk meeting")
+        raise HTTPException(400, "Moderator hanya untuk panggilan")
     user_turns = await db.messages.count_documents({"conversation_id": cid, "role": "user"})
     needed = 2 if x.reason == "stuck" else 1
     if len(personas) < 2 or user_turns < needed or (x.reason == "stuck" and not await _is_stuck(cid)):
@@ -876,7 +876,7 @@ async def meeting_summary(cid: str, u: dict = Depends(current_user)):
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
     if conv.get("type") == "private":
-        raise HTTPException(400, "Notulen hanya untuk percakapan grup atau meeting")
+        raise HTTPException(400, "Notulen hanya untuk percakapan grup atau panggilan")
     history = await _history_text(cid, limit=40)
     if not history.strip():
         raise HTTPException(400, "Belum ada diskusi untuk diringkas")

@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -312,6 +313,7 @@ class SettingsIn(BaseModel):
     noise_suppression: Optional[bool] = None
     smart_routing: Optional[bool] = None  # workspace owner: auto-route topics to the best model
     notulen_fields: Optional[list] = Field(default=None, max_length=12)  # [{name, required}]
+    daily_digest: Optional[dict] = None  # {enabled, channel: chat|call|both, time: "HH:MM", persona_id}
 
 
 @router.put("/settings")
@@ -320,6 +322,13 @@ async def update_settings(x: SettingsIn, u: dict = Depends(current_user)):
     data = x.model_dump()
     if data.get("notulen_fields") is not None:
         data["notulen_fields"] = [{"name": str(f.get("name", ""))[:60].strip(), "required": bool(f.get("required"))} for f in data["notulen_fields"] if str(f.get("name", "")).strip()]
+    if data.get("daily_digest") is not None:
+        d = data["daily_digest"]
+        ch = d.get("channel") if d.get("channel") in ("chat", "call", "both") else "chat"
+        tm = str(d.get("time") or "07:00")
+        if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", tm):
+            raise HTTPException(400, "Format jam harus HH:MM")
+        data["daily_digest"] = {"enabled": bool(d.get("enabled")), "channel": ch, "time": tm, "persona_id": d.get("persona_id") or None}
     settings.update({k: v for k, v in data.items() if v is not None})
     await db.users.update_one({"id": u["id"]}, {"$set": {"settings": settings}})
     return public_user(await db.users.find_one({"id": u["id"]}, {"_id": 0}))
@@ -371,6 +380,9 @@ async def migrate_workspace():
     async for t in db.tasks.find({"workspace_id": {"$exists": False}}, {"_id": 0, "id": 1, "user_id": 1}):
         owner = await db.users.find_one({"id": t["user_id"]}, {"_id": 0, "owner_id": 1}) or {}
         await db.tasks.update_one({"id": t["id"]}, {"$set": {"workspace_id": owner.get("owner_id") or t["user_id"]}})
+    # UI wording: "Meeting" → "Panggilan" in stored conversation titles
+    async for c in db.conversations.find({"title": {"$regex": "^Meeting: "}}, {"_id": 0, "id": 1, "title": 1}):
+        await db.conversations.update_one({"id": c["id"]}, {"$set": {"title": "Panggilan: " + c["title"][len("Meeting: "):]}})
     # accounts created before email verification existed stay active
     await db.users.update_many({"verified": {"$exists": False}}, {"$set": {"verified": True}})
     # legacy members (owner_id != id) get an explicit joined membership so they can also use their home workspace

@@ -3,11 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Plus, ClipboardList, Bell, Video, CalendarDays, Trash2, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
+import { DailyDigestCard } from "../components/DailyDigestCard";
 
 const KIND = {
   task: { label: "Tugas", color: "#2F6BFF", Icon: ClipboardList },
   reminder: { label: "Pengingat", color: "#F59E0B", Icon: Bell },
-  meeting: { label: "Meeting", color: "#7C3AED", Icon: Video },
+  meeting: { label: "Panggilan", color: "#7C3AED", Icon: Video },
   event: { label: "Event", color: "#10B981", Icon: CalendarDays },
 };
 const DAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
@@ -72,7 +73,7 @@ export default function Calendar() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Kalender</h1>
-          <p className="mt-1 text-sm text-slate-500">Tugas terjadwal, pengingat, meeting, dan event tim dalam satu tampilan.</p>
+          <p className="mt-1 text-sm text-slate-500">Tugas terjadwal, pengingat, panggilan, dan event tim dalam satu tampilan.</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))} className="rounded-lg border border-[#E7ECF3] p-2 hover:bg-slate-50" data-testid="cal-prev"><ChevronLeft size={16} /></button>
@@ -101,6 +102,8 @@ export default function Calendar() {
           </div>
         </div>
 
+        <div className="space-y-4">
+        <DailyDigestCard />
         <div className="aivora-card p-4" data-testid="cal-day-panel">
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold text-slate-900">{selected.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
@@ -126,6 +129,7 @@ export default function Calendar() {
               );
             })}
           </div>
+        </div>
         </div>
       </div>
     </div>
