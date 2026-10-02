@@ -3,6 +3,9 @@ import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { RealtimeSession } from "../lib/realtimeSession";
+import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
+import { MicSettingsMenu } from "./MicSettingsMenu";
+import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
 import { Tile } from "./VideoRoom";
 import { useAuth } from "../context/AuthContext";
 
@@ -11,7 +14,7 @@ const MOD = "__moderator__";
 const SILENCE_MS = 20000;
 
 // Multi-assistant meeting where every agent has its own Realtime voice; the browser orchestrates turns.
-export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
+export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }) {
   const { user } = useAuth();
   const members = conv.members || [];
   const [phase, setPhase] = useState("connecting"); // connecting|listening|user_speaking|responding|ending
@@ -22,9 +25,13 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
   const [muted, setMuted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [cpmTotal, setCpmTotal] = useState(null);
+  const [micPrefs, setMicPrefs] = useState(() => loadMicPrefs(user));
+  const [pipe, setPipe] = useState(null);
+  const chat = useMeetingChat(messages);
 
   const sessionsRef = useRef([]); // RealtimeSession[]
-  const streamRef = useRef(null);
+  const pipeRef = useRef(null);
+  const bargeTimerRef = useRef(null);
   const startedAtRef = useRef(null);
   const endedRef = useRef(false);
   const runIdRef = useRef(0);
@@ -140,11 +147,30 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
     setPhase("user_speaking"); setStatus(ME, "speaking");
   };
 
+  // Like ChatGPT Voice: only a sustained voice near the mic (gate open ≥300ms) interrupts; stray sounds are ignored.
+  const confirmInterrupt = () => {
+    const openFor = pipeRef.current ? pipeRef.current.openFor() : Infinity;
+    if (openFor >= BARGE_CONFIRM_MS) { userInterrupted(); return; }
+    if (bargeTimerRef.current) clearTimeout(bargeTimerRef.current);
+    bargeTimerRef.current = setTimeout(() => { if (!endedRef.current && pipeRef.current?.isOpen()) userInterrupted(); }, Math.max(60, BARGE_CONFIRM_MS - openFor));
+  };
+
+  const changeMic = (p) => {
+    setMicPrefs(p); saveMicPrefs(p);
+    pipeRef.current?.setSensitivity(p.sensitivity); pipeRef.current?.setNoise(p.noise);
+    sessionsRef.current.forEach((s) => s.updateVad(p.sensitivity));
+  };
+
+  // typed Q&A in the chat panel is shared with every voice agent as context
+  const onChatExchange = (q, a, name) => {
+    sessionsRef.current.forEach((o) => o.inject(`[Chat panel] ${user?.name || "User"} typed: ${q}\n[Chat panel] ${name} replied in text: ${a.slice(0, 600)}`));
+  };
+
   const handleEvent = (s, ev) => {
     const pid = s.persona.id;
     switch (ev.type) {
       case "input_audio_buffer.speech_started":
-        if (s.primary) userInterrupted(); break;
+        if (s.primary) confirmInterrupt(); break;
       case "input_audio_buffer.speech_stopped":
         if (s.primary) {
           setStatus(ME, "listening");
@@ -205,10 +231,11 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
       created = c.data.sessions;
       if (stale()) { created.forEach((x) => api.post(`/realtime/calls/${x.call_id}/end`, { elapsed_seconds: 0 }).catch(() => {})); return; }
       setCpmTotal(c.data.credits_per_min_total);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      if (stale()) { stream.getTracks().forEach((t) => t.stop()); return; }
-      streamRef.current = stream;
-      const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, stream, onEvent: handleEvent, onError: () => { if (!endedRef.current) { toast.message("Koneksi salah satu peserta terputus"); } } }));
+      const mic = new MicPipeline(micPrefs);
+      const stream = await mic.start();
+      if (stale()) { mic.stop(); return; }
+      pipeRef.current = mic; setPipe(mic);
+      const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, stream, sensitivity: micPrefs.sensitivity, createResponse: created.length === 1, onEvent: handleEvent, onError: () => { if (!endedRef.current) { toast.message("Koneksi salah satu peserta terputus"); } } }));
       sessionsRef.current = sessions;
       await Promise.all(sessions.map((s) => s.connect()));
       if (stale()) return;
@@ -235,9 +262,10 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
     if (userTimerRef.current) clearTimeout(userTimerRef.current);
+    if (bargeTimerRef.current) clearTimeout(bargeTimerRef.current);
     clearSilence(); stopModerator();
     sessionsRef.current.forEach((s) => s.close());
-    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch (e) {}
+    try { pipeRef.current?.stop(); } catch (e) {}
   };
 
   const endSessions = () => {
@@ -267,7 +295,7 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
     // eslint-disable-next-line
   }, []);
 
-  const toggleMute = () => { const nv = !muted; setMuted(nv); streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !nv; }); };
+  const toggleMute = () => { const nv = !muted; setMuted(nv); pipeRef.current?.setMuted(nv); };
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0"), ss = String(elapsed % 60).padStart(2, "0");
   const label = { connecting: "Menyambungkan semua peserta...", listening: "Mendengarkan Anda — bicara saja, sebut nama untuk bertanya ke agen tertentu. Moderator hanya menyela saat buntu/hening.", user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
   const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait })), { id: MOD, isMod: true, name: "Moderator" }];
@@ -280,32 +308,41 @@ export function RealtimeMeeting({ conv, cid, onClose, onRefresh }) {
         <span className="ml-auto font-mono text-sm text-white/80" data-testid="rtm-timer">{mm}:{ss}</span>
         {cpmTotal && <span className="hidden text-xs text-white/50 sm:block">{cpmTotal} kredit/mnt</span>}
       </div>
-      <p className="px-6 text-center text-xs text-white/60" data-testid="rtm-phase">{phase === "connecting" && <Loader2 size={12} className="mr-1 inline animate-spin" />}{label}</p>
 
-      <div className="flex flex-1 items-center overflow-y-auto px-4 pb-2 sm:px-6">
-        <div className="mx-auto grid w-full max-w-6xl gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
-          {tiles.map((tl) => (
-            <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} />
-          ))}
-        </div>
-      </div>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <p className="px-6 text-center text-xs text-white/60" data-testid="rtm-phase">{phase === "connecting" && <Loader2 size={12} className="mr-1 inline animate-spin" />}{label}</p>
 
-      {showCaption && caption && (
-        <div className="px-4 pb-2 sm:px-6" data-testid="rtm-caption">
-          <div className="mx-auto max-w-3xl rounded-2xl bg-black/50 px-4 py-3 text-center backdrop-blur">
-            <p className="text-xs font-bold uppercase tracking-wider text-emerald-300">{caption.name}</p>
-            <p className="mt-1 max-h-24 overflow-y-auto text-sm leading-relaxed text-white/90">{caption.text}</p>
+          <div className="flex flex-1 items-center overflow-y-auto px-4 pb-2 sm:px-6">
+            <div className="mx-auto grid w-full max-w-6xl gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
+              {tiles.map((tl) => (
+                <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} />
+              ))}
+            </div>
+          </div>
+
+          {showCaption && caption && (
+            <div className="px-4 pb-2 sm:px-6" data-testid="rtm-caption">
+              <div className="mx-auto max-w-3xl rounded-2xl bg-black/50 px-4 py-3 text-center backdrop-blur">
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-300">{caption.name}</p>
+                <p className="mt-1 max-h-24 overflow-y-auto text-sm leading-relaxed text-white/90">{caption.text}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-3 px-4 py-5 sm:gap-4">
+            <button onClick={toggleMute} data-testid="rtm-mute" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
+            <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
+            <button onClick={() => setShowCaption((s) => !s)} data-testid="rtm-captions" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}><Captions size={22} /></button>
+            <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />
+            <button onClick={() => hangupAll(true)} disabled={phase === "ending"} data-testid="rtm-end-save" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-5 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-60">
+              {phase === "ending" ? <Loader2 size={20} className="animate-spin" /> : <PhoneOff size={20} />}<span className="hidden sm:inline">Akhiri & Simpan Notulen</span>
+            </button>
+            <button onClick={() => hangupAll(false)} data-testid="rtm-leave" title="Keluar tanpa notulen" className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20"><PhoneOff size={20} /></button>
           </div>
         </div>
-      )}
 
-      <div className="flex items-center justify-center gap-3 px-4 py-5 sm:gap-4">
-        <button onClick={toggleMute} data-testid="rtm-mute" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
-        <button onClick={() => setShowCaption((s) => !s)} data-testid="rtm-captions" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}><Captions size={22} /></button>
-        <button onClick={() => hangupAll(true)} disabled={phase === "ending"} data-testid="rtm-end-save" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-5 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-60">
-          {phase === "ending" ? <Loader2 size={20} className="animate-spin" /> : <PhoneOff size={20} />}<span className="hidden sm:inline">Akhiri & Simpan Notulen</span>
-        </button>
-        <button onClick={() => hangupAll(false)} data-testid="rtm-leave" title="Keluar tanpa notulen" className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20"><PhoneOff size={20} /></button>
+        {chat.open && <MeetingChatPanel cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} />}
       </div>
     </div>
   );

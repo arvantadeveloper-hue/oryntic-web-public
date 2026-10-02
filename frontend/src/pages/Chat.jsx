@@ -171,6 +171,7 @@ export default function Chat() {
   };
 
   const delConv = async (c, e) => { e.stopPropagation(); await api.delete(`/conversations/${c.id}`); loadConvs(); if (c.id === id) nav("/chat"); };
+  const refreshMsgs = () => { refreshUser(); return api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); };
   const copy = (txt) => { navigator.clipboard.writeText(txt); toast.success("Disalin"); };
   const saveMem = async (m) => { await api.post("/memory", { persona_id: m.persona_id || conv?.persona_id || null, content: m.content.slice(0, 300) }); toast.success("Disimpan ke memori"); };
   const regen = async (mid) => { setStreaming(true); try { await api.post(`/conversations/${id}/messages/${mid}/regenerate`); const mr = await api.get(`/conversations/${id}/messages`); setMessages(mr.data.messages); refreshUser(); } catch (e) { toast.error("Gagal"); } finally { setStreaming(false); } };
@@ -332,10 +333,10 @@ export default function Chat() {
       </div>
 
       {videoOpen && conv && (conv.type === "private" && rt.enabled
-        ? <RealtimeCall conv={conv} cid={id} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />
+        ? <RealtimeCall conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />
         : conv.type !== "private" && rt.enabled
-        ? <RealtimeMeeting conv={conv} cid={id} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />
-        : <VideoRoom conv={conv} cid={id} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={() => { api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); refreshUser(); }} />)}
+        ? <RealtimeMeeting conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />
+        : <VideoRoom conv={conv} cid={id} messages={messages} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />)}
 
       {showInvite && conv && (
         <div className="fixed inset-0 z-[92] flex items-center justify-center p-4">

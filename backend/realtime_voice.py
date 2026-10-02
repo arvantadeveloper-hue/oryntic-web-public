@@ -171,16 +171,23 @@ async def _own_call(call_id: str, u: dict) -> dict:
     return call
 
 
+def vad_config(sensitivity: str, multi: bool) -> dict:
+    """Semantic VAD judges whether the audio is meaningful speech; eagerness follows the user's mic sensitivity.
+    interrupt_response is off: the browser confirms a real barge-in (noise gate open ≥300ms) before cancelling."""
+    eager = {"low": "low", "medium": "medium", "high": "high"}.get(sensitivity or "medium", "medium")
+    return {"type": "semantic_vad", "eagerness": eager, "create_response": not multi, "interrupt_response": False}
+
+
 @router.post("/realtime/calls/{call_id}/negotiate", response_class=PlainTextResponse)
 async def negotiate(call_id: str, request: Request, u: dict = Depends(current_user)):
     call = await _own_call(call_id, u)
     if call["status"] == "ended":
         raise HTTPException(400, "Call already ended")
     sdp_offer = (await request.body()).decode()
-    lang = ((u.get("settings") or {}).get("conversation_language") or "id")
+    settings = u.get("settings") or {}
+    lang = settings.get("conversation_language") or "id"
     multi = bool(call.get("multi"))
-    audio_in = {"turn_detection": {"type": "server_vad", "threshold": 0.5, "prefix_padding_ms": 300,
-                                   "silence_duration_ms": 650, "create_response": not multi, "interrupt_response": True}}
+    audio_in = {"turn_detection": vad_config(request.query_params.get("sensitivity") or settings.get("mic_sensitivity"), multi)}
     if not multi or call.get("primary"):
         audio_in["transcription"] = {"model": "gpt-4o-mini-transcribe", "language": lang}
     session = {

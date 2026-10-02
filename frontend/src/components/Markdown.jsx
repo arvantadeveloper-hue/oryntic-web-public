@@ -53,6 +53,23 @@ export function Markdown({ content = "" }) {
       blocks.push(<ol key={key++}>{items}</ol>);
       continue;
     }
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+        if (!/^\s*\|[\s:|-]+\|\s*$/.test(lines[i])) rows.push(lines[i].trim().slice(1, -1).split("|").map((c) => c.trim()));
+        i++;
+      }
+      if (rows.length) {
+        const [head, ...body] = rows;
+        blocks.push(
+          <div key={key++} className="overflow-x-auto"><table>
+            <thead><tr>{head.map((c, k) => <th key={k} dangerouslySetInnerHTML={{ __html: inline(c) }} />)}</tr></thead>
+            <tbody>{body.map((r, ri) => <tr key={ri}>{r.map((c, k) => <td key={k} dangerouslySetInnerHTML={{ __html: inline(c) }} />)}</tr>)}</tbody>
+          </table></div>
+        );
+      }
+      continue;
+    }
     if (line.trim() === "") { i++; continue; }
     blocks.push(<p key={key++} dangerouslySetInnerHTML={{ __html: inline(line) }} />);
     i++;

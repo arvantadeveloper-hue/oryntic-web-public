@@ -76,6 +76,7 @@ class MsgIn(BaseModel):
     moderator: bool = True  # legacy flag (ignored): Moderator now only interjects when the discussion is stuck
     voice_mode: bool = False  # spoken conversation: short, warm, human-like replies (no markdown)
     interrupted: bool = False  # the user barged in while the assistant was speaking
+    channel: Optional[str] = Field(default=None, pattern="^(meeting_chat)$")  # typed in the live meeting's chat panel
 
 
 class MemIn(BaseModel):
@@ -282,6 +283,11 @@ VOICE_STYLE = ("SPOKEN CONVERSATION MODE: your words will be read aloud by text-
                "(e.g. 'oke', 'hmm', 'baik') and acknowledge what the user said before answering. Ask one short follow-up question "
                "when it helps. If the user interrupted you, stop your previous thought gracefully and respond to what they just said.")
 
+MEETING_CHAT_STYLE = ("MEETING CHAT PANEL: a live voice meeting is in progress and the user just TYPED this message in the meeting's text "
+                      "chat panel. Reply in TEXT only (this reply is shown in the panel, not spoken): use markdown freely — tables, "
+                      "numbered lists, code blocks, links — whenever it makes the data clearer. Be complete but compact; do not greet, "
+                      "do not say you will 'speak' or 'read' anything aloud.")
+
 
 async def _persona_system(persona, user, roster=None, voice_mode=False):
     prof = persona.get("profile", {})
@@ -337,11 +343,13 @@ def _mentioned(content: str, personas: list) -> list:
     return [p for p in personas if ("@" + p["name"].lower().replace(" ", "")) in lower.replace(" ", "") or ("@" + p["name"].lower()) in lower]
 
 
-async def _persona_reply(cid: str, u: dict, persona: dict, roster, prompt: str, voice_mode: bool, meta_extra: dict):
+async def _persona_reply(cid: str, u: dict, persona: dict, roster, prompt: str, voice_mode: bool, meta_extra: dict, via: str = None):
     """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
     meta = {"persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}
     yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
     system = await _persona_system(persona, u, roster, voice_mode=voice_mode)
+    if via == "meeting_chat":
+        system += "\n\n" + MEETING_CHAT_STYLE
     try:
         full = await llm_text(system, prompt, persona.get("model"))
     except Exception:
@@ -354,6 +362,8 @@ async def _persona_reply(cid: str, u: dict, persona: dict, roster, prompt: str, 
     ai_msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": full,
               "persona_id": persona["id"], "persona_name": persona["name"],
               "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso()}
+    if via:
+        ai_msg["via"] = via
     await db.messages.insert_one(dict(ai_msg))
     yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full})}\n\n"
     await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
@@ -378,26 +388,32 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     user_msg = {"id": new_id(), "conversation_id": cid, "role": "user", "content": x.content,
                 "attachments": attach_meta, "sender_user_id": u["id"], "sender_name": u.get("name") or "User",
                 "created_at": now_iso()}
+    if x.channel:
+        user_msg["via"] = x.channel
     await db.messages.insert_one(dict(user_msg))
     await notify(cid, {"type": "message", "role": "user", "sender_name": user_msg["sender_name"]})
 
     responders = _mentioned(x.content, personas) or personas
+    if x.channel == "meeting_chat" and not _mentioned(x.content, personas):
+        responders = personas[:1]  # text side-channel: one assistant answers unless someone is @mentioned
     roster = [p["name"] for p in personas] if len(personas) > 1 else None
     extra = (f"\n\n[Lampiran dari user]:\n{attach_text}" if attach_text else "")
     if x.interrupted:
         extra += "\n[Catatan: user baru saja menyela saat asisten sedang berbicara. Tanggapi langsung apa yang user katakan.]"
+    if x.channel == "meeting_chat":
+        extra += "\n[Catatan: pesan terakhir user DIKETIK di panel chat meeting; jawab dalam bentuk teks/markdown.]"
 
     async def stream():
         total = 0
         for persona in responders:
             prompt = (await _history_text(cid)) + extra + f"\n{persona['name']}:"
-            async for ev in _persona_reply(cid, u, persona, roster, prompt, x.voice_mode, {}):
+            async for ev in _persona_reply(cid, u, persona, roster, prompt, x.voice_mode, {}, via=x.channel):
                 if isinstance(ev, int):
                     total += ev
                 else:
                     yield ev
         # meeting: the Moderator only steps in when the discussion is stuck; notulen is on demand via /summary
-        if conv.get("type") == "meeting" and len(responders) > 1:
+        if conv.get("type") == "meeting" and len(responders) > 1 and not x.channel:
             user_turns = await db.messages.count_documents({"conversation_id": cid, "role": "user"})
             if user_turns >= 2 and await _is_stuck(cid):
                 async for ev in _moderator_interject(cid, u, roster, "stuck"):

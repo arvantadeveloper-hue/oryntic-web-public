@@ -1,10 +1,16 @@
 import { API_BASE, getToken } from "./api";
 
+// Same semantic-VAD mapping as backend `vad_config`; interruption is confirmed client-side (see MicPipeline.openFor).
+export const vadUpdate = (sensitivity, createResponse) => ({
+  type: "session.update",
+  session: { type: "realtime", audio: { input: { turn_detection: { type: "semantic_vad", eagerness: sensitivity, create_response: createResponse, interrupt_response: false } } } },
+});
+
 // One OpenAI Realtime WebRTC session (negotiated via our backend) sharing the user's mic stream.
 export class RealtimeSession {
-  constructor({ callId, persona, primary, stream, onEvent, onError }) {
+  constructor({ callId, persona, primary, stream, onEvent, onError, sensitivity = "medium", createResponse = false }) {
     this.callId = callId; this.persona = persona; this.primary = primary; this.stream = stream;
-    this.onEvent = onEvent; this.onError = onError;
+    this.onEvent = onEvent; this.onError = onError; this.sensitivity = sensitivity; this.createResponse = createResponse;
     this.pc = null; this.dc = null; this.audioEl = null; this.ac = null; this.analyser = null; this.buf = null;
     this.level = 0; this.closed = false;
   }
@@ -19,7 +25,7 @@ export class RealtimeSession {
     pc.onconnectionstatechange = () => { if (["failed", "disconnected", "closed"].includes(pc.connectionState) && !this.closed) this.onError?.(this, new Error("connection lost")); };
     const opened = new Promise((resolve) => { dc.onopen = resolve; });
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
-    const res = await fetch(`${API_BASE}/realtime/calls/${this.callId}/negotiate`, { method: "POST", headers: { "Content-Type": "application/sdp", Authorization: `Bearer ${getToken()}` }, body: offer.sdp });
+    const res = await fetch(`${API_BASE}/realtime/calls/${this.callId}/negotiate?sensitivity=${this.sensitivity}`, { method: "POST", headers: { "Content-Type": "application/sdp", Authorization: `Bearer ${getToken()}` }, body: offer.sdp });
     if (!res.ok) { let d = "Negosiasi gagal"; try { d = (await res.json()).detail || d; } catch (e) {} throw new Error(d); }
     const answer = await res.text();
     if (this.closed) return;
@@ -51,6 +57,11 @@ export class RealtimeSession {
   cancel() { this.send({ type: "response.cancel" }); this.send({ type: "output_audio_buffer.clear" }); }
 
   inject(text) { this.send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } }); }
+
+  updateVad(sensitivity) {
+    this.sensitivity = sensitivity;
+    this.send(vadUpdate(sensitivity, this.createResponse));
+  }
 
   close() {
     this.closed = true;
