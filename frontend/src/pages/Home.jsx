@@ -103,7 +103,7 @@ export default function Home() {
           <Stat icon={Bot} label="Active Agents" value={personas.length} tint="#2F6BFF" testId="stat-agents" />
           <Stat icon={FolderKanban} label="Projects" value={tasks.length} tint="#7C3AED" testId="stat-projects" />
           <Stat icon={CheckCircle2} label="Tasks Completed" value={completed.length} tint="#10B981" testId="stat-completed" />
-          <Stat icon={Clock} label="Meetings" value={convs.filter((c) => c.type === "meeting").length} tint="#F59E0B" testId="stat-meetings" />
+          <Stat icon={Clock} label="Panggilan" value={convs.filter((c) => c.type === "meeting").length} tint="#F59E0B" testId="stat-meetings" />
         </section>
 
         <div className="grid gap-5 lg:grid-cols-2">
