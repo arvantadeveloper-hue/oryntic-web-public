@@ -3,6 +3,7 @@ import { Users, Briefcase, MessageSquare, Sparkles, Bell, Server } from "lucide-
 import { api } from "../lib/api";
 import { RealtimePricingCard } from "../components/RealtimePricingCard";
 import { RateLimitsCard } from "../components/RateLimitsCard";
+import { ModelRoutingCard } from "../components/ModelRoutingCard";
 import { PlatformPricingCard, TrialCard } from "../components/PlatformPricingCards";
 
 export default function Admin() {
@@ -126,6 +127,10 @@ export default function Admin() {
           <div>
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Rate Limits</h3>
             <RateLimitsCard />
+          </div>
+          <div>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Model Routing & Tools</h3>
+            <ModelRoutingCard />
           </div>
         </div>
       )}

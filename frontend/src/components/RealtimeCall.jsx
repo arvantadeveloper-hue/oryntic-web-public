@@ -6,12 +6,14 @@ import { vadUpdate } from "../lib/realtimeSession";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
+import { MeetingShell, LayoutMenu, useMeetingLayout } from "./MeetingShell";
 import { useAuth } from "../context/AuthContext";
 
 // ChatGPT-Voice style call: speech-to-speech via OpenAI Realtime (WebRTC), negotiated through our backend.
 export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, opening = null }) {
   const { user } = useAuth();
   const persona = (conv.members || [])[0] || {};
+  const [layout, setLayout] = useMeetingLayout();
   const [phase, setPhase] = useState("connecting"); // connecting|listening|user_speaking|thinking|speaking|ended
   const [muted, setMuted] = useState(false);
   const [showCaption, setShowCaption] = useState(true);
@@ -204,6 +206,40 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
   const speaking = phase === "speaking";
   const ring = 1 + (speaking ? level * 0.35 : phase === "user_speaking" ? 0.06 : 0);
 
+  const participants = [{ id: "me", isMe: true, name: user?.name || "Anda", status: phase === "user_speaking" ? "speaking" : "listening", level: phase === "user_speaking" ? 0.5 : 0 }, { id: persona.id || "p", name: persona.name, portrait: persona.portrait, status: speaking ? "speaking" : phase === "thinking" ? "thinking" : "", level }];
+  const stage = (
+    <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-6">
+      <div className="relative flex items-center justify-center" style={{ width: 260, height: 260 }}>
+        <span className="absolute inset-0 rounded-full transition-transform duration-100" style={{ transform: `scale(${ring + 0.25})`, background: "radial-gradient(circle, rgba(47,107,255,.35) 0%, rgba(124,58,237,.12) 55%, transparent 70%)", opacity: speaking ? 0.9 : 0.45 }} />
+        <span className={`absolute inset-6 rounded-full border-2 transition-transform duration-100 ${speaking ? "border-[#2F6BFF]" : phase === "user_speaking" ? "border-emerald-400" : "border-white/15"}`} style={{ transform: `scale(${ring})` }} />
+        <div className="relative h-40 w-40 overflow-hidden rounded-full shadow-2xl" data-testid="rt-avatar" style={{ transform: `scale(${1 + (speaking ? level * 0.08 : 0)})`, transition: "transform .1s" }}>
+          {persona.portrait ? <img src={persona.portrait} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-5xl font-bold" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(persona.name || "A")[0]}</div>}
+        </div>
+      </div>
+      <h2 className="mt-6 text-2xl font-bold">{persona.name || "Asisten"}</h2>
+      <p className="mt-1 flex items-center gap-2 text-sm text-white/70" data-testid="rt-phase">{phase === "connecting" && <Loader2 size={14} className="animate-spin" />}{label}</p>
+    </div>
+  );
+  const captionEl = showCaption && (live || captions.length > 0) ? (
+    <div className={`${layout === "chat" ? "" : "mx-auto px-6 pb-4"} w-full max-w-2xl space-y-2`} data-testid="rt-captions">
+      {captions.slice(-2).map((c, i) => (
+        <p key={i} className={`text-center text-sm ${c.role === "user" ? "text-emerald-200/80" : "text-white/60"}`}><span className="mr-1 text-[10px] font-bold uppercase tracking-wider opacity-70">{c.role === "user" ? "Anda" : persona.name}</span>{c.text}</p>
+      ))}
+      {live && <p className="text-center text-base leading-relaxed text-white">{live}</p>}
+      {layout === "chat" && <p className="text-center text-xs text-white/60" data-testid="rt-phase-rail">{label}</p>}
+    </div>
+  ) : (layout === "chat" ? <p className="text-center text-xs text-white/60">{label}</p> : null);
+  const controls = (
+    <div className="flex items-center justify-center gap-3 px-4 py-8 sm:gap-4">
+      <button onClick={toggleMute} data-testid="rt-mute" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
+      <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
+      <LayoutMenu layout={layout} onChange={setLayout} />
+      <button onClick={() => setShowCaption((s) => !s)} data-testid="rt-captions-toggle" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}><Captions size={22} /></button>
+      {layout !== "chat" && <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />}
+      <button onClick={hangup} data-testid="rt-end" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-6 text-sm font-bold transition hover:brightness-105"><PhoneOff size={20} /> Akhiri</button>
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-[97] flex flex-col text-white" style={{ background: "radial-gradient(900px 600px at 50% 20%, #1a2550 0%, #0a0f1f 65%)" }} data-testid="realtime-call">
       <div className="flex items-center gap-3 px-5 py-4">
@@ -212,41 +248,8 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
         <span className="ml-auto font-mono text-sm text-white/80" data-testid="rt-timer">{mm}:{ss}</span>
         {cpm && <span className="hidden text-xs text-white/50 sm:block">{cpm} kredit/mnt</span>}
       </div>
-
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-6">
-            <div className="relative flex items-center justify-center" style={{ width: 260, height: 260 }}>
-              <span className="absolute inset-0 rounded-full transition-transform duration-100" style={{ transform: `scale(${ring + 0.25})`, background: "radial-gradient(circle, rgba(47,107,255,.35) 0%, rgba(124,58,237,.12) 55%, transparent 70%)", opacity: speaking ? 0.9 : 0.45 }} />
-              <span className={`absolute inset-6 rounded-full border-2 transition-transform duration-100 ${speaking ? "border-[#2F6BFF]" : phase === "user_speaking" ? "border-emerald-400" : "border-white/15"}`} style={{ transform: `scale(${ring})` }} />
-              <div className="relative h-40 w-40 overflow-hidden rounded-full shadow-2xl" data-testid="rt-avatar" style={{ transform: `scale(${1 + (speaking ? level * 0.08 : 0)})`, transition: "transform .1s" }}>
-                {persona.portrait ? <img src={persona.portrait} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-5xl font-bold" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(persona.name || "A")[0]}</div>}
-              </div>
-            </div>
-            <h2 className="mt-6 text-2xl font-bold">{persona.name || "Asisten"}</h2>
-            <p className="mt-1 flex items-center gap-2 text-sm text-white/70" data-testid="rt-phase">{phase === "connecting" && <Loader2 size={14} className="animate-spin" />}{label}</p>
-
-            {showCaption && (live || captions.length > 0) && (
-              <div className="mt-8 w-full max-w-2xl space-y-2" data-testid="rt-captions">
-                {captions.slice(-2).map((c, i) => (
-                  <p key={i} className={`text-center text-sm ${c.role === "user" ? "text-emerald-200/80" : "text-white/60"}`}><span className="mr-1 text-[10px] font-bold uppercase tracking-wider opacity-70">{c.role === "user" ? "Anda" : persona.name}</span>{c.text}</p>
-                ))}
-                {live && <p className="text-center text-base leading-relaxed text-white">{live}</p>}
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-center gap-3 px-4 py-8 sm:gap-4">
-            <button onClick={toggleMute} data-testid="rt-mute" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
-            <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
-            <button onClick={() => setShowCaption((s) => !s)} data-testid="rt-captions-toggle" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}><Captions size={22} /></button>
-            <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />
-            <button onClick={hangup} data-testid="rt-end" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-6 text-sm font-bold transition hover:brightness-105"><PhoneOff size={20} /> Akhiri</button>
-          </div>
-        </div>
-
-        {chat.open && <MeetingChatPanel cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} />}
-      </div>
+      <MeetingShell layout={layout} chatOpen={chat.open} stage={stage} caption={captionEl} controls={controls} participants={participants}
+        chat={(variant) => <MeetingChatPanel variant={variant} cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} />} />
     </div>
   );
 }

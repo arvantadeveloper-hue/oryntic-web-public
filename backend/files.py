@@ -7,8 +7,15 @@ from fastapi.responses import Response
 
 from auth import JWT_SECRET, JWT_ISSUER
 from storage import get_object
+from db import db
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+
+async def _same_workspace(uid: str, owner_uid: str) -> bool:
+    users = await db.users.find({"id": {"$in": [uid, owner_uid]}}, {"_id": 0, "id": 1, "owner_id": 1}).to_list(2)
+    ws = {x["id"]: (x.get("owner_id") or x["id"]) for x in users}
+    return len(ws) == 2 and ws[uid] == ws[owner_uid]
 
 
 def _verify(token: str) -> str:
@@ -30,11 +37,13 @@ async def serve_file(path: str, authorization: Optional[str] = Header(None), aut
     if not token:
         raise HTTPException(401, "Not authenticated")
     uid = _verify(token)
-    # Files are namespaced by user id: aivora/videos/{user_id}/...
+    # Files are namespaced by owner user id: aivora/{kind}/{user_id}/...; readable by the whole workspace
     parts = path.split("/")
     if any(seg in ("", ".", "..") for seg in parts) or "\\" in path:
         raise HTTPException(403, "Forbidden")
-    if len(parts) < 4 or parts[0] != "aivora" or parts[2] != uid:
+    if len(parts) < 4 or parts[0] != "aivora":
+        raise HTTPException(403, "Forbidden")
+    if parts[2] != uid and not await _same_workspace(uid, parts[2]):
         raise HTTPException(403, "Forbidden")
     try:
         data, content_type = await asyncio.to_thread(get_object, path)

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare, Video, UserPlus, Link as LinkIcon } from "lucide-react";
+import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare, Video, UserPlus, Link as LinkIcon, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -9,6 +9,7 @@ import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
 import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
+import { MediaList, ToolRequestCard, ModelBadge } from "../components/MessageExtras";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
 
 function Avatar({ name, portrait, size = 32, moderator }) {
@@ -159,8 +160,11 @@ export default function Chat() {
           setLiveMap((prev) => ({ ...prev, [pid]: { name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" } }));
           setLiveOrder((o) => (o.includes(pid) ? o : [...o, pid]));
         }
+        if (pid && ev.status) {
+          setLiveMap((prev) => { const cur = prev[pid] || { name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" }; return { ...prev, [pid]: { ...cur, status: ev.status } }; });
+        }
         if (pid && ev.delta !== undefined) {
-          setLiveMap((prev) => { const cur = prev[pid] || { name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" }; return { ...prev, [pid]: { ...cur, text: cur.text + ev.delta } }; });
+          setLiveMap((prev) => { const cur = prev[pid] || { name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" }; return { ...prev, [pid]: { ...cur, status: "", text: cur.text + ev.delta } }; });
         }
         if (pid && ev.final && speaker && ev.content) playTTS(ev.content, ev.voice);
         if (ev.done) refreshUser();
@@ -280,7 +284,12 @@ export default function Chat() {
                 <div className="mt-1 shrink-0"><Avatar name={m.persona_name} portrait={m.portrait} size={32} moderator={m.is_moderator} /></div>
                 <div className="group max-w-[78%]">
                   <p className="mb-1 text-xs font-semibold text-slate-500">{m.persona_name}{m.is_moderator && " · moderator"}</p>
-                  <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm ${m.is_moderator ? "border border-[#2F6BFF]/30 bg-[#EEF3FF] text-slate-700" : "aivora-card text-slate-700"}`} data-testid="msg-assistant"><Markdown content={m.content} /></div>
+                  <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm ${m.is_moderator ? "border border-[#2F6BFF]/30 bg-[#EEF3FF] text-slate-700" : "aivora-card text-slate-700"}`} data-testid="msg-assistant">
+                    <Markdown content={m.content} />
+                    <MediaList media={m.media || []} />
+                    <ToolRequestCard m={m} cid={id} onDone={refreshMsgs} />
+                  </div>
+                  <ModelBadge m={m} />
                   <div className="mt-1.5 flex gap-3 opacity-0 transition group-hover:opacity-100">
                     <button onClick={() => copy(m.content)} className="text-slate-400 hover:text-slate-700"><Copy size={13} /></button>
                     <button onClick={() => playTTS(m.content, voiceFor(m.persona_id))} className="text-slate-400 hover:text-slate-700"><Volume2 size={13} /></button>
@@ -299,7 +308,7 @@ export default function Chat() {
                 <div className="max-w-[78%]">
                   <p className="mb-1 text-xs font-semibold text-slate-500">{l.name}</p>
                   <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm ${l.moderator ? "border border-[#2F6BFF]/30 bg-[#EEF3FF]" : "aivora-card"} text-slate-700`} data-testid="msg-streaming">
-                    {l.text ? <Markdown content={l.text} /> : <span className="inline-flex gap-1"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: ".15s" }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: ".3s" }} /></span>}
+                    {l.status ? <span className="flex items-center gap-2 text-slate-500" data-testid="msg-streaming-status"><Loader2 size={13} className="animate-spin" /> {l.status}</span> : l.text ? <Markdown content={l.text} /> : <span className="inline-flex gap-1"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: ".15s" }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: ".3s" }} /></span>}
                   </div>
                 </div>
               </div>

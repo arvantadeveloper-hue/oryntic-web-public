@@ -5,6 +5,7 @@ import { api, API_BASE, getToken, streamChatWithAtt, streamSSE } from "../lib/ap
 import { MicPipeline, loadMicPrefs, saveMicPrefs } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
+import { MeetingShell, LayoutMenu, useMeetingLayout } from "./MeetingShell";
 import { useAuth } from "../context/AuthContext";
 
 const ME = "__me__";
@@ -83,6 +84,7 @@ export function VideoRoom({ conv, cid, messages = [], onClose, onRefresh, isPriv
   const [micPrefs, setMicPrefs] = useState(() => loadMicPrefs(user));
   const [pipe, setPipe] = useState(null);
   const chat = useMeetingChat(messages);
+  const [layout, setLayout] = useMeetingLayout();
 
   const openRef = useRef(true);
   const mutedRef = useRef(false);
@@ -363,6 +365,64 @@ export function VideoRoom({ conv, cid, messages = [], onClose, onRefresh, isPriv
     ending: "Moderator merangkum meeting...",
   }[phase];
 
+  const participants = tiles.map((tl) => ({ ...tl, status: statusMap[tl.id] || "", level: tl.isMe ? micLevel : 0 }));
+  const stage = (
+    <div className="flex flex-1 items-center overflow-y-auto px-4 pb-2 sm:px-6">
+      <div className="mx-auto grid w-full max-w-6xl gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
+        {tiles.map((tl) => (
+          <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? micLevel : 0} reaction={reactionMap[tl.id]} />
+        ))}
+      </div>
+    </div>
+  );
+  const captionEl = (
+    <>
+      {barged && (
+        <div className="px-4 pb-2 text-center sm:px-6">
+          <span className="vr-barge inline-flex items-center gap-1.5 rounded-full bg-amber-400/90 px-3 py-1 text-xs font-bold text-slate-900" data-testid="vr-barge-pill"><Hand size={12} /> Anda menyela</span>
+        </div>
+      )}
+      {showCaption && caption && (
+        <div className={layout === "chat" ? "" : "px-4 pb-2 sm:px-6"} data-testid="vr-caption">
+          <div className="mx-auto max-w-3xl rounded-2xl bg-black/50 px-4 py-3 text-center backdrop-blur">
+            <p className="text-xs font-bold uppercase tracking-wider text-emerald-300">{caption.name}</p>
+            <p className="mt-1 max-h-24 overflow-y-auto text-sm leading-relaxed text-white/90">{caption.text}</p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+  const controls = (
+    <div className="flex items-center justify-center gap-3 px-4 py-5 sm:gap-4">
+      <button onClick={toggleMute} data-testid="vr-mute" title={muted ? "Nyalakan mic" : "Matikan mic"}
+        className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>
+        {muted ? <MicOff size={22} /> : <Mic size={22} />}
+      </button>
+      <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
+      <LayoutMenu layout={layout} onChange={setLayout} />
+      <button onClick={sendNow} disabled={phase !== "listening" || muted} data-testid="vr-send" title="Kirim sekarang"
+        className="flex h-14 w-14 items-center justify-center rounded-full bg-[#2F6BFF] text-white transition disabled:opacity-40">
+        <Send size={22} />
+      </button>
+      <button onClick={() => setShowCaption((s) => !s)} data-testid="vr-captions" title="Teks langsung"
+        className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}>
+        <Captions size={22} />
+      </button>
+      {layout !== "chat" && <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />}
+      <button onClick={endMeeting} disabled={phase === "ending"} data-testid="vr-end-save"
+        className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-5 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-60">
+        {phase === "ending" ? <Loader2 size={20} className="animate-spin" /> : <PhoneOff size={20} />}
+        <span className="hidden sm:inline">{isPrivate ? "Akhiri Panggilan" : "Akhiri & Simpan Notulen"}</span>
+      </button>
+      {!isPrivate && (
+        <button onClick={leaveNoSummary} data-testid="vr-leave" title="Keluar tanpa menyimpan"
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20">
+          <PhoneOff size={20} />
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-[96] flex flex-col" style={{ background: "radial-gradient(1200px 500px at 50% -10%, #16213e 0%, #0a0f1f 60%)" }} data-testid="video-room">
       <div className="flex items-center gap-3 px-4 py-3 text-white sm:px-6">
@@ -372,63 +432,8 @@ export function VideoRoom({ conv, cid, messages = [], onClose, onRefresh, isPriv
         <span className="hidden text-xs text-white/60 sm:block">{isPrivate ? "Panggilan suara" : `Meeting · ${members.length} asisten${hasModerator ? " + Moderator" : ""}`}</span>
         <span className="ml-auto truncate text-xs text-white/70" data-testid="vr-phase">{phaseLabel}</span>
       </div>
-
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex flex-1 items-center overflow-y-auto px-4 pb-2 sm:px-6">
-            <div className="mx-auto grid w-full max-w-6xl gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
-              {tiles.map((tl) => (
-                <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? micLevel : 0} reaction={reactionMap[tl.id]} />
-              ))}
-            </div>
-          </div>
-
-          {barged && (
-            <div className="px-4 pb-2 text-center sm:px-6">
-              <span className="vr-barge inline-flex items-center gap-1.5 rounded-full bg-amber-400/90 px-3 py-1 text-xs font-bold text-slate-900" data-testid="vr-barge-pill"><Hand size={12} /> Anda menyela</span>
-            </div>
-          )}
-
-          {showCaption && caption && (
-            <div className="px-4 pb-2 sm:px-6" data-testid="vr-caption">
-              <div className="mx-auto max-w-3xl rounded-2xl bg-black/50 px-4 py-3 text-center backdrop-blur">
-                <p className="text-xs font-bold uppercase tracking-wider text-emerald-300">{caption.name}</p>
-                <p className="mt-1 max-h-24 overflow-y-auto text-sm leading-relaxed text-white/90">{caption.text}</p>
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center justify-center gap-3 px-4 py-5 sm:gap-4">
-            <button onClick={toggleMute} data-testid="vr-mute" title={muted ? "Nyalakan mic" : "Matikan mic"}
-              className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>
-              {muted ? <MicOff size={22} /> : <Mic size={22} />}
-            </button>
-            <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
-            <button onClick={sendNow} disabled={phase !== "listening" || muted} data-testid="vr-send" title="Kirim sekarang"
-              className="flex h-14 w-14 items-center justify-center rounded-full bg-[#2F6BFF] text-white transition disabled:opacity-40">
-              <Send size={22} />
-            </button>
-            <button onClick={() => setShowCaption((s) => !s)} data-testid="vr-captions" title="Teks langsung"
-              className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}>
-              <Captions size={22} />
-            </button>
-            <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />
-            <button onClick={endMeeting} disabled={phase === "ending"} data-testid="vr-end-save"
-              className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-5 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-60">
-              {phase === "ending" ? <Loader2 size={20} className="animate-spin" /> : <PhoneOff size={20} />}
-              <span className="hidden sm:inline">{isPrivate ? "Akhiri Panggilan" : "Akhiri & Simpan Notulen"}</span>
-            </button>
-            {!isPrivate && (
-              <button onClick={leaveNoSummary} data-testid="vr-leave" title="Keluar tanpa menyimpan"
-                className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20">
-                <PhoneOff size={20} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {chat.open && <MeetingChatPanel cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} />}
-      </div>
+      <MeetingShell layout={layout} chatOpen={chat.open} stage={stage} caption={captionEl} controls={controls} participants={participants}
+        chat={(variant) => <MeetingChatPanel variant={variant} cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} />} />
     </div>
   );
 }

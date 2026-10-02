@@ -3,6 +3,8 @@ import { UserPlus, Trash2, Shield, User as UserIcon, Loader2, Mail, KeyRound } f
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { UsageReport } from "../components/UsageReport";
+import { SmartRoutingToggle } from "../components/ModelRoutingCard";
+import { useAuth } from "../context/AuthContext";
 
 function QuotaControl({ user, onSaved }) {
   const [val, setVal] = useState(String(user.daily_credit_limit || 0));
@@ -21,6 +23,7 @@ function QuotaControl({ user, onSaved }) {
 }
 
 export default function Team() {
+  const { user, refreshUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: "", email: "", password: "" });
@@ -56,6 +59,7 @@ export default function Team() {
     <div className="mx-auto max-w-5xl p-5 sm:p-8" data-testid="team-page">
       <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Tim & Pengguna</h1>
       <p className="mt-1 text-sm text-slate-500">Kelola anggota workspace. Pengguna biasa dapat chat & ikut meeting, tetapi tidak bisa mengubah setelan, kredit, atau membuat persona.</p>
+      <SmartRoutingToggle user={user} onSaved={refreshUser} />
 
       <form onSubmit={create} className="aivora-card mt-6 grid gap-3 p-5 sm:grid-cols-[1fr_1fr_1fr_auto]" data-testid="create-user-form">
         <div className="relative"><UserIcon size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />

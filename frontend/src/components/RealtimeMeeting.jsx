@@ -6,6 +6,7 @@ import { RealtimeSession } from "../lib/realtimeSession";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
+import { MeetingShell, LayoutMenu, useMeetingLayout } from "./MeetingShell";
 import { Tile } from "./VideoRoom";
 import { useAuth } from "../context/AuthContext";
 
@@ -28,6 +29,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const [micPrefs, setMicPrefs] = useState(() => loadMicPrefs(user));
   const [pipe, setPipe] = useState(null);
   const chat = useMeetingChat(messages);
+  const [layout, setLayout] = useMeetingLayout();
 
   const sessionsRef = useRef([]); // RealtimeSession[]
   const pipeRef = useRef(null);
@@ -300,6 +302,41 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const label = { connecting: "Menyambungkan semua peserta...", listening: "Mendengarkan Anda — bicara saja, sebut nama untuk bertanya ke agen tertentu. Moderator hanya menyela saat buntu/hening.", user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
   const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait })), { id: MOD, isMod: true, name: "Moderator" }];
 
+  const participants = tiles.map((tl) => ({ ...tl, status: statusMap[tl.id] || "", level: tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0) }));
+  const stage = (
+    <>
+      <p className="px-6 text-center text-xs text-white/60" data-testid="rtm-phase">{phase === "connecting" && <Loader2 size={12} className="mr-1 inline animate-spin" />}{label}</p>
+      <div className="flex flex-1 items-center overflow-y-auto px-4 pb-2 sm:px-6">
+        <div className="mx-auto grid w-full max-w-6xl gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
+          {tiles.map((tl) => (
+            <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} />
+          ))}
+        </div>
+      </div>
+    </>
+  );
+  const captionEl = showCaption && caption ? (
+    <div className={layout === "chat" ? "" : "px-4 pb-2 sm:px-6"} data-testid="rtm-caption">
+      <div className="mx-auto max-w-3xl rounded-2xl bg-black/50 px-4 py-3 text-center backdrop-blur">
+        <p className="text-xs font-bold uppercase tracking-wider text-emerald-300">{caption.name}</p>
+        <p className="mt-1 max-h-24 overflow-y-auto text-sm leading-relaxed text-white/90">{caption.text}</p>
+      </div>
+    </div>
+  ) : null;
+  const controls = (
+    <div className="flex items-center justify-center gap-3 px-4 py-5 sm:gap-4">
+      <button onClick={toggleMute} data-testid="rtm-mute" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
+      <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
+      <LayoutMenu layout={layout} onChange={setLayout} />
+      <button onClick={() => setShowCaption((s) => !s)} data-testid="rtm-captions" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}><Captions size={22} /></button>
+      {layout !== "chat" && <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />}
+      <button onClick={() => hangupAll(true)} disabled={phase === "ending"} data-testid="rtm-end-save" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-5 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-60">
+        {phase === "ending" ? <Loader2 size={20} className="animate-spin" /> : <PhoneOff size={20} />}<span className="hidden sm:inline">Akhiri & Simpan Notulen</span>
+      </button>
+      <button onClick={() => hangupAll(false)} data-testid="rtm-leave" title="Keluar tanpa notulen" className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20"><PhoneOff size={20} /></button>
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-[96] flex flex-col" style={{ background: "radial-gradient(1200px 500px at 50% -10%, #16213e 0%, #0a0f1f 60%)" }} data-testid="realtime-meeting">
       <div className="flex items-center gap-3 px-4 py-3 text-white sm:px-6">
@@ -308,42 +345,8 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         <span className="ml-auto font-mono text-sm text-white/80" data-testid="rtm-timer">{mm}:{ss}</span>
         {cpmTotal && <span className="hidden text-xs text-white/50 sm:block">{cpmTotal} kredit/mnt</span>}
       </div>
-
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 flex-1 flex-col">
-          <p className="px-6 text-center text-xs text-white/60" data-testid="rtm-phase">{phase === "connecting" && <Loader2 size={12} className="mr-1 inline animate-spin" />}{label}</p>
-
-          <div className="flex flex-1 items-center overflow-y-auto px-4 pb-2 sm:px-6">
-            <div className="mx-auto grid w-full max-w-6xl gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
-              {tiles.map((tl) => (
-                <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} />
-              ))}
-            </div>
-          </div>
-
-          {showCaption && caption && (
-            <div className="px-4 pb-2 sm:px-6" data-testid="rtm-caption">
-              <div className="mx-auto max-w-3xl rounded-2xl bg-black/50 px-4 py-3 text-center backdrop-blur">
-                <p className="text-xs font-bold uppercase tracking-wider text-emerald-300">{caption.name}</p>
-                <p className="mt-1 max-h-24 overflow-y-auto text-sm leading-relaxed text-white/90">{caption.text}</p>
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center justify-center gap-3 px-4 py-5 sm:gap-4">
-            <button onClick={toggleMute} data-testid="rtm-mute" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
-            <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
-            <button onClick={() => setShowCaption((s) => !s)} data-testid="rtm-captions" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}><Captions size={22} /></button>
-            <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />
-            <button onClick={() => hangupAll(true)} disabled={phase === "ending"} data-testid="rtm-end-save" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-5 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-60">
-              {phase === "ending" ? <Loader2 size={20} className="animate-spin" /> : <PhoneOff size={20} />}<span className="hidden sm:inline">Akhiri & Simpan Notulen</span>
-            </button>
-            <button onClick={() => hangupAll(false)} data-testid="rtm-leave" title="Keluar tanpa notulen" className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20"><PhoneOff size={20} /></button>
-          </div>
-        </div>
-
-        {chat.open && <MeetingChatPanel cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} />}
-      </div>
+      <MeetingShell layout={layout} chatOpen={chat.open} stage={stage} caption={captionEl} controls={controls} participants={participants}
+        chat={(variant) => <MeetingChatPanel variant={variant} cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} />} />
     </div>
   );
 }

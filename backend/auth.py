@@ -198,6 +198,7 @@ async def me(u: dict = Depends(current_user)):
 class SettingsIn(BaseModel):
     mic_sensitivity: Optional[str] = Field(default=None, pattern="^(low|medium|high)$")
     noise_suppression: Optional[bool] = None
+    smart_routing: Optional[bool] = None  # workspace owner: auto-route topics to the best model
 
 
 @router.put("/settings")

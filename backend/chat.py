@@ -12,6 +12,9 @@ from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, pu
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded
 from realtime import notify
 from ratelimit import rate_limit
+from tools import route_model, wants_tool, plan_tool, run_image_tool, run_document_tool, get_routing
+from pricing import rate as tool_rate
+from llm import model_label
 import secrets
 from datetime import datetime, timezone, timedelta
 
@@ -283,6 +286,11 @@ VOICE_STYLE = ("SPOKEN CONVERSATION MODE: your words will be read aloud by text-
                "(e.g. 'oke', 'hmm', 'baik') and acknowledge what the user said before answering. Ask one short follow-up question "
                "when it helps. If the user interrupted you, stop your previous thought gracefully and respond to what they just said.")
 
+SANGUINE_TONE = ("TEMPERAMENT: you are sanguine — warm, friendly, upbeat and genuinely enthusiastic. Greet people like a good friend, "
+                 "celebrate small wins, use light humor and encouraging words, show curiosity about the user, and keep the energy "
+                 "positive even when delivering bad news (be kind, then constructive). Stay professional and accurate; never let "
+                 "cheerfulness replace substance or correctness.")
+
 MEETING_CHAT_STYLE = ("MEETING CHAT PANEL: a live voice meeting is in progress and the user just TYPED this message in the meeting's text "
                       "chat panel. Reply in TEXT only (this reply is shown in the panel, not spoken): use markdown freely — tables, "
                       "numbered lists, code blocks, links — whenever it makes the data clearer. Be complete but compact; do not greet, "
@@ -297,6 +305,7 @@ async def _persona_system(persona, user, roster=None, voice_mode=False):
     pers = prof.get("personality", {})
     parts.append(f"Communication style: {pers.get('communication_style','')}. Formality: {pers.get('formality','')}. Attitude: {pers.get('attitude','')}.")
     parts.append("You are an AI and must not claim to have real human feelings or needs. Be warm but honest.")
+    parts.append(SANGUINE_TONE)
     mems = await db.memory_items.find({"user_id": user["id"], "persona_id": persona["id"], "enabled": True}).to_list(50)
     if mems:
         parts.append("Saved memory about the user: " + "; ".join(m["content"] for m in mems))
@@ -320,6 +329,10 @@ async def _history_text(cid: str, limit=14) -> str:
         else:
             who = m.get("persona_name") or "Assistant"
         lines.append(f"{who}: {m['content']}")
+        if m.get("attachment_text"):
+            lines.append(f"[Isi lampiran {who}]: {m['attachment_text'][:1500]}")
+        if m.get("media"):
+            lines.append("[Berkas yang dibuat asisten]: " + ", ".join(x.get("name", "") for x in m["media"]))
     return "\n".join(lines)
 
 
@@ -343,28 +356,101 @@ def _mentioned(content: str, personas: list) -> list:
     return [p for p in personas if ("@" + p["name"].lower().replace(" ", "")) in lower.replace(" ", "") or ("@" + p["name"].lower()) in lower]
 
 
-async def _persona_reply(cid: str, u: dict, persona: dict, roster, prompt: str, voice_mode: bool, meta_extra: dict, via: str = None):
+async def _owner_settings(u: dict) -> dict:
+    owner = await db.users.find_one({"id": workspace_id(u)}, {"_id": 0, "settings": 1}) or {}
+    return owner.get("settings") or {}
+
+
+async def _save_ai_msg(cid: str, persona: dict, content: str, used: int, via, extra: dict) -> dict:
+    ai_msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": content,
+              "persona_id": persona["id"], "persona_name": persona["name"],
+              "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso(), **extra}
+    if via:
+        ai_msg["via"] = via
+    await db.messages.insert_one(dict(ai_msg))
+    return ai_msg
+
+
+async def _tool_turn(cid, u, persona, system, meta, plan, history, model_key, via):
+    """Create an image/document from chat. Expensive tools (≥ threshold) ask for confirmation first."""
+    cfg = await get_routing()
+    kind = plan["tool"]
+    if kind == "image":
+        credits = tool_rate("image")
+        prompt = (plan.get("image_prompt") or "").strip() or "illustration"
+        if credits >= cfg["confirm_threshold"]:
+            text = f"Siap, aku bisa buatkan gambarnya! 🎨 Perkiraan biaya ±{credits} kredit. Lanjutkan?"
+            msg = await _save_ai_msg(cid, persona, text, 0, via, {"pending_tool": {"kind": "image", "prompt": prompt, "credits": credits}})
+            yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
+            yield f"data: {json.dumps({**meta, 'delta': text})}\n\n"
+            yield f"data: {json.dumps({**meta, 'final': True, 'message_id': msg['id'], 'content': text, 'pending_tool': msg['pending_tool']})}\n\n"
+            await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
+            yield 0
+            return
+        yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
+        yield f"data: {json.dumps({**meta, 'status': 'Sedang membuat gambar...'})}\n\n"
+        try:
+            out = await run_image_tool(u["id"], prompt)
+        except Exception:
+            text = "Maaf, gambarnya belum berhasil dibuat. Coba ulangi dengan deskripsi lain ya."
+            msg = await _save_ai_msg(cid, persona, text, 0, via, {})
+            yield f"data: {json.dumps({**meta, 'final': True, 'message_id': msg['id'], 'content': text})}\n\n"
+            yield 0
+            return
+        text = "Ini gambarnya! ✨ Kalau mau diubah gayanya, bilang saja."
+        await record_usage(u["id"], "image_generation", out["credits"], {"conversation_id": cid, "persona_id": persona["id"]})
+        msg = await _save_ai_msg(cid, persona, text, out["credits"], via, {"media": out["media"], "tool": "image"})
+        yield f"data: {json.dumps({**meta, 'final': True, 'message_id': msg['id'], 'content': text, 'media': out['media']})}\n\n"
+        await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
+        yield out["credits"]
+        return
+    # document
+    title = (plan.get("title") or "Dokumen").strip()[:120]
+    yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
+    yield f"data: {json.dumps({**meta, 'status': f'Sedang menyusun dokumen “{title}”...'})}\n\n"
+    try:
+        out = await run_document_tool(u["id"], system, title, plan.get("instructions") or title, history, model_key)
+    except Exception:
+        text = "Maaf, dokumennya belum berhasil dibuat. Coba lagi sebentar ya."
+        msg = await _save_ai_msg(cid, persona, text, 0, via, {})
+        yield f"data: {json.dumps({**meta, 'final': True, 'message_id': msg['id'], 'content': text})}\n\n"
+        yield 0
+        return
+    text = f"Dokumen **{title}** sudah jadi! 📄 Tersedia dalam Word, PDF, dan Markdown di bawah ini."
+    await record_usage(u["id"], "document_generation", out["credits"], {"conversation_id": cid, "persona_id": persona["id"]})
+    msg = await _save_ai_msg(cid, persona, text, out["credits"], via, {"media": out["media"], "tool": "document", "model_key": model_key, "model_label": out["model_label"], "doc_markdown": out["markdown"][:20000]})
+    yield f"data: {json.dumps({**meta, 'final': True, 'message_id': msg['id'], 'content': text, 'media': out['media']})}\n\n"
+    await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
+    yield out["credits"]
+
+
+async def _persona_reply(cid: str, u: dict, persona: dict, roster, prompt: str, voice_mode: bool, meta_extra: dict, via: str = None, user_text: str = "", attach_len: int = 0):
     """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
     meta = {"persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}
-    yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
     system = await _persona_system(persona, u, roster, voice_mode=voice_mode)
     if via == "meeting_chat":
         system += "\n\n" + MEETING_CHAT_STYLE
+    model_key, reason = await route_model(persona.get("model"), user_text, attach_len, await _owner_settings(u))
+    if reason:
+        meta = {**meta, "model_label": model_label(model_key), "routed": reason}
+    if user_text and not voice_mode and wants_tool(user_text):
+        plan = await plan_tool(user_text, prompt)
+        if plan.get("tool") != "none":
+            async for ev in _tool_turn(cid, u, persona, system, meta, plan, prompt, model_key, via):
+                yield ev
+            return
+    yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
     try:
-        full = await llm_text(system, prompt, persona.get("model"))
+        full = await llm_text(system, prompt, model_key)
     except Exception:
         full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
     for i, w in enumerate(full.split(" ")):
         yield f"data: {json.dumps({**meta, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
         await asyncio.sleep(0.01)
     used = text_credits(prompt, full)
-    await record_usage(u["id"], "chat", used, {"conversation_id": cid, "persona_id": persona["id"], **meta_extra})
-    ai_msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": full,
-              "persona_id": persona["id"], "persona_name": persona["name"],
-              "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso()}
-    if via:
-        ai_msg["via"] = via
-    await db.messages.insert_one(dict(ai_msg))
+    await record_usage(u["id"], "chat", used, {"conversation_id": cid, "persona_id": persona["id"], "model": model_key, **meta_extra})
+    extra = {"model_key": model_key, "model_label": model_label(model_key), "routed": reason} if reason else {}
+    ai_msg = await _save_ai_msg(cid, persona, full, used, via, extra)
     yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full})}\n\n"
     await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
     yield used
@@ -390,6 +476,8 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
                 "created_at": now_iso()}
     if x.channel:
         user_msg["via"] = x.channel
+    if attach_text:
+        user_msg["attachment_text"] = attach_text[:4000]
     await db.messages.insert_one(dict(user_msg))
     await notify(cid, {"type": "message", "role": "user", "sender_name": user_msg["sender_name"]})
 
@@ -407,7 +495,7 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
         total = 0
         for persona in responders:
             prompt = (await _history_text(cid)) + extra + f"\n{persona['name']}:"
-            async for ev in _persona_reply(cid, u, persona, roster, prompt, x.voice_mode, {}, via=x.channel):
+            async for ev in _persona_reply(cid, u, persona, roster, prompt, x.voice_mode, {}, via=x.channel, user_text=x.content, attach_len=len(attach_text)):
                 if isinstance(ev, int):
                     total += ev
                 else:
@@ -582,6 +670,47 @@ async def regenerate(cid: str, mid: str, u: dict = Depends(current_user)):
               "portrait": persona.get("portrait"), "credits": used, "created_at": now_iso()}
     await db.messages.insert_one(dict(ai_msg))
     return {"message": clean(ai_msg), "credits": bal}
+
+
+# ---------- tools (confirmed by the user) ----------
+async def _pending_msg(cid: str, mid: str, u: dict) -> dict:
+    conv = await db.conversations.find_one({"id": cid})
+    if not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    msg = await db.messages.find_one({"id": mid, "conversation_id": cid}, {"_id": 0})
+    if not msg or not msg.get("pending_tool"):
+        raise HTTPException(404, "Tidak ada permintaan alat yang menunggu")
+    return msg
+
+
+@router.post("/conversations/{cid}/messages/{mid}/run-tool")
+async def run_tool(cid: str, mid: str, u: dict = Depends(current_user)):
+    msg = await _pending_msg(cid, mid, u)
+    over = await quota_exceeded(u)
+    if over:
+        raise HTTPException(402, quota_message(over))
+    await rate_limit(u, "generation")
+    pt = msg["pending_tool"]
+    await db.messages.update_one({"id": mid}, {"$set": {"pending_tool.running": True}})
+    try:
+        out = await run_image_tool(u["id"], pt["prompt"])
+    except Exception as exc:
+        await db.messages.update_one({"id": mid}, {"$unset": {"pending_tool.running": ""}})
+        raise HTTPException(502, "Gambar belum berhasil dibuat, coba lagi") from exc
+    await record_usage(u["id"], "image_generation", out["credits"], {"conversation_id": cid, "persona_id": msg.get("persona_id")})
+    upd = {"content": "Ini gambarnya! ✨ Kalau mau diubah gayanya, bilang saja.", "media": out["media"], "tool": "image", "credits": out["credits"]}
+    await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
+    await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id")})
+    return {**msg, **upd, "pending_tool": None}
+
+
+@router.post("/conversations/{cid}/messages/{mid}/cancel-tool")
+async def cancel_tool(cid: str, mid: str, u: dict = Depends(current_user)):
+    msg = await _pending_msg(cid, mid, u)
+    upd = {"content": "Oke, pembuatan gambar dibatalkan. Kalau berubah pikiran, tinggal bilang ya!", "tool_cancelled": True}
+    await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
+    await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id")})
+    return {**msg, **upd, "pending_tool": None}
 
 
 # ---------- memory ----------
