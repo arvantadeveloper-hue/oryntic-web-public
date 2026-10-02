@@ -12,7 +12,7 @@ import { RealtimeMeeting } from "../components/RealtimeMeeting";
 import { MediaList, ToolRequestCard, ModelBadge } from "../components/MessageExtras";
 import { SummaryPrompt, ArchiveModal, LoadMore } from "../components/ConversationTools";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
-import { TaskContextCard, AddPersonaMenu } from "../components/TaskChatTools";
+import { TaskContextCard, AddPersonaMenu, TaskOfferButtons } from "../components/TaskChatTools";
 
 function Avatar({ name, portrait, size = 32, moderator }) {
   if (moderator) return <span className="flex items-center justify-center rounded-full bg-[#0B132B] text-white" style={{ width: size, height: size }}><Gavel size={size * 0.5} /></span>;
@@ -318,6 +318,7 @@ export default function Chat() {
                     <Markdown content={m.content} />
                     <MediaList media={m.media || []} />
                     <ToolRequestCard m={m} cid={id} onDone={refreshMsgs} />
+                    <TaskOfferButtons m={m} cid={id} onDone={refreshMsgs} isLast={i === messages.length - 1} />
                   </div>
                   <ModelBadge m={m} />
                   <div className="mt-1.5 flex gap-3 opacity-0 transition group-hover:opacity-100">

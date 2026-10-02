@@ -15,7 +15,7 @@ from chat import _can_access, _persona_system, _history_text
 from realtime import notify
 from ratelimit import rate_limit, get_limits, set_limits
 from pricing import usd_to_credits, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates
-from tools import get_routing
+from tools import get_routing, TASK_CONTEXT
 from llm import MODEL_CATALOG
 
 router = APIRouter(prefix="/api", tags=["realtime-voice"])
@@ -117,6 +117,21 @@ def delegate_tool(names: list) -> dict:
                 "required": ["assistant", "brief"]}}
 
 
+ASSIGN_TOOL = {"type": "function", "name": "assign_task",
+               "description": "Record a piece of work the user delegates to you (a deliverable such as a document, plan, analysis or research) into the Workspace, to be done now or at a given time. Use when the user asks you to prepare something substantial rather than answer right away. Confirm verbally after the result.",
+               "parameters": {"type": "object", "properties": {
+                   "title": {"type": "string", "description": "Short title of the task (Indonesian, max 10 words)"},
+                   "brief": {"type": "string", "description": "What exactly must be produced, 1-3 sentences"},
+                   "scheduled_at": {"type": "string", "description": "ISO-8601 datetime with timezone offset if the user named a time (e.g. 'besok jam 9'), else omit"}},
+                   "required": ["title", "brief"]}}
+UPDATE_TOOL = {"type": "function", "name": "update_task",
+               "description": "Apply a revision the user asked for to the Workspace result currently being presented/discussed. Pass the full revision instruction. The result is saved as a new version.",
+               "parameters": {"type": "object", "properties": {"instruction": {"type": "string", "description": "What to change, in detail"}}, "required": ["instruction"]}}
+PRESENT_STYLE = ("\n\nYOU ARE PRESENTING the Workspace result above as if sharing your screen: open by presenting it section by section in short spoken "
+                 "chunks (2-4 sentences each), pausing to invite questions. When the user asks for changes, call the `update_task` tool with a precise "
+                 "instruction, then confirm what changed.")
+
+
 def _specialty(p: dict, routing: dict) -> str:
     m = next((x for x in MODEL_CATALOG if x["id"] == p.get("model")), MODEL_CATALOG[0])
     hints = []
@@ -130,9 +145,13 @@ def _specialty(p: dict, routing: dict) -> str:
 
 
 async def _voice_context(cid: str) -> str:
-    """Compact context for the voice session: short memory summary + last 6 messages (keeps cached prefix small)."""
-    conv = await db.conversations.find_one({"id": cid}, {"_id": 0, "memory_summary": 1}) or {}
+    """Compact context for the voice session: task under discussion + short memory summary + last 6 messages (keeps cached prefix small)."""
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0, "memory_summary": 1, "task_id": 1}) or {}
     parts = []
+    if conv.get("task_id"):
+        t = await db.tasks.find_one({"id": conv["task_id"]}, {"_id": 0, "goal": 1, "status": 1, "version": 1, "final_output": 1}) or {}
+        if t:
+            parts.append(TASK_CONTEXT.format(tid=conv["task_id"], ver=t.get("version") or 1, status=t.get("status"), goal=t.get("goal"), body=(t.get("final_output") or "(belum ada hasil)")[:5000]) + PRESENT_STYLE)
     if conv.get("memory_summary"):
         parts.append(f"[Summary of earlier conversation]: {conv['memory_summary'][:600]}")
     recent = (await _history_text(cid, limit=6, with_summary=False)).strip()
@@ -287,8 +306,10 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         "output_modalities": ["audio"],
         "audio": {"input": audio_in, "output": {"voice": call["voice"]}},
     }
-    if role == "moderator":
-        session["tools"] = [delegate_tool([n for n in call.get("roster", [])[1:]])]
+    if role in ("moderator", "solo"):
+        conv = await db.conversations.find_one({"id": call["conversation_id"]}, {"_id": 0, "task_id": 1}) or {}
+        tools = [ASSIGN_TOOL] + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post("https://api.openai.com/v1/realtime/calls",

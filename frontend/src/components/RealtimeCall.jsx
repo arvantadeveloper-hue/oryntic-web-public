@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
-import { vadUpdate, reportUsage, ContextPruner } from "../lib/realtimeSession";
+import { vadUpdate, reportUsage, ContextPruner, runVoiceTool } from "../lib/realtimeSession";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
@@ -100,6 +100,17 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
         const t = ev.transcript || liveRef.current;
         if (t) { setCaptions((c) => [...c.slice(-5), { role: "assistant", text: t }]); saveTranscript("assistant", t); }
         liveRef.current = ""; setLive("");
+        break;
+      }
+      case "response.function_call_arguments.done": {
+        let args = {}; try { args = JSON.parse(ev.arguments || "{}"); } catch (e) {}
+        setPhase("thinking");
+        runVoiceTool(ev.name, args, cid).then((out) => {
+          if (out.ok && ev.name === "update_task") { toast.success(`Revisi v${out.version} tersimpan di Ruang Kerja`); onRefresh && onRefresh(); }
+          if (out.ok && ev.name === "assign_task") toast.success(`Tugas dicatat ke Ruang Kerja (${out.when})`);
+          send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: ev.call_id, output: JSON.stringify(out) } });
+          send({ type: "response.create", response: { instructions: "Confirm briefly (1-2 sentences) what you just did based on the tool result, then continue." } });
+        });
         break;
       }
       case "response.done":

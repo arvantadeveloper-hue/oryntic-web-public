@@ -1,4 +1,5 @@
 import json
+import re
 import asyncio
 import base64
 import io
@@ -13,7 +14,7 @@ from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, pu
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit
-from tools import route_model, wants_tool, plan_tool, run_image_tool, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm
+from tools import route_model, wants_tool, plan_tool, run_image_tool, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task
 from pricing import rate as tool_rate
 from llm import model_label
 import secrets
@@ -483,7 +484,7 @@ async def _emit_final(ctx, text: str, credits: int, extra: dict):
     """Persist the assistant message for a tool turn and yield its final SSE + credits."""
     msg = await _save_ai_msg(ctx.cid, ctx.persona, text, credits, ctx.via, extra)
     payload = {"message_id": msg["id"], "content": text}
-    for k in ("media", "pending_tool", "task_id", "task_version", "tool"):
+    for k in ("media", "pending_tool", "task_id", "task_version", "tool", "pending_task"):
         if k in extra:
             payload[k] = extra[k]
     yield ctx.sse(final=True, **payload)
@@ -591,6 +592,33 @@ async def _prepare_ctx(ctx: ReplyCtx) -> ReplyCtx:
     return ctx
 
 
+DELEGATE_RE = re.compile(r"\b(terima beres|beres saja|kerjakan saja|langsung (saja|kerjakan)|serahkan|tolong kerjakan)\b", re.I)
+DISCUSS_RE = re.compile(r"\b(satu per satu|bahas (dulu|bersama|saja)|diskusi(kan)? dulu|pelan-pelan|bertahap)\b", re.I)
+
+
+async def _task_offer_turn(ctx):
+    """Long/scheduled delegation → offer 'bahas satu per satu' vs 'terima beres'; a reply to a pending offer is resolved here."""
+    conv = await db.conversations.find_one({"id": ctx.cid}, {"_id": 0, "pending_task": 1}) or {}
+    if conv.get("pending_task"):
+        mode = "delegate" if DELEGATE_RE.search(ctx.user_text) else "discuss" if DISCUSS_RE.search(ctx.user_text) else None
+        if mode:
+            from assignments import accept_pending
+            yield ctx.sse(start=True)
+            yield ctx.sse(status="Mencatat tugas..." if mode == "delegate" else "Menyusun langkah...")
+            msg = await accept_pending({"id": ctx.cid, **conv, "persona_id": ctx.persona["id"]}, ctx.user, mode)
+            yield ctx.sse(final=True, content=msg["content"], message_id=msg["id"], credits_used=msg.get("credits", 0), **{k: msg[k] for k in ("tool", "task_id") if k in msg})
+            return
+        await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_task": None}})  # user moved on
+    plan = await plan_task(ctx.user_text, (ctx.user.get("settings") or {}).get("timezone"), ctx.history_text if hasattr(ctx, "history_text") else "")
+    if not plan.get("is_task") or not (plan.get("long") or plan.get("scheduled_at")):
+        return
+    from assignments import offer_text
+    await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_task": {**plan, "persona_id": ctx.persona["id"], "offered_at": now_iso()}}})
+    yield ctx.sse(start=True)
+    async for ev in _emit_final(ctx, offer_text(plan, ctx.user), 0, {"tool": "task_offer", "pending_task": {"title": plan.get("title"), "scheduled_at": plan.get("scheduled_at")}}):
+        yield ev
+
+
 async def _wants_revision(text: str, task: dict) -> bool:
     if not REVISE_RE.search(text or ""):
         return False
@@ -622,6 +650,13 @@ async def _revise_turn(ctx):
 async def _persona_reply(ctx: ReplyCtx):
     """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
     await _prepare_ctx(ctx)
+    if ctx.user_text and not ctx.voice_mode and not ctx.task:
+        handled = False
+        async for ev in _task_offer_turn(ctx):
+            handled = True
+            yield ev
+        if handled:
+            return
     if ctx.task and ctx.user_text and not ctx.voice_mode and await _wants_revision(ctx.user_text, ctx.task):
         async for ev in _revise_turn(ctx):
             yield ev

@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap, Gavel } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { RealtimeSession } from "../lib/realtimeSession";
+import { RealtimeSession, runVoiceTool } from "../lib/realtimeSession";
+import { PresentationPanel } from "./PresentationPanel";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
@@ -47,6 +48,8 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const saidRef = useRef({}); // callId -> last full transcript
   const delegationRef = useRef(null); // {call_id, assistant, brief} from the moderator's tool call
   const returnRef = useRef(null); // {call_id, name, callId} panelist answering on behalf of the moderator
+  const toolRef = useRef(null); // {callId, call_id, name, promise} assign_task / update_task in flight
+  const [taskTick, setTaskTick] = useState(0);
   const doneTimerRef = useRef(null);
   const userTimerRef = useRef(null);
   const msgCountRef = useRef(0);
@@ -103,6 +106,18 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     if (activeRef.current !== callId) return;
     const s = byCall(callId);
     setStatus(s.persona.id, "");
+    if (toolRef.current?.callId === callId) {
+      const t = toolRef.current; toolRef.current = null; activeRef.current = null;
+      setStatus(s.persona.id, "thinking");
+      t.promise.then((out) => {
+        if (out.ok && t.name === "update_task") { toast.success(`Revisi v${out.version} tersimpan`); setTaskTick((x) => x + 1); onRefresh && onRefresh(); }
+        if (out.ok && t.name === "assign_task") toast.success(`Tugas dicatat ke Ruang Kerja (${out.when})`);
+        s.toolOutput(t.call_id, out);
+        enqueue(s, "Confirm briefly (1-2 sentences) what you just did based on the tool result, then hand back to the user.");
+        startNext();
+      });
+      return;
+    }
     if (s === mod() && delegationRef.current) {
       const d = delegationRef.current; delegationRef.current = null;
       const target = panelists().find((p) => p.persona.name === d.assistant) || panelists().find((p) => nameIn(d.assistant || "", p.persona.name));
@@ -127,6 +142,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     queueRef.current = [];
     const act = activeRef.current;
     if (act) { byCall(act)?.cancel(); setStatus(byCall(act).persona.id, ""); }
+    if (toolRef.current) { const t = toolRef.current; toolRef.current = null; t.promise.then((out) => { byCall(t.callId)?.toolOutput(t.call_id, out); if (out.ok && t.name === "update_task") setTaskTick((x) => x + 1); }); }
     activeRef.current = null; settleTools();
     if (doneTimerRef.current) { clearTimeout(doneTimerRef.current); doneTimerRef.current = null; }
     setPhase("user_speaking"); setStatus(ME, "speaking");
@@ -174,9 +190,14 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         planTurn(t);
         break;
       }
-      case "response.function_call_arguments.done":
-        if (s === mod() && ev.name === "delegate") { let a = {}; try { a = JSON.parse(ev.arguments || "{}"); } catch (e) {} delegationRef.current = { call_id: ev.call_id, ...a }; }
+      case "response.function_call_arguments.done": {
+        let a = {}; try { a = JSON.parse(ev.arguments || "{}"); } catch (e) {}
+        if (s === mod() && ev.name === "delegate") { delegationRef.current = { call_id: ev.call_id, ...a }; break; }
+        if (["assign_task", "update_task"].includes(ev.name)) {
+          toolRef.current = { callId: s.callId, call_id: ev.call_id, name: ev.name, promise: runVoiceTool(ev.name, { ...a, persona_id: s.persona.id }, cid) };
+        }
         break;
+      }
       case "output_audio_buffer.started":
       case "response.output_audio.delta":
         if (activeRef.current === s.callId) setStatus(pid, "speaking"); break;
@@ -303,8 +324,9 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const stage = (
     <>
       <p className="px-6 text-center text-xs text-white/60" data-testid="rtm-phase">{phase === "connecting" && <Loader2 size={12} className="mr-1 inline animate-spin" />}{label}</p>
-      <div className="flex flex-1 items-center overflow-y-auto px-4 pb-2 sm:px-6">
-        <div className="mx-auto grid w-full max-w-6xl gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
+      <div className={`flex flex-1 overflow-hidden px-4 pb-2 sm:px-6 ${conv.task_id ? "gap-4" : "items-center overflow-y-auto"}`}>
+        {conv.task_id && <PresentationPanel taskId={conv.task_id} refreshKey={taskTick} />}
+        <div className={conv.task_id ? "flex w-56 shrink-0 flex-col gap-3 overflow-y-auto" : "mx-auto grid w-full max-w-6xl gap-4"} style={conv.task_id ? {} : { gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
           {tiles.map((tl) => (
             <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} />
           ))}

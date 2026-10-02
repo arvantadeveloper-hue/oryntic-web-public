@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { NavLink, useNavigate, Outlet } from "react-router-dom";
-import { Home, MessageSquare, Bot, FileText, Bell, Wallet, User, Shield, LogOut, Menu, X, Sparkles, Search, HelpCircle, Users, Plus, Settings } from "lucide-react";
+import { Home, MessageSquare, Bot, FileText, Bell, Wallet, User, Shield, LogOut, Menu, X, Sparkles, Search, HelpCircle, Users, Plus, Settings, CalendarDays } from "lucide-react";
 import { Logo } from "./Logo";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 import { IncomingCall } from "./IncomingCall";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import { TaskNotifier } from "./TaskChatTools";
 
 export function AppLayout() {
   const { user, logout } = useAuth();
@@ -21,6 +22,7 @@ export function AppLayout() {
     { to: "/personas", icon: Bot, label: "AI Agents", id: "personas", adminOnly: true },
     { to: "/workspace", icon: FileText, label: t("nav.workspace"), id: "workspace" },
     { to: "/reminders", icon: Bell, label: t("nav.reminders"), id: "reminders" },
+    { to: "/calendar", icon: CalendarDays, label: "Kalender", id: "calendar" },
     { to: "/wallet", icon: Wallet, label: t("nav.wallet"), id: "wallet", adminOnly: true },
     { to: "/profile", icon: Settings, label: "Settings", id: "profile" },
   ];
@@ -118,6 +120,7 @@ export function AppLayout() {
       </div>
 
       <IncomingCall />
+      <TaskNotifier />
     </div>
   );
 }

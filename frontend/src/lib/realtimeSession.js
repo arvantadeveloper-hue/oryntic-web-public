@@ -118,3 +118,18 @@ export class RealtimeSession {
     try { if (this.audioEl) { this.audioEl.srcObject = null; this.audioEl.remove(); } } catch (e) {}
   }
 }
+
+// Voice tools shared by solo calls and meetings: the model asks, we call our API, the result goes back as function_call_output.
+export async function runVoiceTool(name, args, cid) {
+  try {
+    if (name === "assign_task") { const r = await api.post(`/conversations/${cid}/tasks`, { title: args.title, brief: args.brief, scheduled_at: args.scheduled_at || null, persona_id: args.persona_id || null }); return { ok: true, ...r.data }; }
+    if (name === "update_task") {
+      const c = await api.get(`/conversations/${cid}/messages?limit=1`);
+      const tid = c.data?.conversation?.task_id;
+      if (!tid) return { ok: false, error: "no task linked to this conversation" };
+      const r = await api.post(`/tasks/${tid}/revise`, { instruction: args.instruction });
+      return { ok: true, version: r.data.version, summary: r.data.summary };
+    }
+    return { ok: false, error: `unknown tool ${name}` };
+  } catch (e) { return { ok: false, error: e?.response?.data?.detail || e.message }; }
+}

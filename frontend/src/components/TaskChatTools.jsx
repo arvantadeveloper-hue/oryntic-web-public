@@ -60,3 +60,39 @@ export function AddPersonaMenu({ conv, personas, onAdded }) {
     </div>
   );
 }
+
+// Quick replies under the assistant's offer: "bahas satu per satu" vs "terima beres".
+export function TaskOfferButtons({ m, cid, onDone, isLast }) {
+  const [busy, setBusy] = useState("");
+  if (m.tool !== "task_offer" || !isLast) return null;
+  const pick = async (mode) => {
+    setBusy(mode);
+    try { await api.post(`/conversations/${cid}/tasks/accept`, { mode }); onDone && onDone(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Gagal"); } finally { setBusy(""); }
+  };
+  return (
+    <div className="mt-2 flex flex-wrap gap-2" data-testid="task-offer-buttons">
+      <button onClick={() => pick("discuss")} disabled={!!busy} className="rounded-full border border-[#2F6BFF]/40 bg-white px-4 py-1.5 text-xs font-bold text-[#2F6BFF] hover:bg-[#EEF3FF] disabled:opacity-60" data-testid="task-offer-discuss">{busy === "discuss" ? "..." : "Bahas satu per satu"}</button>
+      <button onClick={() => pick("delegate")} disabled={!!busy} className="rounded-full bg-[#2F6BFF] px-4 py-1.5 text-xs font-bold text-white hover:brightness-105 disabled:opacity-60" data-testid="task-offer-delegate">{busy === "delegate" ? "..." : "Terima beres"}</button>
+    </div>
+  );
+}
+
+// Polls for finished assigned tasks and shows a toast with a link to the result.
+export function TaskNotifier() {
+  const nav = useNavigate();
+  useEffect(() => {
+    let stop = false;
+    const poll = async () => {
+      try {
+        const r = await api.get("/task-notifications");
+        if (stop || !r.data.length) return;
+        r.data.forEach((t) => toast(t.status === "completed" ? `Tugas selesai: ${t.goal}` : `Tugas gagal: ${t.goal}`, { description: t.persona_name ? `oleh ${t.persona_name}` : undefined, action: { label: "Buka", onClick: () => nav(`/workspace/${t.id}`) }, duration: 12000 }));
+        await api.post("/task-notifications/ack");
+      } catch (e) {}
+    };
+    poll(); const iv = setInterval(poll, 20000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [nav]);
+  return null;
+}

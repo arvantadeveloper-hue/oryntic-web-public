@@ -16,6 +16,7 @@ from wallet import router as wallet_router
 from admin import router as admin_router
 from team import router as team_router
 from workspace import router as workspace_router
+from assignments import router as assignments_router, tasks_tick
 from models import router as models_router
 from voice import router as voice_router
 from files import router as files_router
@@ -42,6 +43,7 @@ app.include_router(wallet_router)
 app.include_router(admin_router)
 app.include_router(team_router)
 app.include_router(workspace_router)
+app.include_router(assignments_router)
 app.include_router(models_router)
 app.include_router(voice_router)
 app.include_router(files_router)
@@ -88,6 +90,7 @@ async def _scheduler_loop():
     while True:
         try:
             await scheduler_tick()
+            await tasks_tick()
         except Exception as e:
             logger.error(f"scheduler error: {e}")
         await asyncio.sleep(20)

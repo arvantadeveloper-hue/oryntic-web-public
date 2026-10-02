@@ -281,3 +281,33 @@ async def revise_with_llm(task: dict, request: str, system: str, model_key: Opti
     return out.strip(), summary.strip(), text_credits(prompt, out)
 
 
+
+
+# ---------- task assignment from chat / meeting ----------
+TASK_RE = re.compile(r"\b(tolong|bisa|minta|buatkan|buatlah|kerjakan|susun(kan)?|siapkan|rancang|analisis|analisa|riset|teliti|rangkum|ringkas|terjemahkan|"
+                     r"laporan|proposal|rencana|roadmap|strategi|artikel|esai|modul|kurikulum|presentasi|jadwalkan|nanti|besok|lusa|minggu depan|jam \d|pukul \d|deadline|tenggat)\b", re.I)
+OFFER_TEXT = ("Siap, {uname}! Tugas ini cukup besar: **{title}**.\n\nMau kita **bahas satu per satu** di sini, atau **terima beres** saja? "
+              "Kalau terima beres, tugas saya masukkan ke Ruang Kerja dan kerjakan {when}; setelah selesai saya kabari di chat ini, dan Anda bisa buat meeting supaya saya paparkan hasilnya.")
+
+
+async def plan_task(text: str, tz: str, history: str = "") -> dict:
+    """Decide whether the message delegates a (long) piece of work and when it should be done."""
+    if not TASK_RE.search(text or "") or len(text) < 25:
+        return {"is_task": False}
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+    try:
+        now = datetime.now(ZoneInfo(tz or "Asia/Jakarta"))
+    except Exception:
+        now = datetime.now(ZoneInfo("Asia/Jakarta"))
+    try:
+        r = await llm_json(
+            "You classify whether a user's chat message DELEGATES work to the assistant (a deliverable: document, plan, analysis, research, report, "
+            "code module, etc.) versus a quick question. Reply JSON only: {\"is_task\": bool, \"long\": bool, \"title\": str, \"brief\": str, \"scheduled_at\": str|null}. "
+            "long=true when the deliverable needs more than ~2 paragraphs of real work. title: short Indonesian title (max 10 words). brief: 1-3 sentences "
+            "restating exactly what must be produced. scheduled_at: ISO-8601 with timezone offset if the user names a time/day to do it (e.g. 'besok jam 9', "
+            "'Senin depan'), else null.",
+            f"Now: {now.isoformat()} ({tz}).\nRecent context: {history[-600:]}\nUser message: {text}")
+    except Exception:
+        return {"is_task": False}
+    return r if isinstance(r, dict) else {"is_task": False}

@@ -23,6 +23,7 @@ import Team from "./pages/Team";
 import JoinMeeting from "./pages/JoinMeeting";
 import VerifyEmail from "./pages/VerifyEmail";
 import InvitePage from "./pages/InvitePage";
+import Calendar from "./pages/Calendar";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -71,6 +72,7 @@ function App() {
                 <Route path="/workspace" element={<Workspace />} />
                 <Route path="/workspace/:id" element={<TaskDetail />} />
                 <Route path="/reminders" element={<Reminders />} />
+                <Route path="/calendar" element={<Calendar />} />
                 <Route path="/wallet" element={<AdminOnly><WalletPage /></AdminOnly>} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/team" element={<AdminOnly><Team /></AdminOnly>} />
