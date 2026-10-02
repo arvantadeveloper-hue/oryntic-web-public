@@ -1,0 +1,66 @@
+import logging
+import os
+from email.message import EmailMessage
+from html import escape
+
+import aiosmtplib
+
+log = logging.getLogger("aivora")
+BRAND = "Oryntix"
+
+
+def configured() -> bool:
+    return bool(os.environ.get("SMTP_HOST") and os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASSWORD"))
+
+
+def debug_links() -> bool:
+    return os.environ.get("EMAIL_DEBUG_LINKS", "").lower() == "true"
+
+
+async def send_email(to: str, subject: str, html: str, text: str) -> bool:
+    if not configured():
+        log.warning("SMTP not configured — email to %s skipped (%s)\n%s", to, subject, text)
+        return False
+    port = int(os.environ.get("SMTP_PORT") or 587)
+    msg = EmailMessage()
+    msg["From"] = f"{os.environ.get('SMTP_FROM_NAME') or BRAND} <{os.environ.get('SMTP_FROM') or os.environ['SMTP_USER']}>"
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(text)
+    msg.add_alternative(html, subtype="html")
+    try:
+        await aiosmtplib.send(msg, hostname=os.environ["SMTP_HOST"], port=port, username=os.environ["SMTP_USER"],
+                              password=os.environ["SMTP_PASSWORD"], use_tls=port == 465, start_tls=port != 465, timeout=20)
+        return True
+    except Exception as e:
+        log.error("SMTP send to %s failed: %s", to, e)
+        return False
+
+
+def _layout(title: str, body: str, cta: str, link: str, footer: str) -> str:
+    return f"""<!doctype html><html><body style="margin:0;background:#0a0f1f;font-family:Segoe UI,Arial,sans-serif;padding:32px 16px">
+<table role="presentation" width="100%" style="max-width:520px;margin:0 auto;background:#111a33;border-radius:16px;color:#fff">
+<tr><td style="padding:32px 32px 8px"><p style="margin:0;font-size:22px;font-weight:700;letter-spacing:.3px">{BRAND}</p></td></tr>
+<tr><td style="padding:8px 32px"><h2 style="margin:0 0 12px;font-size:20px">{title}</h2>
+<p style="margin:0;font-size:15px;line-height:1.6;color:rgba(255,255,255,.8)">{body}</p></td></tr>
+<tr><td style="padding:24px 32px"><a href="{link}" style="display:inline-block;background:linear-gradient(90deg,#2F6BFF,#7C3AED);color:#fff;text-decoration:none;font-weight:700;padding:14px 26px;border-radius:12px;font-size:15px">{cta}</a>
+<p style="margin:16px 0 0;font-size:12px;color:rgba(255,255,255,.5);word-break:break-all">Atau salin tautan ini: {link}</p></td></tr>
+<tr><td style="padding:8px 32px 32px;font-size:12px;color:rgba(255,255,255,.45)">{footer}</td></tr></table></body></html>"""
+
+
+def verification_email(name: str, link: str) -> tuple:
+    n = escape(name or "")
+    subject = f"Verifikasi email Anda — {BRAND}"
+    body = f"Halo {n}, terima kasih sudah mendaftar. Klik tombol di bawah untuk memverifikasi alamat email dan mulai menggunakan workspace {BRAND} Anda."
+    html = _layout("Verifikasi email Anda", body, "Verifikasi Email", link, "Jika Anda tidak mendaftar, abaikan email ini.")
+    text = f"Halo {name},\n\nVerifikasi email Anda untuk mulai menggunakan {BRAND}:\n{link}\n\nJika Anda tidak mendaftar, abaikan email ini."
+    return subject, html, text
+
+
+def invite_email(inviter: str, workspace: str, link: str) -> tuple:
+    i, w = escape(inviter or BRAND), escape(workspace or BRAND)
+    subject = f"{inviter} mengundang Anda ke workspace {workspace} — {BRAND}"
+    body = f"{i} mengundang Anda bergabung ke workspace <b>{w}</b> di {BRAND}. Buka tautan untuk menerima atau menolak undangan."
+    html = _layout("Undangan bergabung ke tim", body, "Lihat Undangan", link, "Undangan ini tidak kedaluwarsa dan dapat dibatalkan oleh pengundang.")
+    text = f"{inviter} mengundang Anda bergabung ke workspace {workspace} di {BRAND}.\nBuka tautan untuk menerima atau menolak undangan:\n{link}"
+    return subject, html, text

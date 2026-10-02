@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 from db import db, now_iso, new_id
-from auth import require_admin, require_platform_admin, workspace_id, pw_hash, public_user
+from auth import require_admin, require_platform_admin, workspace_id, pw_hash, public_user, member_ids
 from wallet import get_packages
 from llm import GPT_MODEL, IMAGE_MODEL, user_today_usage
 from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES
@@ -23,21 +23,30 @@ class UpdateUserIn(BaseModel):
 @router.get("/workspace-users")
 async def workspace_users(admin: dict = Depends(require_admin)):
     wid = workspace_id(admin)
-    items = await db.users.find({"owner_id": wid}, {"_id": 0, "password_hash": 0}).sort("created_at", 1).to_list(500)
+    ids = await member_ids(wid)
+    items = await db.users.find({"id": {"$in": ids}}, {"_id": 0, "password_hash": 0}).to_list(500)
+    items.sort(key=lambda i: (i["id"] != wid, i.get("created_at") or ""))
     out = []
     for i in items:
         pu = public_user(i)
+        pu["is_admin"] = i["id"] == wid
+        pu["role"] = "admin" if i["id"] == wid else "user"
         pu["daily_credit_limit"] = int(i.get("daily_credit_limit") or 0)
         pu["today_usage"] = await user_today_usage(i["id"])
         out.append(pu)
     return out
 
 
+async def _member_or_404(uid: str, admin: dict) -> dict:
+    target = await db.users.find_one({"id": uid})
+    if not target or uid not in await member_ids(workspace_id(admin)):
+        raise HTTPException(404, "Pengguna tidak ditemukan di workspace ini")
+    return target
+
+
 @router.patch("/users/{uid}")
 async def update_workspace_user(uid: str, x: UpdateUserIn, admin: dict = Depends(require_admin)):
-    target = await db.users.find_one({"id": uid})
-    if not target or target.get("owner_id") != workspace_id(admin):
-        raise HTTPException(404, "Pengguna tidak ditemukan di workspace ini")
+    await _member_or_404(uid, admin)
     fields = {}
     if x.daily_credit_limit is not None:
         fields["daily_credit_limit"] = max(0, int(x.daily_credit_limit))

@@ -1,5 +1,7 @@
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from typing import Annotated, Optional
 
 import bcrypt
@@ -11,6 +13,7 @@ from pydantic import BaseModel, EmailStr, Field
 from pricing import get_trial
 from ratelimit import login_allowed
 from db import db, now_iso, new_id
+from mailer import send_email, verification_email, debug_links
 
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ISSUER = "aivora-api"
@@ -56,6 +59,8 @@ def public_user(u: dict) -> dict:
         "role": u.get("role", "user"),
         "owner_id": u.get("owner_id") or u["id"],
         "is_admin": u.get("role") == "admin",
+        "is_home_workspace": (u.get("owner_id") or u["id"]) == u["id"],
+        "verified": u.get("verified", True),
         "onboarded": u.get("onboarded", False),
         "settings": u.get("settings", {}),
         "credits": u.get("credits", 0),
@@ -71,8 +76,40 @@ def is_platform_admin(u: dict) -> bool:
 
 
 def workspace_id(user: dict) -> str:
-    """The id of the workspace owner (admin). Admins own their own workspace."""
+    """The id of the active workspace's owner. Every account owns its own (home) workspace and may join others."""
     return user.get("owner_id") or user["id"]
+
+
+async def member_ids(wid: str) -> list:
+    """Owner + everyone who accepted an invitation to this workspace."""
+    rows = await db.workspace_members.find({"workspace_id": wid, "status": "joined"}, {"_id": 0, "user_id": 1}).to_list(1000)
+    return [wid] + [r["user_id"] for r in rows if r["user_id"] != wid]
+
+
+async def is_member(user_id: str, wid: str) -> bool:
+    return user_id == wid or bool(await db.workspace_members.find_one({"workspace_id": wid, "user_id": user_id, "status": "joined"}))
+
+
+def role_for(u: dict) -> str:
+    return "admin" if (u.get("owner_id") or u["id"]) == u["id"] else "user"
+
+
+def app_url(request: Request) -> str:
+    return (request.headers.get("origin") or os.environ.get("APP_URL") or "").rstrip("/")
+
+
+def token_hash(raw: str) -> str:
+    return sha256(raw.encode()).hexdigest()
+
+
+async def issue_verification(user: dict, base_url: str) -> dict:
+    raw = secrets.token_urlsafe(32)
+    await db.email_tokens.delete_many({"purpose": "verify", "email": user["email"]})
+    await db.email_tokens.insert_one({"purpose": "verify", "email": user["email"], "token_hash": token_hash(raw), "created_at": now_iso()})
+    link = f"{base_url}/verify-email?token={raw}"
+    subject, html, text = verification_email(user.get("name") or "", link)
+    sent = await send_email(user["email"], subject, html, text)
+    return {"mail_sent": sent, **({"debug_link": link} if debug_links() else {})}
 
 
 LANG_NAMES = {"id": "Bahasa Indonesia", "en": "English", "es": "Spanish", "fr": "French",
@@ -125,7 +162,17 @@ async def current_user(
     u = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
     if not u:
         raise HTTPException(401, "User not found")
+    u["role"] = role_for(u)
     return u
+
+
+async def optional_user(creds: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer)]) -> Optional[dict]:
+    if not creds:
+        return None
+    try:
+        return await current_user(creds)
+    except HTTPException:
+        return None
 
 
 async def require_admin(u: dict = Depends(current_user)) -> dict:
@@ -143,10 +190,15 @@ async def require_platform_admin(u: dict = Depends(current_user)) -> dict:
 
 # ---------- routes ----------
 @router.post("/register")
-async def register(x: RegisterIn):
+async def register(x: RegisterIn, request: Request):
     email = str(x.email).lower()
-    if await db.users.find_one({"email": email}):
+    existing = await db.users.find_one({"email": email})
+    if existing and existing.get("verified", True):
         raise HTTPException(409, "Email already registered")
+    if existing:  # unverified leftover: refresh credentials and resend the link
+        await db.users.update_one({"id": existing["id"]}, {"$set": {"password_hash": pw_hash(x.password), "name": x.name or existing.get("name")}})
+        out = await issue_verification({**existing, "name": x.name or existing.get("name")}, app_url(request))
+        return {"pending_verification": True, "email": email, **out}
     trial = await get_trial()
     uid = new_id()
     doc = {
@@ -157,10 +209,10 @@ async def register(x: RegisterIn):
         "email": email,
         "password_hash": pw_hash(x.password),
         "name": x.name or email.split("@")[0],
-        "role": "admin",  # self-registered accounts own their workspace; invited members get role "user"
+        "role": "admin",  # self-registered accounts own their workspace; in other workspaces they act as members
         "owner_id": uid,
         "onboarded": False,
-        "verified": True,
+        "verified": False,
         "credits": int(trial["trial_credits"]),
         "settings": {
             "app_language": "id",
@@ -175,7 +227,36 @@ async def register(x: RegisterIn):
         "id": new_id(), "user_id": uid, "type": "grant", "amount": int(trial["trial_credits"]),
         "balance_after": int(trial["trial_credits"]), "description": f"Paket percobaan {trial['trial_days']} hari", "created_at": now_iso(),
     })
-    return {"access_token": make_token(uid, "user"), "user": public_user(doc)}
+    out = await issue_verification(doc, app_url(request))
+    return {"pending_verification": True, "email": email, **out}
+
+
+class EmailIn(BaseModel):
+    email: EmailStr
+
+
+@router.post("/resend-verification")
+async def resend_verification(x: EmailIn, request: Request):
+    ip = (request.headers.get("x-forwarded-for") or request.client.host or "?").split(",")[0].strip()
+    email = str(x.email).lower()
+    if not login_allowed(ip, email):
+        raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi dalam 5 menit.")
+    u = await db.users.find_one({"email": email}, {"_id": 0})
+    out = await issue_verification(u, app_url(request)) if u and not u.get("verified", True) else {}
+    return {"ok": True, **out}
+
+
+@router.get("/verify-email")
+async def verify_email(token: str):
+    row = await db.email_tokens.find_one_and_delete({"purpose": "verify", "token_hash": token_hash(token)})
+    if not row:
+        raise HTTPException(400, "Tautan verifikasi tidak valid atau sudah dipakai")
+    await db.users.update_one({"email": row["email"]}, {"$set": {"verified": True, "verified_at": now_iso()}})
+    u = await db.users.find_one({"email": row["email"]}, {"_id": 0})
+    if not u:
+        raise HTTPException(404, "Akun tidak ditemukan")
+    u["role"] = role_for(u)
+    return {"access_token": make_token(u["id"], u["role"]), "user": public_user(u)}
 
 
 @router.post("/login")
@@ -187,7 +268,35 @@ async def login(x: LoginIn, request: Request):
     u = await db.users.find_one({"email": email})
     if not u or not pw_ok(x.password, u["password_hash"]):
         raise HTTPException(401, "Incorrect email or password")
-    return {"access_token": make_token(u["id"], u.get("role", "user")), "user": public_user(u)}
+    if not u.get("verified", True):
+        raise HTTPException(403, {"code": "unverified", "message": "Email belum diverifikasi. Cek kotak masuk Anda atau kirim ulang tautan verifikasi."})
+    u["role"] = role_for(u)
+    return {"access_token": make_token(u["id"], u["role"]), "user": public_user(u)}
+
+
+@router.get("/workspaces")
+async def my_workspaces(u: dict = Depends(current_user)):
+    """Home workspace + every workspace the user has joined."""
+    rows = await db.workspace_members.find({"user_id": u["id"], "status": "joined"}, {"_id": 0, "workspace_id": 1, "joined_at": 1}).to_list(100)
+    ids = [u["id"]] + [r["workspace_id"] for r in rows if r["workspace_id"] != u["id"]]
+    owners = {o["id"]: o async for o in db.users.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1})}
+    active = workspace_id(u)
+    return [{"id": wid, "name": (owners.get(wid) or {}).get("name") or "Workspace", "owner_email": (owners.get(wid) or {}).get("email"),
+             "is_home": wid == u["id"], "active": wid == active, "role": "admin" if wid == u["id"] else "user"} for wid in ids if wid in owners]
+
+
+class SwitchIn(BaseModel):
+    workspace_id: str
+
+
+@router.post("/switch-workspace")
+async def switch_workspace(x: SwitchIn, u: dict = Depends(current_user)):
+    if not await is_member(u["id"], x.workspace_id):
+        raise HTTPException(403, "Anda bukan anggota workspace ini")
+    await db.users.update_one({"id": u["id"]}, {"$set": {"owner_id": x.workspace_id, "role": "admin" if x.workspace_id == u["id"] else "user"}})
+    u2 = await db.users.find_one({"id": u["id"]}, {"_id": 0})
+    u2["role"] = role_for(u2)
+    return {"access_token": make_token(u2["id"], u2["role"]), "user": public_user(u2)}
 
 
 @router.get("/me")
@@ -255,3 +364,9 @@ async def migrate_workspace():
     await db.users.update_many({"owner_id": {"$exists": False}}, [{"$set": {"owner_id": "$id"}}])
     # workspace owners (owner_id == own id) are admins of their workspace
     await db.users.update_many({"role": {"$ne": "admin"}, "$expr": {"$eq": ["$owner_id", "$id"]}}, {"$set": {"role": "admin"}})
+    # accounts created before email verification existed stay active
+    await db.users.update_many({"verified": {"$exists": False}}, {"$set": {"verified": True}})
+    # legacy members (owner_id != id) get an explicit joined membership so they can also use their home workspace
+    async for m in db.users.find({"$expr": {"$ne": ["$owner_id", "$id"]}}, {"_id": 0, "id": 1, "owner_id": 1, "email": 1, "created_at": 1}):
+        await db.workspace_members.update_one({"workspace_id": m["owner_id"], "user_id": m["id"]},
+                                              {"$setOnInsert": {"id": new_id(), "email": m["email"], "status": "joined", "joined_at": m.get("created_at") or now_iso(), "legacy": True}}, upsert=True)
