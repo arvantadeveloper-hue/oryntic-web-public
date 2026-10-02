@@ -4,17 +4,17 @@ import { api } from "./api";
 export const SENSITIVITIES = ["low", "medium", "high"];
 export const SENS_LABEL = { low: "Rendah", medium: "Sedang", high: "Tinggi" };
 export const SENS_HINT = {
-  low: "Paling tahan bising — hanya suara keras & dekat yang lolos.",
+  low: "Disarankan — tahan bising, asisten tidak terpotong oleh suara latar.",
   medium: "Seimbang — suara Anda lolos, obrolan orang jauh diabaikan.",
   high: "Peka — untuk ruangan sunyi atau suara pelan.",
 };
-export const BARGE_CONFIRM_MS = 300;
+export const BARGE_CONFIRM_MS = 700; // sustained voice needed before we treat it as a real interruption
 const PREF_KEY = "aivora_mic_prefs";
 
 export function loadMicPrefs(user) {
   try { const l = JSON.parse(localStorage.getItem(PREF_KEY) || "null"); if (l?.sensitivity) return l; } catch (e) {}
   const s = user?.settings || {};
-  return { sensitivity: s.mic_sensitivity || "medium", noise: s.noise_suppression !== false };
+  return { sensitivity: s.mic_sensitivity || "low", noise: s.noise_suppression !== false };
 }
 
 export function saveMicPrefs(p) {

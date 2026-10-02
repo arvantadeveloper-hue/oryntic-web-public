@@ -5,7 +5,7 @@ export const reportUsage = (callId, ev) => { if (ev?.type === "response.done" &&
 // Same semantic-VAD mapping as backend `vad_config`; interruption is confirmed client-side (see MicPipeline.openFor).
 export const vadUpdate = (sensitivity, createResponse) => ({
   type: "session.update",
-  session: { type: "realtime", audio: { input: { turn_detection: { type: "semantic_vad", eagerness: sensitivity, create_response: createResponse, interrupt_response: false } } } },
+  session: { type: "realtime", audio: { input: { turn_detection: { type: "semantic_vad", eagerness: ({ low: "low", medium: "low", high: "medium" })[sensitivity] || "low", create_response: createResponse, interrupt_response: false } } } },
 });
 
 // One OpenAI Realtime WebRTC session (negotiated via our backend) sharing the user's mic stream.

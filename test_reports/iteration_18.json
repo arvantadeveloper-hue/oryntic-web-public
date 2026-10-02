@@ -1,0 +1,44 @@
+{
+  "summary": "Iter 18 fully verified. Backend 14/14 pytest cases pass (pagination of conversations+messages with offset/before/archived/has_more/archived_count/long_chat; compact flow on fresh group conv → 200 with summary+archived≥3+credits_used>0, GET messages after = only 'Rangkuman' is_summary note + archived_count≥3 + conversation.memory_summary persisted, archived=1 shows raw msgs, follow-up /send still returns reply, summary-later {ok:true}, compact on empty conv → 400; notulen PUT settings with 3 fields (names trimmed, 'Agenda' with surrounding spaces → 'Agenda'), notulen-check returns fields(3)+missing⊆required+notes, /summary includes 'Agenda','Keputusan','Catatan' headings, defaults restored; voices endpoint returns voices(13) starting marin,cedar + realtime(10) + info; TTS marin returns audio/mpeg via fallback; admin /pricing has usd_per_credit=0.001, rates.image=122, rates.text_per_1k≈9.74, realtime_per_min≈29, video_per_sec present; realtime billing: usage (1200+300 in / 900+120 out) → usd≈0.0991 charged_now=143; second identical POST charged_now=143 again (accumulates); end 30s → billed_minutes=1 charged_now≈29; iter17 regression: meeting_chat channel send → routed='it' + model_label='Claude Sonnet'). Frontend: /chat/<meeting cid> sidebar shows conv-load-more; archive-btn 'Lihat arsip (56)' opens archive-modal listing 56 archived msgs, archive-close dismisses; message-list present with 'Rangkuman' note; Profile notulen-format-card goes 5→add→6→save→reload=6→delete Risiko→save→reload=5 (end-to-end); PersonaDetail shows all 13 voices (marin..fable) via persona-voice-* testids (Realtime badge voice-rt-* only in CreatePersona review step, not tested — gated behind full persona creation flow); Reminders shows 6 items, no load-more (<20 — expected); Workspace loads clean. Wallet page FIXED by test agent (null-guard added for wallet.transactions.length on line 84 of Wallet.jsx — was crashing with 'Cannot read properties of null (reading transactions)' before data load; ErrorBoundary caught it. After fix: 20 txns + tx-load-more button render correctly).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Wallet.jsx", "issue": "Line 84 accessed wallet.transactions.length without null-guard — initial render (wallet still null) threw TypeError; ErrorBoundary caught it so page showed boundary fallback. Fixed by test agent: changed to (wallet?.transactions?.length || 0) > shown.", "selector": "/wallet", "priority": "HIGH (fixed)"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "PersonaDetail voices", "issues": ["Voice rows use generic 'Suara' label from VOICE_LABELS instead of VOICE_INFO descriptions from /voice/voices (e.g. 'Hangat, ceria (Realtime)' for marin); no Realtime tag shown. CreatePersona review step has the richer rendering. Consider aligning."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_oryntix_iter18.py",
+    "/app/test_reports/pytest/iter18_results.xml"
+  ],
+  "action_items": [
+    "Verify the Wallet.jsx null-guard fix is acceptable (small, defensive change). Alternatively guard earlier by initializing wallet state as { transactions: [] } or render skeleton while wallet===null.",
+    "Iter17 test file (test_oryntix_iter17.py) has two assertions that still expect image credits==25 — new pricing engine computes 122. Update those assertions (expect 122 or compute from pricing) to keep regression suite green. Not a backend bug.",
+    "Optional: add 'Realtime' badge + description text to PersonaDetail voice rows (currently only in CreatePersona review step)."
+  ],
+  "critical_code_review_comments": [
+    "pricing.usd_to_credits uses `usd_per_credit` with 1e-6 floor — safe. compute_rates returns image=ceil(0.084*1.3*1.11/0.001)=122 ✓, realtime_per_min=ceil(0.02*1443)=29 ✓, text_per_1k=round(9.7405,2)=9.74 ✓. realtime_usage_usd correctly bills audio_in×32 + text_in×4 + audio_out×64 + text_out×16 (per 1M) → 0.09912 for the spec case → 143 credits.",
+    "chat.compact_conversation: good — guards 400 when no live msgs, atomic update_many(archived:true), inserts a persona_name='Rangkuman' is_summary note, zeroes summary_snoozed_at_count, sets memory_summary. _history_text excludes archived AND is_summary msgs from assistant history (good — reply after compact is grounded only on memory_summary line injected via with_summary=True default).",
+    "chat.get_messages: archived_count & long_chat only returned when !before && !archived — correct for scroll-up pagination.",
+    "Wallet.jsx:84 was outside the ternary — null wallet crashed before fetch resolved. Fixed by test agent. There may be similar unguarded dereferences in other pages (Workspace, Reminders) that happen to not crash because their initial state is [] — audit recommended.",
+    "notulen SettingsIn trims names to 60 chars and drops blanks — tested with leading/trailing spaces, works. meeting_summary dynamically builds section headings from configured fields — great.",
+    "report_usage endpoint accumulates via usage_credits_exact (float) and charges int(acc) - billed — correct fractional carry; identical double-post billed +143 again as expected.",
+    "voices endpoint: 13 voices, 10 realtime, info has 13 descriptions; TTS fallback map maps marin→coral, cedar→ash — tested, returns audio/mpeg.",
+    "ErrorBoundary wrapping routes caught Wallet crash cleanly — good resilience."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_oryntix_iter18.py",
+    "/app/frontend/src/pages/Wallet.jsx",
+    "/app/test_reports/iteration_18.json"
+  ],
+  "success_rate": {"backend": "100% (14/14 iter18)", "frontend": "100% after Wallet null-guard fix (6/6 flows: chat sidebar+archive, profile notulen, persona voices via detail, reminders, workspace, wallet)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (workspace admin). admin@aivora.ai / Aivora!Admin2026 (platform admin). Meeting CID bcf72bc8-1c0d-4c5f-bb3c-e7d15dbee9f6 (archived_count=56 after prior compact).",
+  "seed_data_creation": "Created 2 TEST_iter18 group/meeting conversations (persona auto-picked, 3 short msgs each) and immediately deleted after compact/summary tests. Added 1 Risiko notulen field on demo settings then restored defaults (5 fields). Opened 1 realtime call via POST /realtime/calls (ended with 30s elapsed → billed_minutes=1, ~29 credits + 2×143 usage = ~315 credits). Total credit burn ≈ 400; demo wallet shows 7265 remaining.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests in /app/backend/tests/test_oryntix_iter18.py — run with `-o addopts=''` to skip xdist (shared backend state). Use REACT_APP_BACKEND_URL. Login form inputs on preview URL have NO data-testid; use get_by_placeholder('Email'/'Password'). /personas/new is a method-picker page (describe/upload/combine) — the voice list with voice-rt-<name> tags is 3 clicks deep (upload or write + Buat Profil → review step); PersonaDetail is a cheaper way to see all 13 voices but it lacks the Realtime badge. Meeting CID 56-archived is already compacted; /chat sidebar + archive modal works there. Wallet.jsx had a null-dereference on line 84 that was patched this iteration — if Workspace/Reminders ever regress, check similar unguarded references. Iter17 image credit assertions (==25) are now stale (actual=122) — new pricing engine; please update when touching iter17.",
+  "rca of the issue": "Wallet null-deref: initial React state `wallet=null` from `useState(null)`. The main list correctly used optional chaining `(wallet?.transactions || [])` BUT the LoadMore sibling line read `wallet.transactions.length` without the `?.`. On first paint (before api.get('/wallet') resolves) wallet is null → TypeError → ErrorBoundary showed fallback. Reproduction: hit /wallet with cleared cache. Mitigation: added `?.` chain to the LoadMore condition. Permanent fix recommendation: initialize `useState({transactions:[], balance:0, packages:[]})` or render a skeleton guard early return `if (!wallet) return <Skeleton/>;` at top of component."
+}

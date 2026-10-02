@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { toast } from "sonner";
-import { Mail, Lock, Eye, EyeOff, ArrowRight, Globe, Play, BarChart3, FileText, Users, Sparkles, MessageSquare, Video } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Globe, BarChart3, FileText, Users, Sparkles, MessageSquare, Video } from "lucide-react";
 import { Logo, BRAND_HERO, TAGLINE } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
@@ -61,10 +61,6 @@ export default function Auth() {
               Oryntix membantu Anda berdiskusi, menganalisis, membuat dokumen, hingga menyelesaikan pekerjaan bersama tim agen AI — lewat chat maupun meeting suara.
             </p>
             <div className="mt-6 flex items-center gap-3">
-              <button className="flex items-center gap-2 rounded-full bg-white/10 px-5 py-3 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20">
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#2F6BFF]"><Play size={14} fill="currentColor" /></span>
-                Lihat Video
-              </button>
               <div className="flex flex-wrap gap-2">
                 {CHIPS.map((c) => (
                   <span key={c.label} className="flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-medium text-white/90 backdrop-blur">
@@ -131,14 +127,10 @@ export default function Auth() {
           <div className="my-6 flex items-center gap-3 text-xs text-slate-400">
             <div className="h-px flex-1 bg-[#E7ECF3]" /> atau masuk dengan <div className="h-px flex-1 bg-[#E7ECF3]" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            {["Google", "Microsoft"].map((p) => (
-              <button key={p} onClick={() => toast.message(`Login ${p} segera hadir`)} data-testid={`social-${p.toLowerCase()}`}
-                className="flex items-center justify-center gap-2 rounded-xl border border-[#E7ECF3] bg-white py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
-                <span className="text-base">{p === "Google" ? "G" : "⊞"}</span> {p}
-              </button>
-            ))}
-          </div>
+          <button onClick={() => toast.message("Login Google sedang disiapkan — menunggu Client ID/Secret Google OAuth")} data-testid="social-google"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#E7ECF3] bg-white py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+            <span className="text-base font-bold text-[#4285F4]">G</span> Masuk dengan Google
+          </button>
 
           <p className="mt-7 text-center text-sm text-slate-500">
             {mode === "login" ? "Belum punya akun?" : "Sudah punya akun?"}{" "}

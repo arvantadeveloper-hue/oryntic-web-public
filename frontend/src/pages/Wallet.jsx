@@ -81,7 +81,7 @@ export default function Wallet() {
               <span className={`text-sm font-semibold ${tx.amount >= 0 ? "text-[#10B981]" : "text-[#EF4444]"}`}>{tx.amount >= 0 ? "+" : ""}{tx.amount}</span>
             </div>
           ))}
-          {wallet.transactions.length > shown && <LoadMore onClick={() => setShown((n) => n + 20)} testid="tx-load-more" />}
+          {(wallet?.transactions?.length || 0) > shown && <LoadMore onClick={() => setShown((n) => n + 20)} testid="tx-load-more" />}
       </div>
     </div>
   );

@@ -183,6 +183,21 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Tests: `assert x is True/False` → `assert x` / `assert not (x)`; variabel tak terpakai & import ganda dibersihkan; `ruff --select E4,E7,E9,F` bersih untuk backend + tests.
 - Regresi: pytest iter16 11/11, iter17 13/13; curl nudge & reminder respond OK. (iter15 gagal 3 hanya karena throttle login 429 dari tes brute-force di file yang sama — bukan regresi kode.)
 
+## Update 2026-06 (u) — Batch 7 item + turn-taking natural (iteration_18 lulus: BE 14/14, FE 100%)
+- **Pagination**: `GET /conversations?limit&offset` (sidebar 20/muat), `GET /conversations/{cid}/messages?limit=50&before=&archived=` → `{messages, has_more, archived_count, long_chat}` (scroll-ke-atas memuat lama, `applyPage/loadOlder` di Chat.jsx); Wallet/Workspace/Reminders `LoadMore` 20/klik (client-side).
+- **Rangkuman otomatis & arsip**: `_long_chat` (≥40 pesan / ≥15k char sejak snooze) → SSE `summary_request` + `long_chat` → `SummaryPrompt`; `POST /compact` (LLM merge ke `conversation.memory_summary`, pesan live → `archived:true`, catatan `is_summary`), `POST /summary-later`; arsip hanya via `ArchiveModal` (tidak masuk memori asisten). Akhir meeting: `/summary` lalu `/compact`.
+- **Format notulen**: `settings.notulen_fields` (owner; `NotulenFormatCard` di Profil), `POST /notulen-check` → `useNotulenGate` dialog *Lanjutkan pembahasan / Tetap akhiri* di RealtimeMeeting & VideoRoom; `/summary` memakai heading sesuai kolom.
+- **Suara**: `VOICES` 13 (10 Realtime: marin, cedar, …) + `VOICE_INFO`, fallback TTS marin/cedar; form persona tag "Realtime". **Moderator membuka meeting** (`MODERATOR_OPENING`), `NO_REPEAT`/`NO_REPEAT_TEXT`.
+- **Turn-taking natural**: `SPEAKING_STYLE` (tenang, jelas, tidak terburu-buru, mengalah halus); eagerness semantic_vad dipetakan low/low/medium; `BARGE_CONFIRM_MS=700`; default sensitivitas **Rendah**.
+- **Mesin harga**: `usd_per_credit=0.001` (1.000 kredit = $1), `usd_to_credits()`; Realtime ditagih per respons dari `response.usage` (`POST /realtime/calls/{id}/usage`, tarif rt_*_usd_1m) + biaya koneksi $0.02/mnt; `video_per_sec`; admin PlatformPricingCards field baru; DB config diperbarui (provider_usd_per_min 0.02).
+- **UI**: `ErrorBoundary` global (anti layar putih), PDF dideteksi dari ekstensi + batas 8MB, sidebar sticky `h-screen` (Workspace Usage & Logout selalu tampil), login Microsoft & "Lihat Video" dihapus, tombol Google (placeholder menunggu Client ID/Secret).
+- Bug "layar putih upload PDF" **tidak tereproduksi** di preview (PDF 16KB & 3MB OK) — ErrorBoundary + validasi ditambahkan; minta user cek ulang di versi deploy terbaru.
+
+## Backlog batch berikut (menunggu kunci dari user)
+- SMTP Gmail (host, user, app-password, from) → verifikasi email + undangan tim via email (status menunggu/bergabung/ditolak, tim buat akun sendiri).
+- Google OAuth sendiri (Client ID/Secret) → login Google.
+- Tugas terjadwal dari meeting/chat → Ruang Kerja (tawaran "bahas satu per satu / terima beres"), buat meeting dari Ruang Kerja, revisi hasil di meeting, unduh Word di Ruang Kerja, menu Kalender.
+
 ## Next tasks
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
 - Verifikasi email saat daftar (ditunda; perlu Resend/SendGrid key).

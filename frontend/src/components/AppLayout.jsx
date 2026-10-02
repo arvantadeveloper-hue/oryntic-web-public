@@ -35,7 +35,7 @@ export function AppLayout() {
   const SidebarInner = (
     <div className="flex h-full flex-col sidebar-dark text-white">
       <div className="px-5 pb-4 pt-6"><Logo light size={32} /></div>
-      <nav className="flex-1 space-y-1 px-3">
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3">
         {items.map((it) => (
           <NavLink key={it.id} to={it.to} data-testid={`nav-${it.id}`} onClick={() => setOpen(false)}
             className={({ isActive }) => `nav-item flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium md:text-sm ${isActive ? "active" : ""}`}>
@@ -44,7 +44,7 @@ export function AppLayout() {
           </NavLink>
         ))}
       </nav>
-      <div className="p-3">
+      <div className="shrink-0 p-3">
         {isAdmin && (
           <div className="rounded-2xl bg-white/[0.06] p-4" data-testid="sidebar-usage">
             <p className="text-xs font-medium text-white/70">Workspace Usage</p>
@@ -76,7 +76,7 @@ export function AppLayout() {
 
   return (
     <div className="flex min-h-screen mesh-bg">
-      <aside className="hidden w-60 shrink-0 md:block">{SidebarInner}</aside>
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 md:block">{SidebarInner}</aside>
 
       {open && (
         <div className="fixed inset-0 z-40 md:hidden">

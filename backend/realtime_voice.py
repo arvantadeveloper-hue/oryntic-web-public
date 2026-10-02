@@ -26,6 +26,10 @@ VOICE_MAP = {"alloy": "alloy", "echo": "echo", "shimmer": "shimmer", "nova": "co
              "ash": "ash", "coral": "coral", "sage": "sage", "verse": "verse", "marin": "marin", "cedar": "cedar", "ballad": "ballad"}
 MODERATOR_OPENING = ("YOU OPEN THE MEETING as the Moderator: greet {uname} warmly by name, name the participants ({roster}), state the "
                      "meeting's purpose in one sentence (title: \"{title}\"), then invite {uname} to start. 3-4 short spoken sentences.")
+SPEAKING_STYLE = ("VOICE STYLE: speak clearly, calmly and naturally like a warm, friendly human — unhurried pace, natural pauses, no rushing. "
+                  "Prioritize understanding what the user means over answering fast: if the user pauses mid-thought, wait; if something is "
+                  "ambiguous, ask one short clarifying question. If the user starts talking while you speak, yield the turn gracefully "
+                  "(finish the word, stop, listen) and continue naturally afterwards without restarting your whole answer.")
 NO_REPEAT = ("Listen to what the other participants already said. NEVER repeat or paraphrase a point someone else has made; "
              "if you agree, say so in a few words and ADD something new (a different angle, risk, example, or decision). "
              "If you have nothing new, say briefly that you have nothing to add.")
@@ -123,7 +127,7 @@ async def _close_stale_calls(user_id: str):
 
 
 async def _session_instructions(persona: dict, u: dict, roster: list, history: str, opening, is_first: bool, title: str = "") -> str:
-    text = await _persona_system(persona, u, None, voice_mode=True)
+    text = await _persona_system(persona, u, None, voice_mode=True) + "\n\n" + SPEAKING_STYLE
     if len(roster) > 1:
         text += "\n\n" + MULTI_STYLE.format(others=", ".join(n for n in roster if n != persona["name"])) + "\n" + NO_REPEAT
     if history.strip():
@@ -181,7 +185,8 @@ async def _own_call(call_id: str, u: dict) -> dict:
 def vad_config(sensitivity: str, multi: bool) -> dict:
     """Semantic VAD judges whether the audio is meaningful speech; eagerness follows the user's mic sensitivity.
     interrupt_response is off: the browser confirms a real barge-in (noise gate open ≥300ms) before cancelling."""
-    eager = {"low": "low", "medium": "medium", "high": "high"}.get(sensitivity or "medium", "medium")
+    # calm turn-taking: even "high" sensitivity never gets eager end-of-turn detection
+    eager = {"low": "low", "medium": "low", "high": "medium"}.get(sensitivity or "low", "low")
     return {"type": "semantic_vad", "eagerness": eager, "create_response": not multi, "interrupt_response": False}
 
 
