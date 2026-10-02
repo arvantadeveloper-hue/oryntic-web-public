@@ -12,6 +12,7 @@ import { RealtimeMeeting } from "../components/RealtimeMeeting";
 import { MediaList, ToolRequestCard, ModelBadge } from "../components/MessageExtras";
 import { SummaryPrompt, ArchiveModal, LoadMore } from "../components/ConversationTools";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
+import { TaskContextCard, AddPersonaMenu } from "../components/TaskChatTools";
 
 function Avatar({ name, portrait, size = 32, moderator }) {
   if (moderator) return <span className="flex items-center justify-center rounded-full bg-[#0B132B] text-white" style={{ width: size, height: size }}><Gavel size={size * 0.5} /></span>;
@@ -277,6 +278,7 @@ export default function Chat() {
               {conv.type === "private" && <button onClick={() => setVideoOpen(true)} title={rt.enabled ? "Panggilan suara realtime" : "Mode panggilan suara"} data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil{rt.enabled ? " · Realtime" : ""}</span></button>}
               {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Masuk ruang meeting" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#2F6BFF] px-2.5 text-xs font-semibold text-white sm:px-3"><Video size={15} /> <span className="hidden sm:inline">Masuk Meeting</span></button>}
               {conv.type !== "private" && <button onClick={saveNotes} disabled={savingNotes} title="Buat & simpan notulen ke Ruang Kerja" data-testid="save-notes-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#E6EAF2] bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:px-3">{savingNotes ? <RefreshCw size={15} className="animate-spin" /> : <FileText size={15} />} <span className="hidden sm:inline">Notulen</span></button>}
+              <AddPersonaMenu conv={conv} personas={personas || []} onAdded={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />
               {conv.type === "meeting" && isAdmin && <button onClick={openInvite} title="Undang pengguna" data-testid="invite-user-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2F6BFF]/40 px-2.5 text-xs font-semibold text-[#2F6BFF] sm:px-3"><UserPlus size={15} /> <span className="hidden sm:inline">Undang</span></button>}
               <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
             </div>
@@ -286,6 +288,7 @@ export default function Chat() {
         <div ref={listRef} onScroll={(e) => { if (e.currentTarget.scrollTop < 60) loadOlder(); }} className="flex-1 space-y-5 overflow-y-auto p-5" data-testid="message-list">
           {conv && msgHasMore && <div className="text-center text-xs text-slate-400" data-testid="msg-older-hint">{loadingOlder ? "Memuat pesan lama…" : "Gulir ke atas untuk pesan lama"}</div>}
           {conv && archivedCount > 0 && <div className="text-center"><button onClick={() => setShowArchive(true)} data-testid="archive-btn" className="rounded-full border border-[#E7ECF3] bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">Lihat arsip ({archivedCount})</button></div>}
+          {conv?.task_id && <TaskContextCard taskId={conv.task_id} refreshKey={messages.length} />}
           {!conv && (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <Bot size={44} className="mb-4 text-[#2F6BFF]" />

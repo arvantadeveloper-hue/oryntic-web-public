@@ -3,11 +3,12 @@ import asyncio
 import math
 from pricing import RATES
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
-from auth import current_user
+from auth import current_user, workspace_id
+from workspace import task_access, get_task_for, task_view
 from llm import llm_text, llm_json, record_usage, text_credits, DEFAULT_MODEL_KEY, MODEL_CATALOG
 
 router = APIRouter(prefix="/api", tags=["agents"])
@@ -158,7 +159,7 @@ async def create_task(x: TaskIn, u: dict = Depends(current_user)):
     model_key = x.model if x.model in _MODEL_IDS else DEFAULT_MODEL_KEY
     tid = new_id()
     doc = {
-        "id": tid, "user_id": u["id"], "goal": x.goal, "persona_id": x.persona_id,
+        "id": tid, "user_id": u["id"], "workspace_id": workspace_id(u), "goal": x.goal, "persona_id": x.persona_id, "version": 1, "source": "workspace",
         "type": "multi_agent", "status": "queued", "steps": [], "summary": "",
         "model": model_key, "final_output": "", "credits_used": 0,
         "created_at": now_iso(), "updated_at": now_iso(),
@@ -170,27 +171,22 @@ async def create_task(x: TaskIn, u: dict = Depends(current_user)):
 
 @router.get("/tasks")
 async def list_tasks(status: Optional[str] = None, q: Optional[str] = None, u: dict = Depends(current_user)):
-    query = {"user_id": u["id"]}
+    query = task_access(u)
     if status and status != "all":
         query["status"] = status
     if q:
         query["goal"] = {"$regex": q, "$options": "i"}
-    return await db.tasks.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return await db.tasks.find(query, {"_id": 0, "versions": 0}).sort("created_at", -1).to_list(200)
 
 
 @router.get("/tasks/{tid}")
 async def get_task(tid: str, u: dict = Depends(current_user)):
-    t = await db.tasks.find_one({"id": tid, "user_id": u["id"]}, {"_id": 0})
-    if not t:
-        raise HTTPException(404, "Task not found")
-    return t
+    return task_view(await get_task_for(tid, u))
 
 
 @router.post("/tasks/{tid}/cancel")
 async def cancel_task(tid: str, u: dict = Depends(current_user)):
-    t = await db.tasks.find_one({"id": tid, "user_id": u["id"]})
-    if not t:
-        raise HTTPException(404, "Task not found")
+    t = await get_task_for(tid, u)
     if t["status"] in ("queued", "running"):
         await db.tasks.update_one({"id": tid}, {"$set": {"status": "cancelled", "updated_at": now_iso()}})
     return {"ok": True}
@@ -198,5 +194,5 @@ async def cancel_task(tid: str, u: dict = Depends(current_user)):
 
 @router.delete("/tasks/{tid}")
 async def delete_task(tid: str, u: dict = Depends(current_user)):
-    await db.tasks.delete_one({"id": tid, "user_id": u["id"]})
+    await db.tasks.delete_one({"id": tid, **task_access(u)})
     return {"ok": True}

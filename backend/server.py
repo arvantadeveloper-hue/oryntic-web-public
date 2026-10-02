@@ -15,6 +15,7 @@ from reminders import router as reminders_router, scheduler_tick
 from wallet import router as wallet_router
 from admin import router as admin_router
 from team import router as team_router
+from workspace import router as workspace_router
 from models import router as models_router
 from voice import router as voice_router
 from files import router as files_router
@@ -40,6 +41,7 @@ app.include_router(reminders_router)
 app.include_router(wallet_router)
 app.include_router(admin_router)
 app.include_router(team_router)
+app.include_router(workspace_router)
 app.include_router(models_router)
 app.include_router(voice_router)
 app.include_router(files_router)

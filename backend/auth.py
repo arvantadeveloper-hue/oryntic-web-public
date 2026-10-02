@@ -367,6 +367,10 @@ async def migrate_workspace():
     await db.users.update_many({"owner_id": {"$exists": False}}, [{"$set": {"owner_id": "$id"}}])
     # workspace owners (owner_id == own id) are admins of their workspace
     await db.users.update_many({"role": {"$ne": "admin"}, "$expr": {"$eq": ["$owner_id", "$id"]}}, {"$set": {"role": "admin"}})
+    # tasks created before multi-workspace: attach to the creator's workspace
+    async for t in db.tasks.find({"workspace_id": {"$exists": False}}, {"_id": 0, "id": 1, "user_id": 1}):
+        owner = await db.users.find_one({"id": t["user_id"]}, {"_id": 0, "owner_id": 1}) or {}
+        await db.tasks.update_one({"id": t["id"]}, {"$set": {"workspace_id": owner.get("owner_id") or t["user_id"]}})
     # accounts created before email verification existed stay active
     await db.users.update_many({"verified": {"$exists": False}}, {"$set": {"verified": True}})
     # legacy members (owner_id != id) get an explicit joined membership so they can also use their home workspace

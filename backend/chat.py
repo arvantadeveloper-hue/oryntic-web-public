@@ -13,7 +13,7 @@ from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, pu
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit
-from tools import route_model, wants_tool, plan_tool, run_image_tool, run_document_tool, get_routing
+from tools import route_model, wants_tool, plan_tool, run_image_tool, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm
 from pricing import rate as tool_rate
 from llm import model_label
 import secrets
@@ -530,7 +530,12 @@ async def _document_turn(ctx, plan: dict):
             yield ev
         return
     await record_usage(ctx.user["id"], "document_generation", out["credits"], {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"]})
-    extra = {"media": out["media"], "tool": "document", "model_key": ctx.model_key, "model_label": out["model_label"], "doc_markdown": out["markdown"][:20000]}
+    task = {"id": new_id(), "user_id": ctx.user["id"], "workspace_id": workspace_id(ctx.user), "goal": title, "type": "document", "status": "completed",
+            "steps": [], "summary": "Dokumen dibuat dari chat", "model": ctx.model_key, "final_output": out["markdown"], "media": [m for m in out["media"] if m.get("type") != "file"],
+            "credits_used": out["credits"], "persona_id": ctx.persona["id"], "persona_name": ctx.persona["name"], "source": "chat", "conversation_ids": [ctx.cid],
+            "version": 1, "created_at": now_iso(), "updated_at": now_iso()}
+    await db.tasks.insert_one(dict(task))
+    extra = {"media": out["media"], "tool": "document", "model_key": ctx.model_key, "model_label": out["model_label"], "doc_markdown": out["markdown"][:20000], "task_id": task["id"]}
     async for ev in _emit_final(ctx, f"Dokumen **{title}** sudah jadi! 📄 Tersedia dalam Word, PDF, dan Markdown di bawah ini.", out["credits"], extra):
         yield ev
 
@@ -559,6 +564,7 @@ class ReplyCtx:
     system: str = ""
     model_key: Optional[str] = None
     routed: Optional[str] = None
+    task: Optional[dict] = None
 
     @property
     def meta(self) -> dict:
@@ -577,12 +583,49 @@ async def _prepare_ctx(ctx: ReplyCtx) -> ReplyCtx:
     if ctx.via == "meeting_chat":
         ctx.system += "\n\n" + MEETING_CHAT_STYLE
     ctx.model_key, ctx.routed = await route_model(ctx.persona.get("model"), ctx.user_text, ctx.attach_len, await _owner_settings(ctx.user))
+    conv = await db.conversations.find_one({"id": ctx.cid}, {"_id": 0, "task_id": 1}) or {}
+    if conv.get("task_id"):
+        ctx.task = await db.tasks.find_one({"id": conv["task_id"]}, {"_id": 0})
+        if ctx.task:
+            ctx.system += TASK_CONTEXT.format(tid=ctx.task["id"], ver=ctx.task.get("version") or 1, status=ctx.task.get("status"), goal=ctx.task.get("goal"), body=(ctx.task.get("final_output") or "(belum ada hasil)")[:6000])
     return ctx
+
+
+async def _wants_revision(text: str, task: dict) -> bool:
+    if not REVISE_RE.search(text or ""):
+        return False
+    try:
+        r = await llm_json("Does the user's message ask to CHANGE/REVISE the document under discussion (edit, add, remove, rewrite parts)? "
+                           "Questions, opinions or chit-chat are NOT revisions. Reply JSON {\"revise\": true|false}.",
+                           f"Document title: {task.get('goal')}\nUser message: {text}")
+        return bool(r.get("revise"))
+    except Exception:
+        return False
+
+
+async def _revise_turn(ctx):
+    yield ctx.sse(start=True)
+    yield ctx.sse(status="Merevisi hasil tugas di Ruang Kerja...")
+    try:
+        new_md, summary, used = await revise_with_llm(ctx.task, ctx.user_text, ctx.system, ctx.model_key)
+    except Exception:
+        async for ev in _emit_final(ctx, "Maaf, revisinya belum berhasil disimpan. Coba ulangi permintaannya.", 0, {}):
+            yield ev
+        return
+    ver = await save_revision(ctx.task, new_md, summary or ctx.user_text, ctx.persona)
+    await record_usage(ctx.user["id"], "task_revision", used, {"task_id": ctx.task["id"], "conversation_id": ctx.cid, "actor_id": ctx.user["id"]})
+    text = f"Revisi **v{ver}** tersimpan di Ruang Kerja ✅\n\n{summary or 'Perubahan sesuai permintaan Anda sudah diterapkan.'}\n\n[Lihat hasil terbaru](/workspace/{ctx.task['id']})"
+    async for ev in _emit_final(ctx, text, used, {"tool": "revise", "task_id": ctx.task["id"], "task_version": ver}):
+        yield ev
 
 
 async def _persona_reply(ctx: ReplyCtx):
     """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
     await _prepare_ctx(ctx)
+    if ctx.task and ctx.user_text and not ctx.voice_mode and await _wants_revision(ctx.user_text, ctx.task):
+        async for ev in _revise_turn(ctx):
+            yield ev
+        return
     if ctx.user_text and not ctx.voice_mode and wants_tool(ctx.user_text):
         plan = await plan_tool(ctx.user_text, ctx.prompt)
         if plan.get("tool") != "none":

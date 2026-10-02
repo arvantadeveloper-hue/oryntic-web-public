@@ -244,3 +244,40 @@ async def run_document_tool(uid: str, system: str, title: str, instructions: str
         await asyncio.to_thread(put_object, path, data, ctype)
         media.append({"type": "file", "path": path, "name": f"{base}.{ext}", "format": ext})
     return {"media": media, "credits": text_credits(prompt, md), "markdown": md, "model_label": model_label(model_key)}
+
+
+# ---------- workspace tasks: shared context & revisions ----------
+TABLE_RE = re.compile(r"^\s*\|.+\|\s*$", re.M)
+TASK_CONTEXT = ("\n\nWORKSPACE TASK UNDER DISCUSSION (id {tid}, version {ver}, status {status}):\nTitle: {goal}\n--- CURRENT RESULT ---\n{body}\n--- END ---\n"
+                "The user may ask questions about this result or request changes. Discuss it in context; when they ask for a change, the system "
+                "saves a revised version to the Workspace automatically — confirm briefly what changed.")
+REVISE_RE = re.compile(r"\b(revisi|ubah|ganti|perbaiki|tambah(kan)?|hapus|kurangi|perbarui|update|rapikan|singkat|perpanjang|sesuaikan|koreksi|edit|rewrite|revise|change|tulis ulang)\b", re.I)
+
+
+def has_tables(md: str) -> bool:
+    return len(TABLE_RE.findall(md or "")) >= 2
+
+
+
+async def save_revision(task: dict, new_md: str, note: str, persona: Optional[dict]) -> int:
+    """Archive the current result as a version and store the revised text. Returns the new version number."""
+    cur = int(task.get("version") or 1)
+    old = {"version": cur, "content": task.get("final_output") or "", "created_at": task.get("updated_at") or task.get("created_at"), "note": task.get("revision_note") or "Versi awal"}
+    await db.tasks.update_one({"id": task["id"]}, {"$push": {"versions": old},
+                                                   "$set": {"final_output": new_md, "version": cur + 1, "revision_note": note[:300], "updated_at": now_iso(),
+                                                            "status": "completed", **({"persona_id": persona["id"], "persona_name": persona["name"]} if persona else {})}})
+    return cur + 1
+
+
+async def revise_with_llm(task: dict, request: str, system: str, model_key: Optional[str]) -> tuple:
+    """Returns (new_markdown, change_summary, credits)."""
+    sys = system + ("\n\nYou are REVISING a workspace deliverable. Output the COMPLETE revised document in markdown (keep everything that was "
+                    "not asked to change), then on the very last line write exactly: RINGKASAN PERUBAHAN: <1-2 sentences>.")
+    prompt = f"CURRENT DOCUMENT:\n{(task.get('final_output') or '')[:15000]}\n\nREVISION REQUEST: {request}"
+    out = await llm_text(sys, prompt, model_key)
+    summary = ""
+    if "RINGKASAN PERUBAHAN:" in out:
+        out, summary = out.rsplit("RINGKASAN PERUBAHAN:", 1)
+    return out.strip(), summary.strip(), text_credits(prompt, out)
+
+
