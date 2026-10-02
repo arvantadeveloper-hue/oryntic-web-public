@@ -13,7 +13,7 @@ const isChat = (m) => m.via === "meeting_chat";
 const fileToData = (file) => new Promise((res) => {
   const r = new FileReader();
   r.onload = () => res(r.result);
-  if (file.type.startsWith("image/") || file.type === "application/pdf") r.readAsDataURL(file); else r.readAsText(file);
+  if (file.type.startsWith("image/") || file.type === "application/pdf" || /\.pdf$/i.test(file.name)) r.readAsDataURL(file); else r.readAsText(file);
 });
 
 // Panel open state (desktop default open, mobile default closed) + unread badge for assistant messages.
@@ -82,7 +82,9 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
   const pick = async (e) => {
     const out = [];
     for (const f of Array.from(e.target.files || []).slice(0, 5)) {
-      const type = f.type.startsWith("image/") ? "image" : f.type === "application/pdf" ? "pdf" : "text";
+      if (f.size > 8 * 1024 * 1024) { toast.error(`${f.name}: maksimal 8 MB`); continue; }
+      const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+      const type = f.type.startsWith("image/") ? "image" : isPdf ? "pdf" : "text";
       out.push({ type, name: f.name, data: await fileToData(f) });
     }
     setAtts((a) => [...a, ...out].slice(0, 5)); e.target.value = "";

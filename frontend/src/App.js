@@ -1,6 +1,7 @@
 import "@/App.css";
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { I18nProvider } from "./i18n";
@@ -51,6 +52,7 @@ function App() {
         <AuthProvider>
           <BrowserRouter>
             <Toaster position="top-center" theme="dark" richColors />
+            <ErrorBoundary>
             <Routes>
               <Route path="/" element={<Gate />} />
               <Route path="/onboarding" element={<Onboarding />} />
@@ -71,6 +73,7 @@ function App() {
                 <Route path="/admin" element={<AdminOnly platform><Admin /></AdminOnly>} />
               </Route>
             </Routes>
+            </ErrorBoundary>
           </BrowserRouter>
         </AuthProvider>
       </I18nProvider>

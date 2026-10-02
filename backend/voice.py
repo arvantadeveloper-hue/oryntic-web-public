@@ -10,7 +10,13 @@ from ratelimit import rate_limit
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
-VOICES = ["alloy", "nova", "shimmer", "echo", "fable", "onyx", "coral", "sage", "ash"]
+VOICES = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "nova", "onyx", "fable"]
+# gpt-realtime voices usable in live calls; the rest are TTS-only and get mapped for Realtime
+REALTIME_VOICES = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]
+VOICE_INFO = {"marin": "Hangat, ceria (Realtime)", "cedar": "Tenang, bersahabat (Realtime)", "alloy": "Netral", "ash": "Dalam, mantap",
+              "ballad": "Lembut, ekspresif", "coral": "Ramah, energik", "echo": "Jernih, formal", "sage": "Kalem, bijak",
+              "shimmer": "Cerah, ringan", "verse": "Dinamis", "nova": "Hangat (TTS)", "onyx": "Berat (TTS)", "fable": "Naratif (TTS)"}
+TTS_FALLBACK = {"marin": "coral", "cedar": "ash"}
 
 
 class TranscribeIn(BaseModel):
@@ -26,7 +32,7 @@ class TTSIn(BaseModel):
 
 @router.get("/voices")
 async def voices():
-    return {"voices": VOICES}
+    return {"voices": VOICES, "realtime": REALTIME_VOICES, "info": VOICE_INFO}
 
 
 @router.post("/transcribe")
@@ -52,7 +58,10 @@ async def tts(x: TTSIn, u: dict = Depends(current_user)):
     audio = b""
     try:
         audio = await synthesize_speech(x.text, voice)
-    except Exception as exc:
-        raise HTTPException(502, "Sintesis suara gagal, coba lagi") from exc
+    except Exception:
+        try:
+            audio = await synthesize_speech(x.text, TTS_FALLBACK.get(voice, "alloy"))
+        except Exception as exc:
+            raise HTTPException(502, "Sintesis suara gagal, coba lagi") from exc
     await record_usage(u["id"], "voice_tts", rate("tts"), {})
     return Response(content=audio, media_type="audio/mpeg")

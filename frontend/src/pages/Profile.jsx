@@ -1,3 +1,4 @@
+import { NotulenFormatCard } from "../components/NotulenFormatCard";
 import React, { useState } from "react";
 import { toast } from "sonner";
 import { User, Globe, Shield, Sparkles } from "lucide-react";
@@ -57,6 +58,8 @@ export default function Profile() {
           <button onClick={save} disabled={busy} className="btn-grad rounded-xl px-6 py-3 text-sm" data-testid="profile-save">{busy ? "..." : t("common.save")}</button>
         </div>
       </div>
+
+      {user?.role === "admin" && <NotulenFormatCard user={user} onSaved={() => api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {})} />}
 
       <div className="mt-4 aivora-card p-6 text-sm text-slate-500">
         <p className="font-semibold text-slate-900">Privasi & Data</p>

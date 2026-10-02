@@ -1,3 +1,4 @@
+import { LoadMore } from "../components/ConversationTools";
 import React, { useEffect, useState } from "react";
 import { Sparkles, Check, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
@@ -12,6 +13,7 @@ const COLORS = ["#00D1FF", "#7C3AED", "#06B6D4", "#F59E0B", "#10B981", "#EF4444"
 export default function Wallet() {
   const { user, setCredits } = useAuth();
   const { t } = useI18n();
+  const [shown, setShown] = useState(20);
   const [wallet, setWallet] = useState(null);
   const [packages, setPackages] = useState([]);
   const [busy, setBusy] = useState(null);
@@ -70,7 +72,7 @@ export default function Wallet() {
       <h2 className="mt-10 text-lg font-bold text-slate-900">{t("wallet.history")}</h2>
       <div className="mt-4 aivora-card divide-y divide-slate-100">
         {(wallet?.transactions || []).length === 0 ? <p className="p-6 text-sm text-slate-500">Belum ada transaksi.</p> :
-          wallet.transactions.map((tx) => (
+          wallet.transactions.slice(0, shown).map((tx) => (
             <div key={tx.id} className="flex items-center justify-between px-5 py-3" data-testid={`txn-${tx.id}`}>
               <div>
                 <p className="text-sm text-slate-700">{tx.description}</p>
@@ -79,6 +81,7 @@ export default function Wallet() {
               <span className={`text-sm font-semibold ${tx.amount >= 0 ? "text-[#10B981]" : "text-[#EF4444]"}`}>{tx.amount >= 0 ? "+" : ""}{tx.amount}</span>
             </div>
           ))}
+          {wallet.transactions.length > shown && <LoadMore onClick={() => setShown((n) => n + 20)} testid="tx-load-more" />}
       </div>
     </div>
   );

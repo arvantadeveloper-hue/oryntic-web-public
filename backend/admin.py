@@ -137,6 +137,13 @@ class PlatformPricingIn(BaseModel):
     stt_usd: float = Field(gt=0)
     tts_usd: float = Field(gt=0)
     provider_usd_per_min: float = Field(gt=0)
+    usd_per_credit: float = Field(default=0.001, gt=0)
+    rt_audio_in_usd_1m: float = Field(default=32.0, ge=0)
+    rt_audio_out_usd_1m: float = Field(default=64.0, ge=0)
+    rt_text_in_usd_1m: float = Field(default=4.0, ge=0)
+    rt_text_out_usd_1m: float = Field(default=16.0, ge=0)
+    rt_cached_in_usd_1m: float = Field(default=0.4, ge=0)
+    video_usd_per_sec: float = Field(default=0.062, ge=0)
 
 
 class TrialIn(BaseModel):

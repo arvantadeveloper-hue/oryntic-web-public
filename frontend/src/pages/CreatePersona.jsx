@@ -33,12 +33,13 @@ export default function CreatePersona() {
   const [models, setModels] = useState([]);
   const [modelKey, setModelKey] = useState("gpt-terra");
   const [voices, setVoices] = useState([]);
+  const [voiceMeta, setVoiceMeta] = useState({ info: {}, realtime: [] });
   const [voice, setVoice] = useState("nova");
   const [previewing, setPreviewing] = useState(null);
   const previewAudioRef = useRef(null);
 
   useEffect(() => { api.get("/models").then((r) => { setModels(r.data.models); setModelKey(r.data.default); }).catch(() => {}); }, []);
-  useEffect(() => { api.get("/voice/voices").then((r) => setVoices(r.data.voices || [])).catch(() => {}); }, []);
+  useEffect(() => { api.get("/voice/voices").then((r) => { setVoices(r.data.voices || []); setVoiceMeta({ info: r.data.info || {}, realtime: r.data.realtime || [] }); }).catch(() => {}); }, []);
   useEffect(() => () => { try { previewAudioRef.current?.pause(); } catch (e) {} }, []);
 
   const previewVoice = async (v) => {
@@ -192,8 +193,8 @@ export default function CreatePersona() {
                     <button type="button" onClick={() => setVoice(v)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                       <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${on ? "btn-grad border-transparent" : "border-slate-300"}`}>{on && <Check size={10} />}</span>
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-bold capitalize text-slate-900">{v}</span>
-                        <span className="block truncate text-xs text-slate-400">{VOICE_LABELS[v] || "Suara"}</span>
+                        <span className="flex items-center gap-1.5 truncate text-sm font-bold capitalize text-slate-900">{v}{voiceMeta.realtime.includes(v) && <span className="rounded bg-[#2F6BFF]/10 px-1 text-[9px] font-bold uppercase tracking-wider text-[#2F6BFF]" data-testid={`voice-rt-${v}`}>Realtime</span>}</span>
+                        <span className="block truncate text-xs text-slate-400">{voiceMeta.info[v] || VOICE_LABELS[v] || "Suara"}</span>
                       </span>
                     </button>
                     <button type="button" onClick={() => previewVoice(v)} data-testid={`voice-preview-${v}`}

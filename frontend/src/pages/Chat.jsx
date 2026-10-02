@@ -10,6 +10,7 @@ import { VideoRoom } from "../components/VideoRoom";
 import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
 import { MediaList, ToolRequestCard, ModelBadge } from "../components/MessageExtras";
+import { SummaryPrompt, ArchiveModal, LoadMore } from "../components/ConversationTools";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
 
 function Avatar({ name, portrait, size = 32, moderator }) {
@@ -21,7 +22,7 @@ function Avatar({ name, portrait, size = 32, moderator }) {
 const fileToData = (file) => new Promise((res) => {
   const r = new FileReader();
   r.onload = () => res(r.result);
-  if (file.type.startsWith("image/") || file.type === "application/pdf") r.readAsDataURL(file);
+  if (file.type.startsWith("image/") || file.type === "application/pdf" || /\.pdf$/i.test(file.name)) r.readAsDataURL(file);
   else r.readAsText(file);
 });
 
@@ -34,6 +35,13 @@ export default function Chat() {
   const isAdmin = user?.role === "admin";
   const rt = useRealtimeStatus();
   const [convs, setConvs] = useState([]);
+  const [convHasMore, setConvHasMore] = useState(false);
+  const [msgHasMore, setMsgHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [archivedCount, setArchivedCount] = useState(0);
+  const [summaryRequest, setSummaryRequest] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
+  const listRef = useRef(null);
   const [q, setQ] = useState("");
   const [conv, setConv] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -60,11 +68,24 @@ export default function Chat() {
 
   useEffect(() => { streamingRef.current = streaming; }, [streaming]);
 
-  const loadConvs = (query = "") => api.get(`/conversations${query ? `?q=${encodeURIComponent(query)}` : ""}`).then((r) => setConvs(r.data)).catch(() => {});
+  const PAGE = 20;
+  const loadConvs = (query = "", more = false) => api.get(`/conversations?limit=${PAGE}&offset=${more ? convs.length : 0}${query ? `&q=${encodeURIComponent(query)}` : ""}`)
+    .then((r) => { setConvs((prev) => (more ? [...prev, ...r.data] : r.data)); setConvHasMore(r.data.length === PAGE); }).catch(() => {});
+  const applyPage = (data) => { setMessages(data.messages); setMsgHasMore(!!data.has_more); setArchivedCount(data.archived_count || 0); setSummaryRequest(!!data.long_chat); };
+  const loadOlder = async () => {
+    if (!msgHasMore || loadingOlder || !messages.length) return;
+    setLoadingOlder(true);
+    const el = listRef.current; const prevH = el ? el.scrollHeight : 0;
+    try {
+      const r = await api.get(`/conversations/${id}/messages?limit=50&before=${encodeURIComponent(messages[0].created_at)}`);
+      setMessages((m) => [...r.data.messages, ...m]); setMsgHasMore(!!r.data.has_more);
+      requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - prevH; });
+    } catch (e) {} finally { setLoadingOlder(false); }
+  };
   useEffect(() => { loadConvs(); api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {}); }, [user?.id]);
   useEffect(() => {
-    if (id) api.get(`/conversations/${id}/messages`).then((r) => {
-      setConv(r.data.conversation); setMessages(r.data.messages);
+    if (id) api.get(`/conversations/${id}/messages?limit=50`).then((r) => {
+      setConv(r.data.conversation); applyPage(r.data);
       if (location.state?.openMeeting) { setVideoOpen(true); nav(location.pathname, { replace: true, state: {} }); }
     }).catch(() => {});
     else { setConv(null); setMessages([]); setVideoOpen(false); }
@@ -105,7 +126,9 @@ export default function Chat() {
     const files = Array.from(e.target.files || []);
     const out = [];
     for (const f of files.slice(0, 5)) {
-      const type = f.type.startsWith("image/") ? "image" : f.type === "application/pdf" ? "pdf" : "text";
+      if (f.size > 8 * 1024 * 1024) { toast.error(`${f.name}: maksimal 8 MB`); continue; }
+      const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+      const type = f.type.startsWith("image/") ? "image" : isPdf ? "pdf" : "text";
       out.push({ type, name: f.name, data: await fileToData(f) });
     }
     setAttachments((a) => [...a, ...out].slice(0, 5));
@@ -167,6 +190,7 @@ export default function Chat() {
           setLiveMap((prev) => { const cur = prev[pid] || { name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" }; return { ...prev, [pid]: { ...cur, status: "", text: cur.text + ev.delta } }; });
         }
         if (pid && ev.final && speaker && ev.content) playTTS(ev.content, ev.voice);
+        if (ev.summary_request) setSummaryRequest(true);
         if (ev.done) refreshUser();
       });
       const r = await api.get(`/conversations/${id}/messages`);
@@ -175,7 +199,7 @@ export default function Chat() {
   };
 
   const delConv = async (c, e) => { e.stopPropagation(); await api.delete(`/conversations/${c.id}`); loadConvs(); if (c.id === id) nav("/chat"); };
-  const refreshMsgs = () => { refreshUser(); return api.get(`/conversations/${id}/messages`).then((r) => setMessages(r.data.messages)).catch(() => {}); };
+  const refreshMsgs = () => { refreshUser(); return api.get(`/conversations/${id}/messages?limit=50`).then((r) => applyPage(r.data)).catch(() => {}); };
   const copy = (txt) => { navigator.clipboard.writeText(txt); toast.success("Disalin"); };
   const saveMem = async (m) => { await api.post("/memory", { persona_id: m.persona_id || conv?.persona_id || null, content: m.content.slice(0, 300) }); toast.success("Disimpan ke memori"); };
   const regen = async (mid) => { setStreaming(true); try { await api.post(`/conversations/${id}/messages/${mid}/regenerate`); const mr = await api.get(`/conversations/${id}/messages`); setMessages(mr.data.messages); refreshUser(); } catch (e) { toast.error("Gagal"); } finally { setStreaming(false); } };
@@ -216,6 +240,7 @@ export default function Chat() {
           </div>
         ))}
         {convs.length === 0 && <p className="px-2 py-4 text-center text-xs text-slate-400">Belum ada percakapan.</p>}
+        {convHasMore && <LoadMore onClick={() => loadConvs(q, true)} testid="conv-load-more" />}
       </div>
     </div>
   );
@@ -258,7 +283,9 @@ export default function Chat() {
           )}
         </div>
 
-        <div className="flex-1 space-y-5 overflow-y-auto p-5">
+        <div ref={listRef} onScroll={(e) => { if (e.currentTarget.scrollTop < 60) loadOlder(); }} className="flex-1 space-y-5 overflow-y-auto p-5" data-testid="message-list">
+          {conv && msgHasMore && <div className="text-center text-xs text-slate-400" data-testid="msg-older-hint">{loadingOlder ? "Memuat pesan lama…" : "Gulir ke atas untuk pesan lama"}</div>}
+          {conv && archivedCount > 0 && <div className="text-center"><button onClick={() => setShowArchive(true)} data-testid="archive-btn" className="rounded-full border border-[#E7ECF3] bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">Lihat arsip ({archivedCount})</button></div>}
           {!conv && (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <Bot size={44} className="mb-4 text-[#2F6BFF]" />
@@ -314,6 +341,7 @@ export default function Chat() {
               </div>
             );
           })}
+          {conv && summaryRequest && !streaming && <SummaryPrompt cid={id} onDone={refreshMsgs} onLater={() => setSummaryRequest(false)} />}
           <div ref={endRef} />
         </div>
 
@@ -341,6 +369,7 @@ export default function Chat() {
         )}
       </div>
 
+      {showArchive && conv && <ArchiveModal cid={id} onClose={() => setShowArchive(false)} />}
       {videoOpen && conv && (conv.type === "private" && rt.enabled
         ? <RealtimeCall conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />
         : conv.type !== "private" && rt.enabled

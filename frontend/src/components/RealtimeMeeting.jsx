@@ -7,6 +7,7 @@ import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../li
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
 import { MeetingShell, LayoutMenu, useMeetingLayout } from "./MeetingShell";
+import { useNotulenGate } from "./ConversationTools";
 import { Tile } from "./VideoRoom";
 import { useAuth } from "../context/AuthContext";
 
@@ -30,6 +31,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const [pipe, setPipe] = useState(null);
   const chat = useMeetingChat(messages);
   const [layout, setLayout] = useMeetingLayout();
+  const notulen = useNotulenGate(cid);
 
   const sessionsRef = useRef([]); // RealtimeSession[]
   const pipeRef = useRef(null);
@@ -277,11 +279,13 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
 
   const hangupAll = async (withSummary) => {
     if (endedRef.current) return;
+    if (withSummary && msgCountRef.current > 0 && !(await notulen.gate())) return;
+    if (endedRef.current) return;
     endedRef.current = true;
     flushLive(); cleanup(); endSessions();
     if (withSummary && msgCountRef.current > 0) {
       setPhase("ending");
-      try { await api.post(`/conversations/${cid}/summary`); toast.success("Notulen meeting tersimpan di Ruang Kerja"); }
+      try { await api.post(`/conversations/${cid}/summary`); await api.post(`/conversations/${cid}/compact`).catch(() => {}); toast.success("Notulen tersimpan di Ruang Kerja; transkrip lama diarsipkan"); }
       catch (e) { toast.message(e?.response?.data?.detail || "Meeting diakhiri"); }
     }
     onRefresh && onRefresh();
@@ -347,6 +351,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
       </div>
       <MeetingShell layout={layout} chatOpen={chat.open} stage={stage} caption={captionEl} controls={controls} participants={participants}
         chat={(variant) => <MeetingChatPanel variant={variant} cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} />} />
+      {notulen.dialog}
     </div>
   );
 }

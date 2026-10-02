@@ -4,13 +4,13 @@ import base64
 import io
 from dataclasses import dataclass, field
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, EmailStr
 
 from db import db, now_iso, new_id, clean
 from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, public_user
-from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded
+from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit
 from tools import route_model, wants_tool, plan_tool, run_image_tool, run_document_tool, get_routing
@@ -259,20 +259,109 @@ async def invite_register(token: str, x: InviteRegisterIn):
 
 
 @router.get("/conversations")
-async def list_conv(q: Optional[str] = None, u: dict = Depends(current_user)):
+async def list_conv(q: Optional[str] = None, limit: int = Query(200, ge=1, le=200), offset: int = Query(0, ge=0), u: dict = Depends(current_user)):
     query = {"$or": [{"user_id": u["id"]}, {"participants": u["id"]}]}
     if q:
         query["title"] = {"$regex": q, "$options": "i"}
-    return await db.conversations.find(query, {"_id": 0, "invite_token": 0}).sort("updated_at", -1).to_list(200)
+    return await db.conversations.find(query, {"_id": 0, "invite_token": 0}).sort("updated_at", -1).skip(offset).to_list(limit)
 
 
 @router.get("/conversations/{cid}/messages")
-async def get_messages(cid: str, u: dict = Depends(current_user)):
+async def get_messages(cid: str, before: Optional[str] = None, limit: int = Query(50, ge=1, le=200), archived: int = 0, u: dict = Depends(current_user)):
+    """Newest `limit` messages (ascending). `before` = created_at cursor for scrolling up; archived=1 shows the archive."""
     conv = await db.conversations.find_one({"id": cid}, {"_id": 0, "invite_token": 0})
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
-    msgs = await db.messages.find({"conversation_id": cid}, {"_id": 0}).sort("created_at", 1).to_list(1000)
-    return {"conversation": conv, "messages": msgs}
+    query = {"conversation_id": cid, "archived": True} if archived else {"conversation_id": cid, "archived": {"$ne": True}}
+    if before:
+        query["created_at"] = {"$lt": before}
+    page = await db.messages.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit + 1)
+    has_more = len(page) > limit
+    msgs = list(reversed(page[:limit]))
+    out = {"conversation": conv, "messages": msgs, "has_more": has_more}
+    if not before and not archived:
+        out["archived_count"] = await db.messages.count_documents({"conversation_id": cid, "archived": True})
+        out["long_chat"] = await _long_chat(cid, conv)
+    return out
+
+
+LONG_CHAT_MSGS, LONG_CHAT_CHARS = 40, 15000
+
+
+async def _long_chat(cid: str, conv: dict) -> bool:
+    """True when the live (non-archived) thread is long enough that the assistant should offer to summarize."""
+    live = await db.messages.find({"conversation_id": cid, "archived": {"$ne": True}}, {"_id": 0, "content": 1}).to_list(500)
+    snooze = int((conv or {}).get("summary_snoozed_at_count") or 0)
+    return len(live) - snooze >= LONG_CHAT_MSGS or sum(len(m.get("content") or "") for m in live[snooze:]) >= LONG_CHAT_CHARS
+
+
+async def _merge_summary(cid: str, u: dict, conv: dict, instruction: str) -> tuple:
+    history = await _history_text(cid, limit=120, with_summary=False)
+    prev = conv.get("memory_summary") or ""
+    sys = (f"You write entirely in {_lang_name(u)}. {instruction} Output markdown, compact but complete; keep every decision, number, "
+           "name, deadline and open question. If an earlier summary is given, MERGE it with the new discussion into one updated summary.")
+    prompt = (f"Earlier summary:\n{prev}\n\n" if prev else "") + f"Discussion since then:\n{history}\n\nUpdated summary:"
+    text = await llm_text(sys, prompt)
+    return text, text_credits(prompt, text)
+
+
+@router.post("/conversations/{cid}/compact")
+async def compact_conversation(cid: str, u: dict = Depends(current_user)):
+    """Summarize the live thread into conversation memory and archive the raw messages (not shown to the assistant anymore)."""
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    if not await db.messages.count_documents({"conversation_id": cid, "archived": {"$ne": True}}):
+        raise HTTPException(400, "Tidak ada pesan untuk dirangkum")
+    summary, used = await _merge_summary(cid, u, conv, "Summarize this conversation so the assistant can continue it later without the raw transcript.")
+    await record_usage(u["id"], "chat_summary", used, {"conversation_id": cid})
+    res = await db.messages.update_many({"conversation_id": cid, "archived": {"$ne": True}}, {"$set": {"archived": True}})
+    note = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": f"📝 **Rangkuman percakapan sebelumnya**\n\n{summary}\n\n_{res.modified_count} pesan lama diarsipkan — lihat lewat tombol Arsip._",
+            "persona_id": "__system__", "persona_name": "Rangkuman", "is_summary": True, "portrait": None, "credits": used, "created_at": now_iso()}
+    await db.messages.insert_one(dict(note))
+    await db.conversations.update_one({"id": cid}, {"$set": {"memory_summary": summary, "summary_snoozed_at_count": 0, "updated_at": now_iso()}})
+    return {"summary": summary, "archived": res.modified_count, "credits_used": used}
+
+
+@router.post("/conversations/{cid}/summary-later")
+async def summary_later(cid: str, u: dict = Depends(current_user)):
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    live = await db.messages.count_documents({"conversation_id": cid, "archived": {"$ne": True}})
+    await db.conversations.update_one({"id": cid}, {"$set": {"summary_snoozed_at_count": live}})
+    return {"ok": True}
+
+
+DEFAULT_NOTULEN_FIELDS = [{"name": "Agenda", "required": True}, {"name": "Pembahasan", "required": True}, {"name": "Keputusan", "required": True},
+                          {"name": "Tindak lanjut (PIC & tenggat)", "required": True}, {"name": "Isu terbuka", "required": False}]
+
+
+async def _notulen_fields(u: dict) -> list:
+    owner = await db.users.find_one({"id": workspace_id(u)}, {"_id": 0, "settings": 1}) or {}
+    fields = (owner.get("settings") or {}).get("notulen_fields")
+    return fields if fields else DEFAULT_NOTULEN_FIELDS
+
+
+@router.post("/conversations/{cid}/notulen-check")
+async def notulen_check(cid: str, u: dict = Depends(current_user)):
+    """Which notulen fields are still empty? Used before 'Akhiri & Simpan Notulen'."""
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    fields = await _notulen_fields(u)
+    history = await _history_text(cid, limit=60)
+    if not history.strip():
+        return {"fields": fields, "missing": [f["name"] for f in fields if f.get("required")], "notes": {}}
+    sys = ('You audit meeting minutes. For each field decide if the discussion contains enough concrete content to fill it. '
+           'Reply JSON only: {"fields": {"<field name>": {"filled": bool, "note": "<what is missing, in ' + _lang_name(u) + ', max 15 words>"}}}')
+    try:
+        res = await llm_json(sys, f"Fields: {json.dumps([f['name'] for f in fields], ensure_ascii=False)}\n\nDiscussion:\n{history}")
+    except Exception:
+        res = {}
+    status = res.get("fields") or {}
+    missing = [f["name"] for f in fields if f.get("required") and not (status.get(f["name"]) or {}).get("filled")]
+    return {"fields": fields, "missing": missing, "notes": {k: v.get("note", "") for k, v in status.items() if isinstance(v, dict)}}
 
 
 @router.delete("/conversations/{cid}")
@@ -299,6 +388,9 @@ SANGUINE_TONE = ("TEMPERAMENT: you are sanguine — warm, friendly, upbeat and g
                  "celebrate small wins, use light humor and encouraging words, show curiosity about the user, and keep the energy "
                  "positive even when delivering bad news (be kind, then constructive). Stay professional and accurate; never let "
                  "cheerfulness replace substance or correctness.")
+
+NO_REPEAT_TEXT = ("Read what the other assistants already answered in this thread. Do NOT repeat or rephrase their points; "
+                  "agree in a few words if needed and add something NEW, or say briefly you have nothing to add.")
 
 MEETING_CHAT_STYLE = ("MEETING CHAT PANEL: a live voice meeting is in progress and the user just TYPED this message in the meeting's text "
                       "chat panel. Reply in TEXT only (this reply is shown in the panel, not spoken): use markdown freely — tables, "
@@ -329,9 +421,13 @@ async def _persona_system(persona, user, roster=None, voice_mode=False):
     return "\n".join(parts)
 
 
-async def _history_text(cid: str, limit=14) -> str:
-    msgs = await db.messages.find({"conversation_id": cid}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+async def _history_text(cid: str, limit=14, with_summary=True) -> str:
+    msgs = await db.messages.find({"conversation_id": cid, "archived": {"$ne": True}, "is_summary": {"$ne": True}}, {"_id": 0}).sort("created_at", 1).to_list(1000)
     lines = []
+    if with_summary:
+        conv = await db.conversations.find_one({"id": cid}, {"_id": 0, "memory_summary": 1}) or {}
+        if conv.get("memory_summary"):
+            lines.append(f"[Rangkuman percakapan sebelumnya]: {conv['memory_summary'][:4000]}")
     for m in msgs[-limit:]:
         if m["role"] == "user":
             who = m.get("sender_name") or "User"
@@ -584,6 +680,8 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
         if await _moderator_if_stuck(cid, conv, responders, roster, x):
             async for ev in _collect(_moderator_interject(cid, u, roster, "stuck"), totals):
                 yield ev
+        if await _long_chat(cid, await db.conversations.find_one({"id": cid}, {"_id": 0, "summary_snoozed_at_count": 1})):
+            yield f"data: {json.dumps({'summary_request': True})}\n\n"
         yield await _finish_stream(cid, u, totals[0], x.content)
 
     return _sse(stream())
@@ -701,8 +799,10 @@ async def meeting_summary(cid: str, u: dict = Depends(current_user)):
     history = await _history_text(cid, limit=40)
     if not history.strip():
         raise HTTPException(400, "Belum ada diskusi untuk diringkas")
-    sys = (f"You are the meeting Moderator. You MUST write entirely in {_lang_name(u)}. Summarize the whole discussion into: key points, agreements, "
-           "disagreements, and clear action items. Be concise, warm and neutral. Use markdown.")
+    fields = await _notulen_fields(u)
+    sys = (f"You are the meeting Moderator. You MUST write entirely in {_lang_name(u)}. Write the minutes (notulen) in markdown using EXACTLY these "
+           f"sections as headings, in order: {', '.join(f['name'] for f in fields)}. If a section has no content, write '- (belum dibahas)'. "
+           "Be concise, warm and neutral.")
     summary = await llm_text(sys, f"Diskusi rapat:\n{history}\n\nRingkasan moderator:")
     used = text_credits(history, summary)
     await record_usage(u["id"], "meeting_summary", used, {"conversation_id": cid})

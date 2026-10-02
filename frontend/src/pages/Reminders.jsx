@@ -1,3 +1,4 @@
+import { LoadMore } from "../components/ConversationTools";
 import React, { useEffect, useState } from "react";
 import { Bell, Plus, Trash2, Clock } from "lucide-react";
 import { toast } from "sonner";
@@ -9,6 +10,7 @@ const statusColor = { scheduled: "#00D1FF", ringing: "#F59E0B", answered: "#10B9
 
 export default function Reminders() {
   const { t } = useI18n();
+  const [shown, setShown] = useState(20);
   const [items, setItems] = useState([]);
   const [personas, setPersonas] = useState([]);
   const [title, setTitle] = useState("");
@@ -65,7 +67,7 @@ export default function Reminders() {
       </div>
 
       <div className="mt-6 space-y-3">
-        {items.length === 0 ? <p className="py-8 text-center text-slate-500">Belum ada pengingat.</p> : items.map((r) => (
+        {items.length === 0 ? <p className="py-8 text-center text-slate-500">Belum ada pengingat.</p> : items.slice(0, shown).map((r) => (
           <div key={r.id} className="aivora-card flex items-center justify-between p-4" data-testid={`rem-${r.id}`}>
             <div>
               <p className="font-semibold text-slate-900">{r.title}</p>
@@ -77,6 +79,7 @@ export default function Reminders() {
             </div>
           </div>
         ))}
+        {items.length > shown && <LoadMore onClick={() => setShown((n) => n + 20)} testid="reminders-load-more" />}
       </div>
     </div>
   );

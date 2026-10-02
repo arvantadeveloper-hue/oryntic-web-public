@@ -6,7 +6,12 @@ from db import db, now_iso
 DEFAULT_PRICING = {
     "margin_pct": 30.0, "tax_pct": 11.0, "usd_to_idr": 16500.0, "idr_per_credit": 80.0,
     "text_usd_per_1k_chars": 0.00675, "image_usd": 0.084, "profile_usd": 0.026,
-    "stt_usd": 0.0165, "tts_usd": 0.013, "provider_usd_per_min": 0.25,
+    "stt_usd": 0.0165, "tts_usd": 0.013, "provider_usd_per_min": 0.02,
+    # 1 credit = $0.001 (1,000 credits = $1). idr_per_credit is kept for display only.
+    "usd_per_credit": 0.001,
+    # OpenAI gpt-realtime list prices (USD per 1M tokens): billed per response from the usage report
+    "rt_audio_in_usd_1m": 32.0, "rt_audio_out_usd_1m": 64.0, "rt_text_in_usd_1m": 4.0, "rt_text_out_usd_1m": 16.0, "rt_cached_in_usd_1m": 0.4,
+    "video_usd_per_sec": 0.062,
 }
 DEFAULT_TRIAL = {"trial_days": 7, "trial_daily_limit": 100, "trial_credits": 700}
 
@@ -14,18 +19,31 @@ _cache = {"at": 0.0, "pricing": dict(DEFAULT_PRICING), "trial": dict(DEFAULT_TRI
 RATES = {"text_per_1k": 2.0, "image": 25, "profile": 8, "stt": 5, "tts": 4, "realtime_per_min": 75}
 
 
+def usd_to_credits(p: dict, usd: float) -> float:
+    """Provider cost × (1 + margin) × (1 + tax) ÷ value of one credit (exact, un-rounded)."""
+    return usd * (1 + p["margin_pct"] / 100) * (1 + p["tax_pct"] / 100) / max(float(p.get("usd_per_credit") or 0.001), 1e-6)
+
+
 def _credits(p: dict, usd: float) -> int:
-    idr = usd * (1 + p["margin_pct"] / 100) * (1 + p["tax_pct"] / 100) * p["usd_to_idr"]
-    return max(1, math.ceil(idr / max(p["idr_per_credit"], 0.01)))
+    return max(1, math.ceil(usd_to_credits(p, usd)))
+
+
+def realtime_usage_usd(p: dict, usage: dict) -> float:
+    """Raw provider cost of one Realtime response from OpenAI's usage report."""
+    i, o = usage.get("input_token_details") or {}, usage.get("output_token_details") or {}
+    cached = int((i.get("cached_tokens_details") or {}).get("audio_tokens") or 0) + int((i.get("cached_tokens_details") or {}).get("text_tokens") or 0) or int(i.get("cached_tokens") or 0)
+    return (max(0, int(i.get("audio_tokens") or 0) - 0) * p["rt_audio_in_usd_1m"] + int(i.get("text_tokens") or 0) * p["rt_text_in_usd_1m"]
+            + int(o.get("audio_tokens") or 0) * p["rt_audio_out_usd_1m"] + int(o.get("text_tokens") or 0) * p["rt_text_out_usd_1m"]
+            + cached * p["rt_cached_in_usd_1m"]) / 1_000_000
 
 
 def compute_rates(p: dict) -> dict:
-    text_idr = p["text_usd_per_1k_chars"] * (1 + p["margin_pct"] / 100) * (1 + p["tax_pct"] / 100) * p["usd_to_idr"]
     return {
-        "text_per_1k": round(max(0.1, text_idr / max(p["idr_per_credit"], 0.01)), 2),
+        "text_per_1k": round(max(0.1, usd_to_credits(p, p["text_usd_per_1k_chars"])), 2),
         "image": _credits(p, p["image_usd"]), "profile": _credits(p, p["profile_usd"]),
         "stt": _credits(p, p["stt_usd"]), "tts": _credits(p, p["tts_usd"]),
         "realtime_per_min": _credits(p, p["provider_usd_per_min"]),
+        "video_per_sec": round(usd_to_credits(p, p["video_usd_per_sec"]), 2),
     }
 
 

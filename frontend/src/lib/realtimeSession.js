@@ -1,4 +1,6 @@
-import { API_BASE, getToken } from "./api";
+import { API_BASE, getToken, api } from "./api";
+
+export const reportUsage = (callId, ev) => { if (ev?.type === "response.done" && ev.response?.usage) api.post(`/realtime/calls/${callId}/usage`, { usage: ev.response.usage }).catch(() => {}); };
 
 // Same semantic-VAD mapping as backend `vad_config`; interruption is confirmed client-side (see MicPipeline.openFor).
 export const vadUpdate = (sensitivity, createResponse) => ({
@@ -21,7 +23,7 @@ export class RealtimeSession {
     pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; this._monitor(e.streams[0]); };
     this.stream.getTracks().forEach((t) => pc.addTrack(t, this.stream));
     const dc = pc.createDataChannel("oai-events"); this.dc = dc;
-    dc.onmessage = (e) => { try { this.onEvent(this, JSON.parse(e.data)); } catch (err) {} };
+    dc.onmessage = (e) => { try { reportUsage(this.callId, ev); this.onEvent(this, JSON.parse(e.data)); } catch (err) {} };
     pc.onconnectionstatechange = () => { if (["failed", "disconnected", "closed"].includes(pc.connectionState) && !this.closed) this.onError?.(this, new Error("connection lost")); };
     const opened = new Promise((resolve) => { dc.onopen = resolve; });
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);

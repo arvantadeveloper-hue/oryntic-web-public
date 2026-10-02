@@ -4,11 +4,12 @@ import { toast } from "sonner";
 import { api } from "../lib/api";
 
 const PRICE_FIELDS = [
-  ["margin_pct", "Margin platform (%)", 1], ["tax_pct", "PPN (%)", 0.5], ["usd_to_idr", "Kurs USD → IDR", 100], ["idr_per_credit", "Nilai 1 kredit (IDR)", 1],
+  ["margin_pct", "Margin platform (%)", 1], ["tax_pct", "PPN (%)", 0.5], ["usd_to_idr", "Kurs USD → IDR", 100], ["usd_per_credit", "Nilai 1 kredit (USD)", 0.0001], ["idr_per_credit", "Nilai 1 kredit (IDR, tampilan)", 1],
   ["text_usd_per_1k_chars", "Teks (USD / 1k karakter)", 0.0001], ["image_usd", "Gambar (USD / gambar)", 0.001], ["profile_usd", "Profil persona (USD)", 0.001],
-  ["stt_usd", "Transkripsi (USD / permintaan)", 0.001], ["tts_usd", "Suara TTS (USD / permintaan)", 0.001], ["provider_usd_per_min", "Realtime (USD / menit)", 0.01],
+  ["stt_usd", "Transkripsi (USD / permintaan)", 0.001], ["tts_usd", "Suara TTS (USD / permintaan)", 0.001], ["provider_usd_per_min", "Biaya koneksi Realtime (USD / menit)", 0.01],
+  ["rt_audio_in_usd_1m", "Realtime audio masuk (USD / 1M token)", 1], ["rt_audio_out_usd_1m", "Realtime audio keluar (USD / 1M token)", 1], ["rt_text_in_usd_1m", "Realtime teks masuk (USD / 1M token)", 0.5], ["rt_text_out_usd_1m", "Realtime teks keluar (USD / 1M token)", 0.5], ["rt_cached_in_usd_1m", "Realtime cache (USD / 1M token)", 0.1], ["video_usd_per_sec", "Video Seedance (USD / detik)", 0.001],
 ];
-const RATE_LABELS = { text_per_1k: "kredit / 1k karakter", image: "kredit / gambar", profile: "kredit / profil", stt: "kredit / transkripsi", tts: "kredit / TTS", realtime_per_min: "kredit / menit realtime" };
+const RATE_LABELS = { text_per_1k: "kredit / 1k karakter", image: "kredit / gambar", profile: "kredit / profil", stt: "kredit / transkripsi", tts: "kredit / TTS", realtime_per_min: "kredit / menit koneksi realtime (+ token audio aktual)", video_per_sec: "kredit / detik video" };
 
 export function PlatformPricingCard({ pricing, rates, onSaved }) {
   const [form, setForm] = useState(pricing);

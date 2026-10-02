@@ -6,6 +6,7 @@ import { MicPipeline, loadMicPrefs, saveMicPrefs } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
 import { MeetingShell, LayoutMenu, useMeetingLayout } from "./MeetingShell";
+import { useNotulenGate } from "./ConversationTools";
 import { useAuth } from "../context/AuthContext";
 
 const ME = "__me__";
@@ -85,6 +86,7 @@ export function VideoRoom({ conv, cid, messages = [], onClose, onRefresh, isPriv
   const [pipe, setPipe] = useState(null);
   const chat = useMeetingChat(messages);
   const [layout, setLayout] = useMeetingLayout();
+  const notulen = useNotulenGate(cid);
 
   const openRef = useRef(true);
   const mutedRef = useRef(false);
@@ -327,11 +329,13 @@ export function VideoRoom({ conv, cid, messages = [], onClose, onRefresh, isPriv
       onClose();
       return;
     }
+    if (!(await notulen.gate())) return;
     goPhase("ending");
     stopSpeech(); stopAll();
     setStatus(MOD, "speaking");
     try {
       const r = await api.post(`/conversations/${cid}/summary`);
+      api.post(`/conversations/${cid}/compact`).catch(() => {});
       const summary = r.data.summary || "";
       onRefresh && onRefresh();
       toast.success("Notulen meeting tersimpan di Ruang Kerja");
@@ -434,6 +438,7 @@ export function VideoRoom({ conv, cid, messages = [], onClose, onRefresh, isPriv
       </div>
       <MeetingShell layout={layout} chatOpen={chat.open} stage={stage} caption={captionEl} controls={controls} participants={participants}
         chat={(variant) => <MeetingChatPanel variant={variant} cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} />} />
+      {notulen.dialog}
     </div>
   );
 }

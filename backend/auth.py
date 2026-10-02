@@ -199,12 +199,16 @@ class SettingsIn(BaseModel):
     mic_sensitivity: Optional[str] = Field(default=None, pattern="^(low|medium|high)$")
     noise_suppression: Optional[bool] = None
     smart_routing: Optional[bool] = None  # workspace owner: auto-route topics to the best model
+    notulen_fields: Optional[list] = Field(default=None, max_length=12)  # [{name, required}]
 
 
 @router.put("/settings")
 async def update_settings(x: SettingsIn, u: dict = Depends(current_user)):
     settings = u.get("settings", {}) or {}
-    settings.update({k: v for k, v in x.model_dump().items() if v is not None})
+    data = x.model_dump()
+    if data.get("notulen_fields") is not None:
+        data["notulen_fields"] = [{"name": str(f.get("name", ""))[:60].strip(), "required": bool(f.get("required"))} for f in data["notulen_fields"] if str(f.get("name", "")).strip()]
+    settings.update({k: v for k, v in data.items() if v is not None})
     await db.users.update_one({"id": u["id"]}, {"$set": {"settings": settings}})
     return public_user(await db.users.find_one({"id": u["id"]}, {"_id": 0}))
 

@@ -14,7 +14,7 @@ from llm import record_usage, quota_exceeded, quota_message
 from chat import _can_access, _persona_system, _history_text
 from realtime import notify
 from ratelimit import rate_limit, get_limits, set_limits
-from pricing import get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates
+from pricing import usd_to_credits, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates
 
 router = APIRouter(prefix="/api", tags=["realtime-voice"])
 
@@ -23,7 +23,12 @@ REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
 
 # TTS voice (persona.voice) -> Realtime voice
 VOICE_MAP = {"alloy": "alloy", "echo": "echo", "shimmer": "shimmer", "nova": "coral", "onyx": "ash", "fable": "ballad",
-             "ash": "ash", "coral": "coral", "sage": "sage", "verse": "verse", "marin": "marin", "cedar": "cedar"}
+             "ash": "ash", "coral": "coral", "sage": "sage", "verse": "verse", "marin": "marin", "cedar": "cedar", "ballad": "ballad"}
+MODERATOR_OPENING = ("YOU OPEN THE MEETING as the Moderator: greet {uname} warmly by name, name the participants ({roster}), state the "
+                     "meeting's purpose in one sentence (title: \"{title}\"), then invite {uname} to start. 3-4 short spoken sentences.")
+NO_REPEAT = ("Listen to what the other participants already said. NEVER repeat or paraphrase a point someone else has made; "
+             "if you agree, say so in a few words and ADD something new (a different angle, risk, example, or decision). "
+             "If you have nothing new, say briefly that you have nothing to add.")
 
 async def get_pricing() -> dict:
     return await platform_pricing()
@@ -117,16 +122,18 @@ async def _close_stale_calls(user_id: str):
                                         {"$set": {"status": "ended", "ended_at": now_iso(), "stale": True}})
 
 
-async def _session_instructions(persona: dict, u: dict, roster: list, history: str, opening, is_first: bool) -> str:
+async def _session_instructions(persona: dict, u: dict, roster: list, history: str, opening, is_first: bool, title: str = "") -> str:
     text = await _persona_system(persona, u, None, voice_mode=True)
     if len(roster) > 1:
-        text += "\n\n" + MULTI_STYLE.format(others=", ".join(n for n in roster if n != persona["name"]))
+        text += "\n\n" + MULTI_STYLE.format(others=", ".join(n for n in roster if n != persona["name"])) + "\n" + NO_REPEAT
     if history.strip():
         text += f"\n\nRecent conversation with the user (for context):\n{history[-3000:]}"
     uname = u.get("name") or "the user"
     if is_first and opening:
         text += (f"\n\nYOU ARE CALLING THE USER. Open the call immediately by delivering this reminder warmly in 2-3 short "
                  f"spoken sentences, greeting {uname} by name, then ask if they need anything: {opening}")
+    elif is_first and len(roster) > 1:
+        text += "\n\n" + MODERATOR_OPENING.format(uname=uname, roster=", ".join(roster), title=title or "meeting")
     elif is_first:
         text += f"\n\nThe user just joined. Greet {uname} briefly and warmly, then let them talk."
     return text
@@ -152,7 +159,7 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
     for i, persona in enumerate(personas):
         call = {"id": new_id(), "group_id": group_id, "conversation_id": conv["id"], "user_id": u["id"], "persona_id": persona["id"],
                 "voice": VOICE_MAP.get(persona.get("voice", "alloy"), "marin"),
-                "instructions": await _session_instructions(persona, u, roster, history, x.opening, i == 0),
+                "instructions": await _session_instructions(persona, u, roster, history, x.opening, i == 0, conv.get("title", "")),
                 "multi": len(personas) > 1, "primary": i == 0, "status": "created", "billed_minutes": 0, "credits": 0, "credits_per_min": cpm,
                 "created_at": now_iso(), "started_at": None, "ended_at": None, "seconds": 0}
         await db.realtime_calls.insert_one(dict(call))
@@ -233,6 +240,26 @@ async def transcript(call_id: str, x: TranscriptIn, u: dict = Depends(current_us
 
 class TickIn(BaseModel):
     elapsed_seconds: int = Field(ge=0, le=6 * 3600)
+
+
+class UsageIn(BaseModel):
+    usage: dict  # OpenAI `response.done` → response.usage
+
+
+@router.post("/realtime/calls/{call_id}/usage")
+async def report_usage(call_id: str, x: UsageIn, u: dict = Depends(current_user)):
+    """Bill one Realtime response from its real token usage (audio in/out, text, cached) × margin."""
+    call = await _own_call(call_id, u)
+    p = await get_pricing()
+    usd = realtime_usage_usd(p, x.usage or {})
+    exact = usd_to_credits(p, usd)
+    acc = float(call.get("usage_credits_exact") or 0) + exact
+    charged = int(acc) - int(call.get("usage_credits_billed") or 0)
+    if charged > 0:
+        await record_usage(u["id"], "realtime_call", charged, {"call_id": call["id"], "conversation_id": call["conversation_id"], "usd": round(usd, 6)})
+    await db.realtime_calls.update_one({"id": call["id"]}, {"$set": {"usage_credits_exact": acc, "usage_credits_billed": int(acc)},
+                                                            "$inc": {"credits": charged, "usage_usd": usd}})
+    return {"charged_now": charged, "credits_total": int(call.get("credits") or 0) + charged, "usd": round(usd, 6)}
 
 
 async def _bill(call: dict, elapsed: int, u: dict) -> dict:

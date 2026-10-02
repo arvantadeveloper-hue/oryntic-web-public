@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
-import { vadUpdate } from "../lib/realtimeSession";
+import { vadUpdate, reportUsage } from "../lib/realtimeSession";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
@@ -75,6 +75,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
   };
 
   const handleEvent = (ev) => {
+    reportUsage(callIdRef.current, ev);
     switch (ev.type) {
       case "session.created":
       case "session.updated":

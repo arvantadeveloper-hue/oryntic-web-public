@@ -1,5 +1,7 @@
 import json
 import asyncio
+import math
+from pricing import RATES
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -111,8 +113,8 @@ async def _attach_video(task_id: str, user_id: str, goal: str, final: str):
         from storage import store_remote_video
         video_url = await asyncio.to_thread(generate_seedance_video, goal)
         if video_url:
-            credits = 80
-            await record_usage(user_id, "video_generation", 80, {"task_id": task_id})
+            credits = max(1, math.ceil(float(RATES.get("video_per_sec", 16)) * 5))  # 5-second Seedance clip at platform tariff
+            await record_usage(user_id, "video_generation", credits, {"task_id": task_id})
             video_path = await asyncio.to_thread(store_remote_video, video_url, user_id, task_id)
             final += "\n\n## Video\nVideo berhasil dibuat dengan Seedance dan disimpan permanen."
         else:

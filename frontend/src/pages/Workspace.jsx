@@ -1,3 +1,4 @@
+import { LoadMore } from "../components/ConversationTools";
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sparkles, Search, Trash2 } from "lucide-react";
@@ -11,6 +12,7 @@ const statusColor = { completed: "#10B981", running: "#8B5CF6", queued: "#F59E0B
 export default function Workspace() {
   const nav = useNavigate();
   const { t } = useI18n();
+  const [shown, setShown] = useState(20);
   const [goal, setGoal] = useState("");
   const [tasks, setTasks] = useState([]);
   const [filter, setFilter] = useState("all");
@@ -92,7 +94,7 @@ export default function Workspace() {
       </div>
 
       <div className="mt-5 space-y-3">
-        {tasks.length === 0 ? <p className="py-10 text-center text-slate-500">Belum ada tugas.</p> : tasks.map((tk) => (
+        {tasks.length === 0 ? <p className="py-10 text-center text-slate-500">Belum ada tugas.</p> : tasks.slice(0, shown).map((tk) => (
           <div key={tk.id} onClick={() => nav(`/workspace/${tk.id}`)} data-testid={`task-${tk.id}`}
             className="aivora-card aivora-card-hover group flex cursor-pointer items-center justify-between p-5">
             <div className="min-w-0">
@@ -105,6 +107,7 @@ export default function Workspace() {
             </div>
           </div>
         ))}
+        {tasks.length > shown && <LoadMore onClick={() => setShown((n) => n + 20)} testid="tasks-load-more" />}
       </div>
     </div>
   );
