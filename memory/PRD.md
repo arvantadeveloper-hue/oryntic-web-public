@@ -151,6 +151,14 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Catatan: cache tarif & rate limit per-proses (deploy 1 worker) — bila scale-out perlu Redis.
 - Tested: iteration_15 — backend 11/11, FE 100%.
 
+## Update 2026-06 (q) — Diskusi fitur lanjutan (DITUNDA oleh user)
+- User bertanya: avatar interaktif ala Runway Characters, vision (webcam/berbagi layar), integrasi Zoom/Meet/Teams. Agen memaparkan opsi (vision via image input gpt-realtime; Zoom/Meet/Teams via Recall.ai/Meeting BaaS atau SDK resmi, atau alternatif "Oryntix sebagai host" dengan WebRTC). User memutuskan **tunda dulu semua rencana**. Tidak ada perubahan kode.
+
+## Backlog (ditunda)
+- Vision: snapshot webcam/layar → sesi Realtime / chat teks (image input), tarif per gambar.
+- Zoom/Meet/Teams: bot meeting (Recall.ai / Meeting BaaS) atau kamera+share screen WebRTC di ruang meeting Oryntix.
+- Avatar interaktif (Runway LiveKit / HeyGen-Simli / animasi 2.5D).
+
 ## Next tasks
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
 - Verifikasi email saat daftar (ditunda; perlu Resend/SendGrid key).
