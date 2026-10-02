@@ -225,6 +225,10 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Frontend: `TaskOfferButtons` + `TaskNotifier` (poll 20 dtk → toast + event `oryntix:task-done` → Chat refresh), `Calendar.jsx` (/calendar, grid bulan, panel hari, form event), `PresentationPanel.jsx` di stage RealtimeMeeting saat conv.task_id, `runVoiceTool()` di realtimeSession (dipakai RealtimeCall & RealtimeMeeting untuk assign_task/update_task).
 - Belum diuji dengan suara nyata: tool assign_task/update_task + panel presentasi di meeting (butuh mic).
 
+## Update 2026-06 (z) — Ringkasan Harian + istilah "Meeting" → "Panggilan" (iteration_22 lulus BE 9/9, FE lulus)
+- `settings.daily_digest {enabled, channel: chat|call|both, time HH:MM, persona_id}` (validasi di `PUT /auth/settings`); `assignments.py`: `build_digest` (agenda hari ini via `calendar_items` + tugas selesai 24 jam + yang berjalan → LLM persona), `send_digest` (chat → pesan di percakapan privat; call → reminder `kind:digest` status ringing → IncomingCall), `digest_tick` di loop scheduler (sekali/hari, jendela 3 jam, `users.digest_last_date`), `POST /digest/send-now`. UI: `DailyDigestCard.jsx` di halaman Kalender.
+- Semua teks UI "Meeting" → "Panggilan" (frontend + pesan backend berbahasa Indonesia; judul tersimpan dimigrasi di `migrate_workspace`). Nilai internal `type: "meeting"`, route, dan data-testid tidak berubah.
+
 ## Backlog batch berikut
 - Google OAuth sendiri (Client ID/Secret dari user) → login Google.
 - Produksi: set secret SMTP_* seperti preview; JANGAN set `EMAIL_DEBUG_LINKS=true` di produksi (tautan verifikasi akan bocor di respons API).

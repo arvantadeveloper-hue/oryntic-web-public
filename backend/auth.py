@@ -383,6 +383,8 @@ async def migrate_workspace():
     # UI wording: "Meeting" → "Panggilan" in stored conversation titles
     async for c in db.conversations.find({"title": {"$regex": "^Meeting: "}}, {"_id": 0, "id": 1, "title": 1}):
         await db.conversations.update_one({"id": c["id"]}, {"$set": {"title": "Panggilan: " + c["title"][len("Meeting: "):]}})
+    async for t in db.tasks.find({"goal": {"$regex": "Meeting: "}}, {"_id": 0, "id": 1, "goal": 1}):
+        await db.tasks.update_one({"id": t["id"]}, {"$set": {"goal": t["goal"].replace("Meeting: ", "Panggilan: ")}})
     # accounts created before email verification existed stay active
     await db.users.update_many({"verified": {"$exists": False}}, {"$set": {"verified": True}})
     # legacy members (owner_id != id) get an explicit joined membership so they can also use their home workspace
