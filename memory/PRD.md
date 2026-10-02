@@ -209,6 +209,14 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **Frontend**: `Auth.jsx` layar "Cek email Anda" + peringatan unverified & kirim ulang; `VerifyEmail.jsx` (/verify-email); `InvitePage.jsx` (/invite/:token); `Team.jsx` → form "Undang via Email", daftar undangan berstatus (kirim ulang/batalkan), keluarkan anggota; `WorkspaceSwitcher.jsx` di sidebar (pilih workspace + kartu undangan Bergabung/Tolak, polling 60 dtk); `AuthContext.applyAuth/switchWorkspace`.
 
 
+## Update 2026-06 (x) — Ruang Kerja Tahap 1 (iteration_20: BE 21/21 setelah fix, FE 100%)
+- `workspace.py`: `GET /tasks/{id}/export/{docx|pdf|xlsx|md}` (konversi on-demand; xlsx hanya bila ada tabel markdown → `has_tables`), `GET /tasks/{id}/versions/{v}`, `POST /tasks/{id}/revise`, `POST /tasks/{id}/discuss {mode: chat|call|meeting}` (buat/pakai ulang percakapan ber-`task_id`), `POST /conversations/{cid}/personas` (+Asisten; private→group + pesan sistem).
+- `tools.py`: `TASK_CONTEXT`, `REVISE_RE`, `save_revision` (versions[] + version/revision_note), `revise_with_llm` (dokumen penuh + "RINGKASAN PERUBAHAN").
+- `chat.py`: `_prepare_ctx` menyuntik konteks tugas bila conv.task_id; `_wants_revision` (regex + llm_json) → `_revise_turn` menyimpan versi baru; dokumen dari chat juga jadi item Ruang Kerja (type document, media non-file); `_emit_final` meneruskan task_id/task_version/tool.
+- `agents.py`: tasks punya `workspace_id` (migrasi di `migrate_workspace`), akses lintas anggota via `task_access`.
+- Frontend: `TaskDetail.jsx` (DiscussBar, ExportBar, versi, RevisePanel, MediaList), `TaskChatTools.jsx` (TaskContextCard, AddPersonaMenu) dipasang di `Chat.jsx`.
+- Tahap 2 (berikutnya): penugasan dari chat/meeting ("bahas satu per satu / terima beres"), jadwal `scheduled_at` + scheduler, tool `assign_task` di moderator Realtime, notifikasi selesai in-app. Tahap 3: Kalender, panel Presentasi di meeting.
+
 ## Backlog batch berikut
 - Google OAuth sendiri (Client ID/Secret dari user) → login Google.
 - Produksi: set secret SMTP_* seperti preview; JANGAN set `EMAIL_DEBUG_LINKS=true` di produksi (tautan verifikasi akan bocor di respons API).

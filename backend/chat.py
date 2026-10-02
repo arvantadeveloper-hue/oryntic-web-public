@@ -483,7 +483,7 @@ async def _emit_final(ctx, text: str, credits: int, extra: dict):
     """Persist the assistant message for a tool turn and yield its final SSE + credits."""
     msg = await _save_ai_msg(ctx.cid, ctx.persona, text, credits, ctx.via, extra)
     payload = {"message_id": msg["id"], "content": text}
-    for k in ("media", "pending_tool"):
+    for k in ("media", "pending_tool", "task_id", "task_version", "tool"):
         if k in extra:
             payload[k] = extra[k]
     yield ctx.sse(final=True, **payload)
@@ -536,7 +536,7 @@ async def _document_turn(ctx, plan: dict):
             "version": 1, "created_at": now_iso(), "updated_at": now_iso()}
     await db.tasks.insert_one(dict(task))
     extra = {"media": out["media"], "tool": "document", "model_key": ctx.model_key, "model_label": out["model_label"], "doc_markdown": out["markdown"][:20000], "task_id": task["id"]}
-    async for ev in _emit_final(ctx, f"Dokumen **{title}** sudah jadi! 📄 Tersedia dalam Word, PDF, dan Markdown di bawah ini.", out["credits"], extra):
+    async for ev in _emit_final(ctx, f"Dokumen **{title}** sudah jadi! 📄 Tersedia dalam Word, PDF, dan Markdown di bawah ini.\n\nDokumen ini juga tersimpan di Ruang Kerja untuk dibahas atau direvisi nanti — [buka di Ruang Kerja](/workspace/{task['id']}).", out["credits"], extra):
         yield ev
 
 
