@@ -1,0 +1,31 @@
+{
+  "summary": "Iter 17 fully verified: 13/13 backend pytest cases pass (admin model-routing GET/PUT/validation/forbidden, smart routing IT→Claude Sonnet with routed='it' + model_label 'Claude Sonnet' on SSE final + persisted model_key='claude-sonnet'/routed='it', non-IT message has no routed field, PUT /auth/settings smart_routing:false disables routing, image tool pending→cancel + pending→run with media[0].type='image' credits=25 + /api/files/{path}?auth=TOKEN returns 200 image/*, run-tool on non-pending msg → 404, document tool with 3 files docx/pdf/md all downloadable with correct content-types + %PDF magic, attachment_text persisted on user msg and recalled by follow-up question mentioning 28.000). Frontend: existing media chips (image, docx/pdf/md) + model-badge 'via Claude Sonnet' render in meeting chat; tool-request-card with run/cancel appears on image intent, cancel replaces bubble with cancellation note, run (in private conv) produces media-image inline; Admin /admin → pricing tab shows model-routing-card, threshold change to 30 saves + reload shows 30, restored to 20; Team page shows smart-routing-card with smart-routing-toggle, toggles off then on. Meeting video-call-btn opens meeting-shell with mic grant; layout-btn popover exposes all 3 options; CHAT layout: data-layout='chat', panel data-variant='main', panel at x=0 and participant-rail at x=1640 (rail is RIGHT of panel on desktop), meeting-chat-toggle NOT rendered; SPLIT: data-layout='split', vr-tile-me visible + main meeting-chat-panel visible; TILES: data-layout='tiles'; localStorage key 'aivora_meeting_layout' persists and is applied on reload (ls='chat' → data-layout='chat'); meeting-chat-input Enter sends document request → mc-live-status spinner then mc-msg-assistant with media-file-docx/pdf/md chips, docx chip href returns 200. Closed with rtm-leave each time.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_oryntix_iter17.py",
+    "/app/test_reports/pytest/iter17_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "tools.route_model short-circuits on `cfg['enabled']` or owner_settings.smart_routing==False — correct precedence; IT_RE catches 'regex' and triggers claude-sonnet; model_label is attached to meta only when reason is non-None (good).",
+    "chat._tool_turn: image path with credits >= confirm_threshold yields a 'final' SSE with pending_tool and saves a message carrying pending_tool — matches spec. run-tool endpoint sets $unset pending_tool and $set media/tool/credits atomically; cancel-tool sets tool_cancelled:true. Both guard with _pending_msg → 404 when no pending_tool.",
+    "tools.run_document_tool stores 3 files (docx/pdf/md) with correct MIME types and returns markdown. Font fallback to Liberation if present, else Helvetica.",
+    "files._same_workspace token param `auth=` works for workspace members (verified via fetch of generated chip href).",
+    "MeetingShell renders TWO <aside data-testid='meeting-chat-panel'> elements (one `data-variant='main'` for desktop, one `data-variant='side'` for mobile bottom sheet). This triggers Playwright strict-mode failures on bare locators and may surprise other test authors; consider gating one with CSS display:none at the DOM level or splitting testids (e.g., meeting-chat-panel-main / -side). Non-blocking.",
+    "ModelRoutingCard: GET /admin/model-routing is called even for non-platform admins (demo workspace owner), which returns 403; the component swallows it (`.catch(()=>{})`) so no visible error — fine, but the card won't be shown for non-platform owners anyway because Admin page is gated by `AdminOnly platform`.",
+    "chat._history_text truncates attachment_text to 1500 chars; attachment memory test confirmed the follow-up answer references the correct price (28.000). Nice.",
+    "Minor: _tool_turn image-with-confirmation yields a `final` event before the moderator check runs (moderator skipped when channel is meeting_chat, but regular channel still bypasses moderator for tool turns — intentional and matches spec)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_oryntix_iter17.py",
+    "/app/test_reports/iteration_17.json"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% (chat tools + admin routing + team smart-toggle + meeting layouts + meeting-chat document)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (workspace admin); admin@aivora.ai / Aivora!Admin2026 (platform admin). Meeting CID bcf72bc8-1c0d-4c5f-bb3c-e7d15dbee9f6.",
+  "seed_data_creation": "Backend tests created ~2 image generations (one via run-tool, one via SSE pending+cancel) and 1 document (3 files) in a private conversation, plus a couple of IT/non-IT chat turns in the meeting conv. Frontend added one real image (anjing illustration) in a private 'Chat dengan Rio' conv and one real document (3 chips) in meeting_chat. Total credit burn ≈ 100 kredit; wallet remained ≈ 9240 after all runs.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests live in /app/backend/tests/test_oryntix_iter17.py; run with -o addopts='' because pytest.ini injects xdist-only flags. Routing cache in tools.get_routing is 30s TTL — tests sleep 1-2s after admin PUT and 2s after settings PUT so the cache picks up. For run-tool image flow test, always use a *private* conversation; in meetings both personas (Rio & Nova) will each emit their own pending_tool card. MeetingShell renders two meeting-chat-panel elements (data-variant='main' and 'side'); when asserting with Playwright, use .nth(0) or filter by data-variant. localStorage keys used: aivora_token, aivora_meeting_layout (tiles|chat|split), aivora_meeting_chat_open ('0'|'1'). Meeting billing is 150 kredit/mnt — close with rtm-leave quickly.",
+  "rca of the issue": "N/A — all features from the review request work as specified; no regressions observed in iteration_16 flows (meeting-chat panel default-open on desktop, mc-msg-assistant table rendering, chat-send-btn text streaming, 'Akhiri & Simpan Notulen' button still ends meeting cleanly)."
+}

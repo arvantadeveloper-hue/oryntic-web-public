@@ -166,6 +166,16 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Tested: iteration_16 — backend 11/11, FE 100% (desktop, mobile, RealtimeCall, regresi). **Kualitas gate/RNNoise dengan suara nyata perlu uji manual user.**
 - Backlog: Tahap 2 tool-use & routing (Seedance video/gambar/dokumen dari chat meeting, model per topik) — hasil masuk `media[]` panel.
 
+## Update 2026-06 (s) — Tool-use (gambar & dokumen), routing model, 3 layout meeting, memori lampiran, nada sanguinis
+- **Tool-use** (`backend/tools.py`, `chat._tool_turn`): deteksi niat (regex `wants_tool` + planner LLM JSON `plan_tool`) di `POST /conversations/{cid}/send` (chat biasa & panel meeting). **Gambar** (Gemini image, `rate("image")`=25 ≥ `confirm_threshold` 20) → pesan asisten dengan `pending_tool{kind,prompt,credits}` → UI `ToolRequestCard` → `POST /conversations/{cid}/messages/{mid}/run-tool` (buat, simpan ke object storage `aivora/images/{uid}/..`, `media:[{type:image,path}]`) atau `/cancel-tool`. **Dokumen** → langsung dibuat: LLM (model hasil routing) menulis markdown → `.docx` (python-docx) + `.pdf` (fpdf2, LiberationSans) + `.md` di `aivora/docs/{uid}/{id}/` → `media[]` 3 file; SSE event `status` saat proses. `GET /api/files/{path}` kini boleh diakses seluruh anggota workspace (`_same_workspace`). Usage: `image_generation`, `document_generation`.
+- **Routing model** (`tools.route_model`): IT/coding (regex) → `it_model` (Claude Sonnet), riset panjang (regex / teks+lampiran >3500 char) → `research_model` (Gemini Pro), lainnya model persona. Config platform admin `GET/PUT /api/admin/model-routing` {enabled, it_model, research_model, confirm_threshold} + kartu `ModelRoutingCard` di Admin → Pricing. Toggle workspace `settings.smart_routing` (`SmartRoutingToggle` di halaman Tim, `PUT /auth/settings`). Pesan asisten menyimpan `model_key/model_label/routed`; UI badge "via Claude Sonnet" (`ModelBadge`).
+- **Layout meeting** (`components/MeetingShell.jsx`): tombol `layout-btn` → popover 3 mode: *Peserta utama* (tiles + panel kanan), *Chat utama* (chat memenuhi stage, `ParticipantRail` kolom kanan 280px dengan status/caption; mobile strip horizontal), *Sejajar* (50:50). Persist localStorage `aivora_meeting_layout`. Dipakai RealtimeMeeting, RealtimeCall, VideoRoom; `MeetingChatPanel` punya `variant` side|main.
+- **Memori lampiran**: `attachment_text` (≤4000 char) disimpan di pesan user dan ikut `_history_text` (≤1500/pesan) → pertanyaan lanjutan tentang lampiran terjawab; nama berkas buatan asisten juga masuk riwayat.
+- **Nada sanguinis**: `SANGUINE_TONE` di `_persona_system` (hangat, ceria, humor ringan, tetap akurat).
+- `MessageExtras.jsx`: `MediaList` (gambar/video/file chips Word·PDF·Markdown), `ToolRequestCard`, `ModelBadge`, `fileUrl`. Chat.jsx & panel meeting merender ketiganya + status streaming.
+- Deps: `python-docx`, `fpdf2` (requirements.txt).
+- Tested: iteration_17 — backend 13/13, FE 100% (layout 3 mode + persist, tool gambar konfirmasi/batal/jalankan, dokumen 3 file, routing badge, admin card, toggle workspace, memori lampiran).
+
 ## Next tasks
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
 - Verifikasi email saat daftar (ditunda; perlu Resend/SendGrid key).
