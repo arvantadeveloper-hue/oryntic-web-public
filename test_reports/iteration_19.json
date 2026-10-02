@@ -1,0 +1,33 @@
+{
+  "summary": "Iter19 — Email verification + Team invitations + Multi-workspace feature. BACKEND: 27/27 pytest cases pass in /app/backend/tests/test_oryntix_iter19.py — register returns pending_verification+debug_link (no access_token), login before verify returns 403 {code:'unverified'}, re-register of unverified resends link (200), resend-verification OK for both known+unknown emails, GET /auth/verify-email mints access_token+user.verified=true, second use → 400, login succeeds post-verify, re-register of verified email → 409. Team invites: new user → status pending+debug_link+existing_user:false, by-token (public) returns workspace_name='Demo'+inviter_name, accept without password → 400, accept with name+password → access_token with user.role='user'+is_home_workspace=false, status becomes 'joined', new user listed in /admin/workspace-users, same email again → 409. Existing-user invite: existing_user:true, GET /my-invites lists it, POST accept switches workspace, GET /auth/workspaces returns 2 (home is_home + Demo active), switch to home → role=admin+is_home_workspace=true, switch to bogus id → 403. Reject-by-token → status 'rejected'; admin resend → back to pending with new debug_link; DELETE invite → gone; DELETE /team/members/{uid} removes member (not in workspace-users, their workspaces list only home). Legacy budi@aivora.ai can login + sees Demo + still listed in demo's workspace-users. FRONTEND (7 flows): [01] Register → verify-pending screen with verify-resend-btn OK; [02] Login unverified → login-unverified warning with login-resend-btn OK; [03] /verify-email?token=... → verify-success → redirects to /onboarding logged in OK; [04] Demo /team invite form sends → row with status 'Menunggu tanggapan', resend+cancel buttons visible, cancel removes row OK; [05] /invite/<token> (logged out, new email) → invite-page with 'Undangan ke workspace Demo', button disabled with short password (abc), enabled with ≥6 chars, accept → invite-joined + redirects (/onboarding) OK; [06] /invite/<token> reject → invite-rejected OK; [07] Sidebar pending-invites for existing+onboarded user: pending-invite block visible, accept switches workspace-select to 'Demo' + navigates to /home, switch back to '(milik saya)' works (toast 'Workspace diganti'), admin nav items (AI Agents, Team, Kredit) visible on own workspace.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_oryntix_iter19.py",
+    "/app/test_reports/pytest/iter19_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "auth.py:resend-verification + login both gated by login_allowed() 10/5min per IP+email — this is global on IP so very quickly tripped by test automation making many registers (saw 429 during parallel browser tests). Not a bug but worth noting: register endpoint itself is also rate-limited? Need to confirm; got 429 during back-to-back registers from browser automation + urllib. Suggest: either exempt /register from brute-force bucket (keep bot-protection separate) or document limits. For regression tests, use `sudo supervisorctl restart backend` to reset the in-memory _hits deque between runs.",
+    "verify-email endpoint uses find_one_and_delete — correct: single-use token guarantee tested (test_07).",
+    "InvitePage.jsx validates password length ≥ 6 locally (disabled attr) AND backend returns 400 if password missing on accept — double-sided validation good.",
+    "WorkspaceSwitcher renders pending-invites block only on routes with Sidebar (i.e. post-onboarding). Users invited while on /onboarding won't see the sidebar invites; they must finish onboarding first. This is observable behavior rather than a bug (invites remain pending until user accepts via /invite/<token> link or finishes onboarding). Consider showing a toast/banner on /onboarding when pending invites exist, if desired.",
+    "After onboarding, new users land on /personas/new (not /home) when they have no personas yet. Tests should allow both /home and /personas/new as valid post-onboarding routes. The sidebar + pending-invites block appear on both.",
+    "team.py cancel (DELETE) removes doc entirely; status 'joined' members are removed via DELETE /team/members/{uid} and DELETE /admin/users/{uid} — tested both remove membership while keeping the user account alive, correct."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_oryntix_iter19.py",
+    "/app/test_reports/iteration_19.json"
+  ],
+  "success_rate": {"backend": "100% (27/27)", "frontend": "100% (7/7 flows)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (workspace admin). budi@aivora.ai / budi123456 (legacy member). New test accounts use qa.fe<n>.<kind>.<ts>@example.com pattern (SMTP rejects *.example.com → mail_sent=false, debug_link used).",
+  "seed_data_creation": "Created ~15 TEST users via /auth/register with qa.fe*.{ts}@example.com emails (each with distinct suffix per flow run). All are either unverified placeholders, verified home-workspace owners, or members accepted into Demo workspace. Approx. 8 Team invites rows now exist on demo@aivora.ai's /team page (various statuses: joined, rejected, Dikeluarkan) — safe to leave or purge. No seeded data was modified; demo/budi untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run backend tests with `pytest /app/backend/tests/test_oryntix_iter19.py -o addopts='' -v`. If you hit 429s during back-to-back API-heavy frontend tests, `sudo supervisorctl restart backend` clears the in-memory brute-force deque. Kubernetes ingress blocks urllib default User-Agent — pass `User-Agent: Mozilla/...` on all urllib requests from inside browser automation. New-user post-onboarding redirects to /personas/new, not /home (sidebar + pending-invites render on both). WorkspaceSwitcher pending-invite buttons use data-testid='invite-accept-<invite_id>' / 'invite-reject-<invite_id>'. Team page row testids use email suffixes: invite-row-<email>, invite-status-<email>, invite-resend-<email>, invite-cancel-<email>, delete-user-<email>.",
+  "rca of the issue": "None — all iter19 features (email verification, team invites with pending/joined/rejected/removed, multi-workspace with switcher + sidebar pending invites, admin team page) verified end-to-end on backend and frontend. Transient 429s during testing are expected brute-force protection (10/5min per IP+email) — not a product bug."
+}

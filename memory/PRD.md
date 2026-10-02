@@ -201,9 +201,18 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Spesialisasi panel dari `get_routing()` (it_model → "THE IT/CODING EXPERT", research_model → "THE RESEARCH EXPERT") + `PROVIDER_HINT`.
 
 
-## Backlog batch berikut (menunggu kunci dari user)
-- SMTP Gmail (host, user, app-password, from) → verifikasi email + undangan tim via email (status menunggu/bergabung/ditolak, tim buat akun sendiri).
-- Google OAuth sendiri (Client ID/Secret) → login Google.
+## Update 2026-06 (w) — Verifikasi email, undangan tim via email, multi-workspace (iteration_19 lulus: BE 27/27, FE 7/7)
+- **Mailer** (`mailer.py`, aiosmtplib): SMTP Hostinger port 465 (env `SMTP_HOST/PORT/USER/PASSWORD/FROM/FROM_NAME`); template verifikasi & undangan (HTML+teks). `EMAIL_DEBUG_LINKS=true` (preview saja) → respons API menyertakan `debug_link`. Tautan memakai `APP_URL` env → `app_url` dari body (window.location.origin) → header Origin.
+- **Verifikasi email** (`auth.py`): register → `verified:false`, token SHA-256 di `email_tokens`, respons `{pending_verification, mail_sent, debug_link?}` tanpa token; login belum verifikasi → 403 `{code:"unverified"}`; `POST /auth/resend-verification`; `GET /auth/verify-email?token=` → login otomatis. Akun lama otomatis `verified:true` (migrasi).
+- **Multi-workspace**: `users.owner_id` = workspace aktif; koleksi `workspace_members {workspace_id,user_id,status:joined}` (migrasi anggota lama); `member_ids()/is_member()/role_for()`; `GET /auth/workspaces`, `POST /auth/switch-workspace`; role dihitung dinamis di `current_user`. Semua query anggota (`/admin/workspace-users`, usage report, peserta meeting, join link) memakai membership.
+- **Undangan tim** (`team.py`, koleksi `workspace_invites` status pending/joined/rejected/removed): `POST/GET /team/invites`, `/team/invites/{id}/resend`, `DELETE`; publik `GET /team/invites/by-token/{t}`, `POST .../accept` (user baru buat password; user lama harus login dengan email yang sama), `POST .../reject`; in-app `GET /team/my-invites`, `POST /team/my-invites/{id}/accept|reject`; `DELETE /team/members/{uid}` (keluarkan, akun tetap). Undangan tidak kedaluwarsa.
+- **Frontend**: `Auth.jsx` layar "Cek email Anda" + peringatan unverified & kirim ulang; `VerifyEmail.jsx` (/verify-email); `InvitePage.jsx` (/invite/:token); `Team.jsx` → form "Undang via Email", daftar undangan berstatus (kirim ulang/batalkan), keluarkan anggota; `WorkspaceSwitcher.jsx` di sidebar (pilih workspace + kartu undangan Bergabung/Tolak, polling 60 dtk); `AuthContext.applyAuth/switchWorkspace`.
+
+
+## Backlog batch berikut
+- Google OAuth sendiri (Client ID/Secret dari user) → login Google.
+- Produksi: set secret SMTP_* seperti preview; JANGAN set `EMAIL_DEBUG_LINKS=true` di produksi (tautan verifikasi akan bocor di respons API).
+
 - Tugas terjadwal dari meeting/chat → Ruang Kerja (tawaran "bahas satu per satu / terima beres"), buat meeting dari Ruang Kerja, revisi hasil di meeting, unduh Word di Ruang Kerja, menu Kalender.
 
 ## Next tasks
