@@ -36,12 +36,12 @@ class TestSettings:
         assert r.status_code == 200, r.text
         s = r.json().get("settings", {})
         assert s.get("mic_sensitivity") == "high"
-        assert s.get("noise_suppression") is False
+        assert not (s.get("noise_suppression"))
 
         # verify via GET /me
         me = requests.get(f"{BASE_URL}/api/auth/me", headers=auth_headers, timeout=15).json()
         assert me["settings"]["mic_sensitivity"] == "high"
-        assert me["settings"]["noise_suppression"] is False
+        assert not (me["settings"]["noise_suppression"])
 
     def test_settings_partial_update_keeps_other(self, auth_headers):
         # Only change noise_suppression -> mic_sensitivity must remain 'high'
@@ -50,7 +50,7 @@ class TestSettings:
         assert r.status_code == 200, r.text
         s = r.json()["settings"]
         assert s.get("mic_sensitivity") == "high"
-        assert s.get("noise_suppression") is True
+        assert s.get("noise_suppression")
 
     def test_restore_defaults(self, auth_headers):
         r = requests.put(f"{BASE_URL}/api/auth/settings",
@@ -156,7 +156,7 @@ class TestRealtime:
     def test_realtime_status(self, auth_headers):
         r = requests.get(f"{BASE_URL}/api/realtime/status", headers=auth_headers, timeout=15)
         assert r.status_code == 200
-        assert r.json().get("enabled") is True
+        assert r.json().get("enabled")
 
     def test_negotiate_accepts_sensitivity_query(self, auth_headers):
         # Create a call

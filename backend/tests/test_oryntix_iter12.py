@@ -155,7 +155,7 @@ def test_realtime_calls_multi_and_single(admin_h):
                      json={"conversation_id": mcid}, timeout=30)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["multi"] is True
+    assert body["multi"]
     assert len(body["sessions"]) == 2
     assert sum(1 for s in body["sessions"] if s["primary"]) == 1
     assert body["credits_per_min_total"] == 2 * body["credits_per_min"]
@@ -175,7 +175,7 @@ def test_realtime_calls_multi_and_single(admin_h):
                      json={"conversation_id": pcid}, timeout=30)
     assert r.status_code == 200, r.text
     b = r.json()
-    assert b["multi"] is False
+    assert not (b["multi"])
     assert len(b["sessions"]) == 1
     requests.post(f"{BASE}/api/realtime/calls/{b['sessions'][0]['call_id']}/end",
                  headers=admin_h, json={"elapsed_seconds": 0}, timeout=20)

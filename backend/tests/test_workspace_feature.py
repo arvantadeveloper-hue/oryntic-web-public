@@ -96,7 +96,7 @@ def fresh_user(admin_tok):
 class TestRoles:
     def test_admin_role_and_owner(self, admin_user):
         assert admin_user["role"] == "admin"
-        assert admin_user["is_admin"] is True
+        assert admin_user["is_admin"]
         assert admin_user["owner_id"] == admin_user["id"]
         assert admin_user["email"] == ADMIN_EMAIL
 
@@ -116,7 +116,7 @@ class TestAdminCreateUsers:
         u = fresh_user["user"]
         assert u["role"] == "user"
         assert u["owner_id"] == admin_user["id"]
-        assert u["is_admin"] is False
+        assert not (u["is_admin"])
 
     def test_duplicate_email_409(self, admin_tok, fresh_user):
         r = requests.post(f"{API}/admin/users",

@@ -87,7 +87,7 @@ def _stream_send(cid, content, headers, moderator=True, timeout=120):
     )
     assert r.status_code == 200, f"send failed {r.status_code}: {r.text[:400]}"
     finals = []
-    buf = ""
+    pass
     for raw in r.iter_lines(decode_unicode=True):
         if not raw:
             continue

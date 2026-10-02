@@ -44,7 +44,7 @@ class TestStatus:
         r = requests.get(f"{API}/realtime/status", headers=_hdr(admin_tok), timeout=15)
         assert r.status_code == 200, r.text
         d = r.json()
-        assert d["enabled"] is True
+        assert d["enabled"]
         assert d["model"] == "gpt-realtime"
         assert isinstance(d["credits_per_min"], int) and d["credits_per_min"] > 0
 
@@ -179,7 +179,7 @@ class TestTranscript:
         assert rb.status_code == 422
         # Appears in messages
         msgs = requests.get(f"{API}/conversations/{cid}/messages", headers=_hdr(admin_tok), timeout=15).json()
-        texts = [m.get("content") for m in msgs.get("messages", msgs if isinstance(msgs, list) else [])]
+        _ = [m.get("content") for m in msgs.get("messages", msgs if isinstance(msgs, list) else [])]
         # some servers return list directly
         if isinstance(msgs, dict) and "messages" in msgs:
             arr = msgs["messages"]

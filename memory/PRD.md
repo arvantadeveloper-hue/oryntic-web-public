@@ -176,6 +176,13 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Deps: `python-docx`, `fpdf2` (requirements.txt).
 - Tested: iteration_17 — backend 13/13, FE 100% (layout 3 mode + persist, tool gambar konfirmasi/batal/jalankan, dokumen 3 file, routing badge, admin card, toggle workspace, memori lampiran).
 
+## Update 2026-06 (t) — Code review fixes (kualitas kode)
+- `chat.py`: `send_message` dipecah (`_store_user_message`, `_pick_responders`, `_reply_extra`, `_collect`, `_moderator_if_stuck`); `_persona_reply` kini menerima dataclass **`ReplyCtx`** (`meta`, `sse()`), `_prepare_ctx`; `_tool_turn` → `_image_turn`/`_document_turn`/`_emit_final`; `_process_attachments` → `_attachment_context` + `_pdf_text`. `nudge` memakai `ReplyCtx`.
+- `agents._orchestrate` → `_plan_steps`, `_run_step`, `_merge_outputs`, `_attach_video`. `llm.quota_exceeded` → `_workspace_owner`, `_trial_expired`, `_daily_limit_hit`. `files.serve_file` → `_bearer`, `_path_parts`. `reminders.respond` → `_reminder_message`, `_private_conv`, `_store_opening`.
+- `tools.route_model`: `.get("smart_routing", True)` (hilangkan `is False`); `plan_tool`/tool turns inisialisasi variabel defensif; pernyataan `;` dipisah (tools.py, video_gen.py). `models.list_models() -> dict`.
+- Tests: `assert x is True/False` → `assert x` / `assert not (x)`; variabel tak terpakai & import ganda dibersihkan; `ruff --select E4,E7,E9,F` bersih untuk backend + tests.
+- Regresi: pytest iter16 11/11, iter17 13/13; curl nudge & reminder respond OK. (iter15 gagal 3 hanya karena throttle login 429 dari tes brute-force di file yang sama — bukan regresi kode.)
+
 ## Next tasks
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
 - Verifikasi email saat daftar (ditunda; perlu Resend/SendGrid key).

@@ -2,6 +2,7 @@ import json
 import asyncio
 import base64
 import io
+from dataclasses import dataclass, field
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -25,32 +26,40 @@ MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
+def _pdf_text(data: str) -> str:
+    from pypdf import PdfReader
+    raw = base64.b64decode(data.split(",")[-1])
+    if len(raw) > MAX_ATTACHMENT_BYTES:
+        raise ValueError("attachment too large")
+    reader = PdfReader(io.BytesIO(raw))
+    return "".join((p.extract_text() or "") + "\n" for p in reader.pages[:20])[:6000]
+
+
+async def _attachment_context(a: dict, user_id: str) -> Optional[str]:
+    """Text the model should see for one attachment (vision description, PDF text, or raw text)."""
+    atype, name, data = a.get("type", "text"), a.get("name", "file"), a.get("data", "")
+    if atype == "image":
+        desc = await describe_image(data.split(",")[-1])
+        if not desc:
+            return None
+        await record_usage(user_id, "vision", VISION_CREDITS, {"name": name})
+        return f"[Gambar '{name}']: {desc}"
+    if atype == "pdf":
+        return f"[PDF '{name}']:\n{_pdf_text(data)}"
+    return f"[Berkas '{name}']:\n{str(data)[:6000]}"
+
+
 async def _process_attachments(attachments, user_id):
     """Return (context_text, light_meta_list). Extracts text from pdf/text, vision-describes images."""
     ctx, meta = [], []
     for a in (attachments or [])[:5]:
-        atype = a.get("type", "text")
-        name = a.get("name", "file")
-        data = a.get("data", "")
-        meta.append({"type": atype, "name": name})
+        meta.append({"type": a.get("type", "text"), "name": a.get("name", "file")})
         try:
-            if atype == "image":
-                desc = await describe_image(data.split(",")[-1])
-                if desc:
-                    await record_usage(user_id, "vision", VISION_CREDITS, {"name": name})
-                    ctx.append(f"[Gambar '{name}']: {desc}")
-            elif atype == "pdf":
-                from pypdf import PdfReader
-                raw = base64.b64decode(data.split(",")[-1])
-                if len(raw) > MAX_ATTACHMENT_BYTES:
-                    raise ValueError("attachment too large")
-                reader = PdfReader(io.BytesIO(raw))
-                txt = "".join((p.extract_text() or "") + "\n" for p in reader.pages[:20])
-                ctx.append(f"[PDF '{name}']:\n{txt[:6000]}")
-            else:
-                ctx.append(f"[Berkas '{name}']:\n{str(data)[:6000]}")
+            text = await _attachment_context(a, user_id)
         except Exception:
-            ctx.append(f"[Lampiran '{name}' tidak dapat diproses]")
+            text = f"[Lampiran '{a.get('name', 'file')}' tidak dapat diproses]"
+        if text:
+            ctx.append(text)
     return ("\n\n".join(ctx), meta)
 
 
@@ -371,88 +380,130 @@ async def _save_ai_msg(cid: str, persona: dict, content: str, used: int, via, ex
     return ai_msg
 
 
-async def _tool_turn(cid, u, persona, system, meta, plan, history, model_key, via):
+async def _emit_final(ctx, text: str, credits: int, extra: dict):
+    """Persist the assistant message for a tool turn and yield its final SSE + credits."""
+    msg = await _save_ai_msg(ctx.cid, ctx.persona, text, credits, ctx.via, extra)
+    payload = {"message_id": msg["id"], "content": text}
+    for k in ("media", "pending_tool"):
+        if k in extra:
+            payload[k] = extra[k]
+    yield ctx.sse(final=True, **payload)
+    await notify(ctx.cid, {"type": "message", "role": "assistant", "persona_id": ctx.persona["id"]})
+    yield credits
+
+
+async def _image_turn(ctx, plan: dict, confirm_threshold: int):
+    credits = tool_rate("image")
+    prompt = (plan.get("image_prompt") or "").strip() or "illustration"
+    yield ctx.sse(start=True)
+    if credits >= confirm_threshold:
+        text = f"Siap, aku bisa buatkan gambarnya! 🎨 Perkiraan biaya ±{credits} kredit. Lanjutkan?"
+        yield ctx.sse(delta=text)
+        async for ev in _emit_final(ctx, text, 0, {"pending_tool": {"kind": "image", "prompt": prompt, "credits": credits}}):
+            yield ev
+        return
+    yield ctx.sse(status="Sedang membuat gambar...")
+    out = None
+    try:
+        out = await run_image_tool(ctx.user["id"], prompt)
+    except Exception:
+        out = None
+    if not out:
+        async for ev in _emit_final(ctx, "Maaf, gambarnya belum berhasil dibuat. Coba ulangi dengan deskripsi lain ya.", 0, {}):
+            yield ev
+        return
+    await record_usage(ctx.user["id"], "image_generation", out["credits"], {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"]})
+    async for ev in _emit_final(ctx, "Ini gambarnya! ✨ Kalau mau diubah gayanya, bilang saja.", out["credits"], {"media": out["media"], "tool": "image"}):
+        yield ev
+
+
+async def _document_turn(ctx, plan: dict):
+    title = (plan.get("title") or "Dokumen").strip()[:120]
+    yield ctx.sse(start=True)
+    yield ctx.sse(status=f"Sedang menyusun dokumen “{title}”...")
+    out = None
+    try:
+        out = await run_document_tool(ctx.user["id"], ctx.system, title, plan.get("instructions") or title, ctx.prompt, ctx.model_key)
+    except Exception:
+        out = None
+    if not out:
+        async for ev in _emit_final(ctx, "Maaf, dokumennya belum berhasil dibuat. Coba lagi sebentar ya.", 0, {}):
+            yield ev
+        return
+    await record_usage(ctx.user["id"], "document_generation", out["credits"], {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"]})
+    extra = {"media": out["media"], "tool": "document", "model_key": ctx.model_key, "model_label": out["model_label"], "doc_markdown": out["markdown"][:20000]}
+    async for ev in _emit_final(ctx, f"Dokumen **{title}** sudah jadi! 📄 Tersedia dalam Word, PDF, dan Markdown di bawah ini.", out["credits"], extra):
+        yield ev
+
+
+async def _tool_turn(ctx, plan: dict):
     """Create an image/document from chat. Expensive tools (≥ threshold) ask for confirmation first."""
     cfg = await get_routing()
-    kind = plan["tool"]
-    if kind == "image":
-        credits = tool_rate("image")
-        prompt = (plan.get("image_prompt") or "").strip() or "illustration"
-        if credits >= cfg["confirm_threshold"]:
-            text = f"Siap, aku bisa buatkan gambarnya! 🎨 Perkiraan biaya ±{credits} kredit. Lanjutkan?"
-            msg = await _save_ai_msg(cid, persona, text, 0, via, {"pending_tool": {"kind": "image", "prompt": prompt, "credits": credits}})
-            yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
-            yield f"data: {json.dumps({**meta, 'delta': text})}\n\n"
-            yield f"data: {json.dumps({**meta, 'final': True, 'message_id': msg['id'], 'content': text, 'pending_tool': msg['pending_tool']})}\n\n"
-            await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
-            yield 0
-            return
-        yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
-        yield f"data: {json.dumps({**meta, 'status': 'Sedang membuat gambar...'})}\n\n"
-        try:
-            out = await run_image_tool(u["id"], prompt)
-        except Exception:
-            text = "Maaf, gambarnya belum berhasil dibuat. Coba ulangi dengan deskripsi lain ya."
-            msg = await _save_ai_msg(cid, persona, text, 0, via, {})
-            yield f"data: {json.dumps({**meta, 'final': True, 'message_id': msg['id'], 'content': text})}\n\n"
-            yield 0
-            return
-        text = "Ini gambarnya! ✨ Kalau mau diubah gayanya, bilang saja."
-        await record_usage(u["id"], "image_generation", out["credits"], {"conversation_id": cid, "persona_id": persona["id"]})
-        msg = await _save_ai_msg(cid, persona, text, out["credits"], via, {"media": out["media"], "tool": "image"})
-        yield f"data: {json.dumps({**meta, 'final': True, 'message_id': msg['id'], 'content': text, 'media': out['media']})}\n\n"
-        await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
-        yield out["credits"]
-        return
-    # document
-    title = (plan.get("title") or "Dokumen").strip()[:120]
-    yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
-    yield f"data: {json.dumps({**meta, 'status': f'Sedang menyusun dokumen “{title}”...'})}\n\n"
-    try:
-        out = await run_document_tool(u["id"], system, title, plan.get("instructions") or title, history, model_key)
-    except Exception:
-        text = "Maaf, dokumennya belum berhasil dibuat. Coba lagi sebentar ya."
-        msg = await _save_ai_msg(cid, persona, text, 0, via, {})
-        yield f"data: {json.dumps({**meta, 'final': True, 'message_id': msg['id'], 'content': text})}\n\n"
-        yield 0
-        return
-    text = f"Dokumen **{title}** sudah jadi! 📄 Tersedia dalam Word, PDF, dan Markdown di bawah ini."
-    await record_usage(u["id"], "document_generation", out["credits"], {"conversation_id": cid, "persona_id": persona["id"]})
-    msg = await _save_ai_msg(cid, persona, text, out["credits"], via, {"media": out["media"], "tool": "document", "model_key": model_key, "model_label": out["model_label"], "doc_markdown": out["markdown"][:20000]})
-    yield f"data: {json.dumps({**meta, 'final': True, 'message_id': msg['id'], 'content': text, 'media': out['media']})}\n\n"
-    await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
-    yield out["credits"]
+    gen = _image_turn(ctx, plan, cfg["confirm_threshold"]) if plan["tool"] == "image" else _document_turn(ctx, plan)
+    async for ev in gen:
+        yield ev
 
 
-async def _persona_reply(cid: str, u: dict, persona: dict, roster, prompt: str, voice_mode: bool, meta_extra: dict, via: str = None, user_text: str = "", attach_len: int = 0):
+@dataclass
+class ReplyCtx:
+    """Everything one persona needs to answer a turn."""
+    cid: str
+    user: dict
+    persona: dict
+    roster: Optional[list]
+    prompt: str
+    voice_mode: bool = False
+    via: Optional[str] = None
+    user_text: str = ""
+    attach_len: int = 0
+    meta_extra: dict = field(default_factory=dict)
+    system: str = ""
+    model_key: Optional[str] = None
+    routed: Optional[str] = None
+
+    @property
+    def meta(self) -> dict:
+        p = self.persona
+        m = {"persona_id": p["id"], "persona_name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")}
+        if self.routed:
+            m.update(model_label=model_label(self.model_key), routed=self.routed)
+        return m
+
+    def sse(self, **payload) -> str:
+        return f"data: {json.dumps({**self.meta, **payload})}\n\n"
+
+
+async def _prepare_ctx(ctx: ReplyCtx) -> ReplyCtx:
+    ctx.system = await _persona_system(ctx.persona, ctx.user, ctx.roster, voice_mode=ctx.voice_mode)
+    if ctx.via == "meeting_chat":
+        ctx.system += "\n\n" + MEETING_CHAT_STYLE
+    ctx.model_key, ctx.routed = await route_model(ctx.persona.get("model"), ctx.user_text, ctx.attach_len, await _owner_settings(ctx.user))
+    return ctx
+
+
+async def _persona_reply(ctx: ReplyCtx):
     """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
-    meta = {"persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}
-    system = await _persona_system(persona, u, roster, voice_mode=voice_mode)
-    if via == "meeting_chat":
-        system += "\n\n" + MEETING_CHAT_STYLE
-    model_key, reason = await route_model(persona.get("model"), user_text, attach_len, await _owner_settings(u))
-    if reason:
-        meta = {**meta, "model_label": model_label(model_key), "routed": reason}
-    if user_text and not voice_mode and wants_tool(user_text):
-        plan = await plan_tool(user_text, prompt)
+    await _prepare_ctx(ctx)
+    if ctx.user_text and not ctx.voice_mode and wants_tool(ctx.user_text):
+        plan = await plan_tool(ctx.user_text, ctx.prompt)
         if plan.get("tool") != "none":
-            async for ev in _tool_turn(cid, u, persona, system, meta, plan, prompt, model_key, via):
+            async for ev in _tool_turn(ctx, plan):
                 yield ev
             return
-    yield f"data: {json.dumps({**meta, 'start': True})}\n\n"
+    yield ctx.sse(start=True)
     try:
-        full = await llm_text(system, prompt, model_key)
+        full = await llm_text(ctx.system, ctx.prompt, ctx.model_key)
     except Exception:
         full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
     for i, w in enumerate(full.split(" ")):
-        yield f"data: {json.dumps({**meta, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
+        yield ctx.sse(delta=(w if i == 0 else " " + w))
         await asyncio.sleep(0.01)
-    used = text_credits(prompt, full)
-    await record_usage(u["id"], "chat", used, {"conversation_id": cid, "persona_id": persona["id"], "model": model_key, **meta_extra})
-    extra = {"model_key": model_key, "model_label": model_label(model_key), "routed": reason} if reason else {}
-    ai_msg = await _save_ai_msg(cid, persona, full, used, via, extra)
-    yield f"data: {json.dumps({**meta, 'final': True, 'message_id': ai_msg['id'], 'content': full})}\n\n"
-    await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"]})
+    used = text_credits(ctx.prompt, full)
+    await record_usage(ctx.user["id"], "chat", used, {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"], "model": ctx.model_key, **ctx.meta_extra})
+    extra = {"model_key": ctx.model_key, "model_label": model_label(ctx.model_key), "routed": ctx.routed} if ctx.routed else {}
+    ai_msg = await _save_ai_msg(ctx.cid, ctx.persona, full, used, ctx.via, extra)
+    yield ctx.sse(final=True, message_id=ai_msg["id"], content=full)
+    await notify(ctx.cid, {"type": "message", "role": "assistant", "persona_id": ctx.persona["id"]})
     yield used
 
 
@@ -466,11 +517,7 @@ def _sse(gen):
     return StreamingResponse(gen, media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@router.post("/conversations/{cid}/send")
-async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
-    await rate_limit(u, "chat")
-    conv, personas = await _load_ai_conv(cid, u)
-    attach_text, attach_meta = await _process_attachments(x.attachments, u["id"])
+async def _store_user_message(cid: str, x: MsgIn, u: dict, attach_text: str, attach_meta: list) -> dict:
     user_msg = {"id": new_id(), "conversation_id": cid, "role": "user", "content": x.content,
                 "attachments": attach_meta, "sender_user_id": u["id"], "sender_name": u.get("name") or "User",
                 "created_at": now_iso()}
@@ -480,36 +527,64 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
         user_msg["attachment_text"] = attach_text[:4000]
     await db.messages.insert_one(dict(user_msg))
     await notify(cid, {"type": "message", "role": "user", "sender_name": user_msg["sender_name"]})
+    return user_msg
 
-    responders = _mentioned(x.content, personas) or personas
-    if x.channel == "meeting_chat" and not _mentioned(x.content, personas):
-        responders = personas[:1]  # text side-channel: one assistant answers unless someone is @mentioned
-    roster = [p["name"] for p in personas] if len(personas) > 1 else None
-    extra = (f"\n\n[Lampiran dari user]:\n{attach_text}" if attach_text else "")
+
+def _pick_responders(x: MsgIn, personas: list) -> list:
+    mentioned = _mentioned(x.content, personas)
+    if mentioned:
+        return mentioned
+    return personas[:1] if x.channel == "meeting_chat" else personas  # text side-channel: one assistant answers
+
+
+def _reply_extra(x: MsgIn, attach_text: str) -> str:
+    notes = [f"\n\n[Lampiran dari user]:\n{attach_text}"] if attach_text else []
     if x.interrupted:
-        extra += "\n[Catatan: user baru saja menyela saat asisten sedang berbicara. Tanggapi langsung apa yang user katakan.]"
+        notes.append("\n[Catatan: user baru saja menyela saat asisten sedang berbicara. Tanggapi langsung apa yang user katakan.]")
     if x.channel == "meeting_chat":
-        extra += "\n[Catatan: pesan terakhir user DIKETIK di panel chat meeting; jawab dalam bentuk teks/markdown.]"
+        notes.append("\n[Catatan: pesan terakhir user DIKETIK di panel chat meeting; jawab dalam bentuk teks/markdown.]")
+    return "".join(notes)
+
+
+async def _collect(gen, totals: list):
+    """Re-yield SSE strings from a reply generator; its trailing int (credits) is added to totals[0]."""
+    async for ev in gen:
+        if isinstance(ev, int):
+            totals[0] += ev
+        else:
+            yield ev
+
+
+async def _moderator_if_stuck(cid: str, conv: dict, responders: list, roster, x: MsgIn):
+    """Meeting only: the Moderator steps in when the discussion is stuck (never for the text side-channel)."""
+    if conv.get("type") != "meeting" or len(responders) < 2 or x.channel:
+        return None
+    user_turns = await db.messages.count_documents({"conversation_id": cid, "role": "user"})
+    return roster if user_turns >= 2 and await _is_stuck(cid) else None
+
+
+@router.post("/conversations/{cid}/send")
+async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
+    await rate_limit(u, "chat")
+    conv, personas = await _load_ai_conv(cid, u)
+    attach_text, attach_meta = await _process_attachments(x.attachments, u["id"])
+    await _store_user_message(cid, x, u, attach_text, attach_meta)
+    responders = _pick_responders(x, personas)
+    roster = [p["name"] for p in personas] if len(personas) > 1 else None
+    extra = _reply_extra(x, attach_text)
 
     async def stream():
-        total = 0
+        totals = [0]
         for persona in responders:
             prompt = (await _history_text(cid)) + extra + f"\n{persona['name']}:"
-            async for ev in _persona_reply(cid, u, persona, roster, prompt, x.voice_mode, {}, via=x.channel, user_text=x.content, attach_len=len(attach_text)):
-                if isinstance(ev, int):
-                    total += ev
-                else:
-                    yield ev
-        # meeting: the Moderator only steps in when the discussion is stuck; notulen is on demand via /summary
-        if conv.get("type") == "meeting" and len(responders) > 1 and not x.channel:
-            user_turns = await db.messages.count_documents({"conversation_id": cid, "role": "user"})
-            if user_turns >= 2 and await _is_stuck(cid):
-                async for ev in _moderator_interject(cid, u, roster, "stuck"):
-                    if isinstance(ev, int):
-                        total += ev
-                    else:
-                        yield ev
-        yield await _finish_stream(cid, u, total, x.content)
+            ctx = ReplyCtx(cid=cid, user=u, persona=persona, roster=roster, prompt=prompt, voice_mode=x.voice_mode,
+                           via=x.channel, user_text=x.content, attach_len=len(attach_text))
+            async for ev in _collect(_persona_reply(ctx), totals):
+                yield ev
+        if await _moderator_if_stuck(cid, conv, responders, roster, x):
+            async for ev in _collect(_moderator_interject(cid, u, roster, "stuck"), totals):
+                yield ev
+        yield await _finish_stream(cid, u, totals[0], x.content)
 
     return _sse(stream())
 
@@ -605,15 +680,12 @@ async def nudge(cid: str, u: dict = Depends(current_user)):
               f"atau tawarkan bantuan lanjutan. Jangan mengulang jawaban sebelumnya.]\n{persona['name']}:")
 
     async def stream():
-        total = 0
-        gen = _moderator_interject(cid, u, roster, "silence") if use_mod else \
-            _persona_reply(cid, u, persona, roster if len(personas) > 1 else None, prompt, True, {"reason": "silence"})
-        async for ev in gen:
-            if isinstance(ev, int):
-                total += ev
-            else:
-                yield ev
-        yield f"data: {json.dumps({'done': True, 'credits_used': total})}\n\ndata: [DONE]\n\n"
+        totals = [0]
+        ctx = ReplyCtx(cid=cid, user=u, persona=persona, roster=roster if len(personas) > 1 else None, prompt=prompt, voice_mode=True, meta_extra={"reason": "silence"})
+        gen = _moderator_interject(cid, u, roster, "silence") if use_mod else _persona_reply(ctx)
+        async for ev in _collect(gen, totals):
+            yield ev
+        yield f"data: {json.dumps({'done': True, 'credits_used': totals[0]})}\n\ndata: [DONE]\n\n"
 
     return _sse(stream())
 

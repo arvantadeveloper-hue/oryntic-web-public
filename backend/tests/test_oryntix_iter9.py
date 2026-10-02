@@ -244,7 +244,7 @@ class TestLegacyModeratorSummary:
             assert mod_final, "expected a Moderator final event in legacy meeting"
             # meeting_notes task created
             tasks = requests.get(f"{BASE_URL}/api/tasks", headers=admin_headers, timeout=20).json()
-            matches = [t for t in tasks if t.get("type") == "meeting_notes" and cid in (t.get("goal", "") + t.get("final_output", ""))]
+            _ = [t for t in tasks if t.get("type") == "meeting_notes" and cid in (t.get("goal", "") + t.get("final_output", ""))]
             # fallback: just assert at least one meeting_notes task exists after
             notes = [t for t in tasks if t.get("type") == "meeting_notes"]
             assert notes, "no meeting_notes task found"

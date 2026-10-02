@@ -1,6 +1,9 @@
 """Iter15: cross-tenant persona isolation, trial-expiry inheritance, login throttle, admin regression."""
-import os, uuid, time, asyncio
-import pytest, requests
+import os
+import uuid
+import asyncio
+import pytest
+import requests
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
@@ -182,7 +185,8 @@ class TestTrialExpiry:
             cid = None
             for c in convs:
                 if c.get("type") == "private" and rio["id"] in (c.get("persona_ids") or []):
-                    cid = c["id"]; break
+                    cid = c["id"]
+                    break
             if not cid:
                 rc = S.post(f"{API}/conversations", headers=_hdr(budi_tok),
                             json={"type": "private", "persona_ids": [rio["id"]]})
@@ -201,7 +205,8 @@ class TestTrialExpiry:
             dcid = None
             for c in dconvs:
                 if c.get("type") == "private" and rio["id"] in (c.get("persona_ids") or []):
-                    dcid = c["id"]; break
+                    dcid = c["id"]
+                    break
             if not dcid:
                 rc = S.post(f"{API}/conversations", headers=_hdr(demo_tok),
                             json={"type": "private", "persona_ids": [rio["id"]]})
@@ -231,7 +236,8 @@ class TestTrialExpiry:
         cid = None
         for c in convs:
             if c.get("type") == "private" and rio["id"] in (c.get("persona_ids") or []):
-                cid = c["id"]; break
+                cid = c["id"]
+                break
         r3 = S.post(f"{API}/conversations/{cid}/send",
                     headers=_hdr(budi_tok), json={"content": "halo iter15 restored"}, stream=True, timeout=30)
         assert r3.status_code == 200, f"after restore expected 200 got {r3.status_code}: {r3.text[:300] if hasattr(r3,'text') else ''}"
@@ -249,13 +255,10 @@ class TestZZLoginThrottle:
         # (b) within 11 attempts we observe at least one 429 with the Indonesian message.
         email = f"bruteforce_{uuid.uuid4().hex[:6]}@x.ai"
         got_429 = False
-        got_401 = False
         msg = ""
         for i in range(11):
             r = S.post(f"{API}/auth/login", json={"email": email, "password": "wrong"})
             assert r.status_code in (401, 429), f"attempt {i+1}: unexpected {r.status_code} {r.text}"
-            if r.status_code == 401:
-                got_401 = True
             if r.status_code == 429:
                 got_429 = True
                 msg = r.text

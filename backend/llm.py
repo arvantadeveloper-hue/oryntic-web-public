@@ -104,20 +104,32 @@ def quota_message(over: dict) -> str:
     return f"Kuota kredit harian Anda habis ({over['used']}/{over['limit']}). Hubungi admin atau coba lagi besok."
 
 
-async def quota_exceeded(user: dict):
-    """Return {used, limit} if the user is over their daily credit quota (members, and owners on a trial plan), else None."""
-    owner = user if user.get("role") == "admin" else (await db.users.find_one({"id": user.get("owner_id")}, {"_id": 0, "plan": 1, "trial_ends_at": 1}) or {})
-    if owner.get("plan") == "trial" and (owner.get("trial_ends_at") or "") < now_iso() and owner.get("trial_ends_at"):
-        return {"used": 0, "limit": 0, "trial_expired": True}
-    if user.get("role") == "admin" and user.get("plan") != "trial":
-        return None
+async def _workspace_owner(user: dict) -> dict:
+    if user.get("role") == "admin":
+        return user
+    return await db.users.find_one({"id": user.get("owner_id")}, {"_id": 0, "plan": 1, "trial_ends_at": 1}) or {}
+
+
+def _trial_expired(owner: dict) -> bool:
+    ends = owner.get("trial_ends_at") or ""
+    return owner.get("plan") == "trial" and bool(ends) and ends < now_iso()
+
+
+async def _daily_limit_hit(user: dict):
     limit = int(user.get("daily_credit_limit") or 0)
     if limit <= 0:
         return None
     used = await user_today_usage(user["id"])
-    if used >= limit:
-        return {"used": used, "limit": limit}
-    return None
+    return {"used": used, "limit": limit} if used >= limit else None
+
+
+async def quota_exceeded(user: dict):
+    """Return {used, limit} if the user is over their daily credit quota (members, and owners on a trial plan), else None."""
+    if _trial_expired(await _workspace_owner(user)):
+        return {"used": 0, "limit": 0, "trial_expired": True}
+    if user.get("role") == "admin" and user.get("plan") != "trial":
+        return None
+    return await _daily_limit_hit(user)
 
 
 async def llm_text(system_message: str, user_text: str, model_key: str | None = None) -> str:

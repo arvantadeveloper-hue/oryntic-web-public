@@ -54,85 +54,86 @@ class TaskIn(BaseModel):
     model: Optional[str] = None
 
 
+async def _plan_steps(task_id: str, goal: str, model_key: str):
+    """Coordinator breaks the goal into 2-4 subtasks. Returns (steps, credits)."""
+    plan_sys = (
+        "You are the orchestration coordinator of a team of AI agents. Break the user's goal into 2-4 concrete "
+        "subtasks. For each subtask choose one role from: Research, Planning, Writing, Analyst, Coding. "
+        'Respond JSON: {"plan_summary": str, "subtasks": [{"role": str, "title": str, "instruction": str}]}'
+    )
+    plan = await llm_json(plan_sys, f"Goal: {goal}", model_key)
+    subtasks = plan.get("subtasks", [])[:4] or [{"role": "Writing", "title": "Complete request", "instruction": goal}]
+    steps = [{"id": new_id(), "role": st.get("role", "Writing"), "title": st.get("title", "Subtask"),
+              "instruction": st.get("instruction", goal), "status": "pending", "output": "", "created_at": now_iso()} for st in subtasks]
+    await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "summary": plan.get("plan_summary", ""), "updated_at": now_iso()}})
+    return steps, text_credits(goal, json.dumps(plan))
+
+
+async def _run_step(task_id: str, goal: str, step: dict, steps: list, model_key: str) -> int:
+    """Execute one subtask (one retry), persist progress, return credits used."""
+    step["status"] = "running"
+    await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "updated_at": now_iso()}})
+    role = step["role"] if step["role"] in ROLE_PROMPTS else "Writing"
+    sys = ROLE_PROMPTS[role] + " Keep the output focused and useful."
+    prompt = f"Overall goal: {goal}\n\nYour subtask: {step['title']}\nInstructions: {step['instruction']}"
+    out = ""
+    for _ in range(2):
+        try:
+            out = await llm_text(sys, prompt, model_key)
+        except Exception:
+            out = ""
+        if out:
+            break
+    step["output"] = out or "(This subtask could not be completed.)"
+    step["status"] = "completed"
+    await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "updated_at": now_iso()}})
+    return text_credits(prompt, step["output"])
+
+
+async def _merge_outputs(goal: str, steps: list, model_key: str):
+    merge_sys = (
+        "You are the orchestration coordinator with a Reviewer. Combine the agents' outputs into a single, "
+        "coherent, well-structured final deliverable in markdown. Remove redundancy, ensure consistency, "
+        "and add a short executive summary at the top."
+    )
+    outputs = [f"### {s['title']} ({s['role']})\n{s['output']}" for s in steps]
+    merge_prompt = f"Goal: {goal}\n\nAgent outputs:\n\n" + "\n\n".join(outputs)
+    final = await llm_text(merge_sys, merge_prompt, model_key)
+    return final, text_credits(merge_prompt, final)
+
+
+async def _attach_video(task_id: str, user_id: str, goal: str, final: str):
+    """Video tasks: render with Seedance (fal.ai) and persist to object storage. Returns (final, url, path, credits)."""
+    await db.tasks.update_one({"id": task_id}, {"$set": {"status": "running", "summary": "Membuat video dengan Seedance...", "updated_at": now_iso()}})
+    video_url, video_path, credits = None, None, 0
+    try:
+        from video_gen import generate_seedance_video
+        from storage import store_remote_video
+        video_url = await asyncio.to_thread(generate_seedance_video, goal)
+        if video_url:
+            credits = 80
+            await record_usage(user_id, "video_generation", 80, {"task_id": task_id})
+            video_path = await asyncio.to_thread(store_remote_video, video_url, user_id, task_id)
+            final += "\n\n## Video\nVideo berhasil dibuat dengan Seedance dan disimpan permanen."
+        else:
+            final += "\n\n> Catatan: eksekusi video tidak mengembalikan hasil."
+    except Exception as ve:
+        final += f"\n\n> Catatan: eksekusi video gagal ({str(ve)[:120]}). Rencana di atas tetap tersedia."
+    return final, video_url, video_path, credits
+
+
 async def _orchestrate(task_id: str, user_id: str, goal: str, model_key: str = None):
     try:
-        task = await db.tasks.find_one({"id": task_id})
         await db.tasks.update_one({"id": task_id}, {"$set": {"status": "running", "updated_at": now_iso()}})
-
-        # 1. Coordinator plans
-        plan_sys = (
-            "You are the orchestration coordinator of a team of AI agents. Break the user's goal into 2-4 concrete "
-            "subtasks. For each subtask choose one role from: Research, Planning, Writing, Analyst, Coding. "
-            'Respond JSON: {"plan_summary": str, "subtasks": [{"role": str, "title": str, "instruction": str}]}'
-        )
-        plan = await llm_json(plan_sys, f"Goal: {goal}", model_key)
-        subtasks = plan.get("subtasks", [])[:4]
-        if not subtasks:
-            subtasks = [{"role": "Writing", "title": "Complete request", "instruction": goal}]
-        credits_total = text_credits(goal, json.dumps(plan))
-
-        steps = []
-        for st in subtasks:
-            steps.append({
-                "id": new_id(), "role": st.get("role", "Writing"), "title": st.get("title", "Subtask"),
-                "instruction": st.get("instruction", goal), "status": "pending", "output": "", "created_at": now_iso(),
-            })
-        await db.tasks.update_one({"id": task_id}, {"$set": {
-            "steps": steps, "summary": plan.get("plan_summary", ""), "updated_at": now_iso()}})
-
-        # 2. Run each subtask
-        outputs = []
+        steps, credits_total = await _plan_steps(task_id, goal, model_key)
         for step in steps:
-            step["status"] = "running"
-            await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "updated_at": now_iso()}})
-            role = step["role"] if step["role"] in ROLE_PROMPTS else "Writing"
-            sys = ROLE_PROMPTS[role] + " Keep the output focused and useful."
-            prompt = f"Overall goal: {goal}\n\nYour subtask: {step['title']}\nInstructions: {step['instruction']}"
-            try:
-                out = await llm_text(sys, prompt, model_key)
-            except Exception:
-                out = ""
-            if not out:
-                try:
-                    out = await llm_text(sys, prompt, model_key)  # retry once
-                except Exception:
-                    out = "(This subtask could not be completed.)"
-            step["output"] = out
-            step["status"] = "completed"
-            credits_total += text_credits(prompt, out)
-            outputs.append(f"### {step['title']} ({role})\n{out}")
-            await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "updated_at": now_iso()}})
-
-        # 3. Coordinator + Reviewer merge
-        merge_sys = (
-            "You are the orchestration coordinator with a Reviewer. Combine the agents' outputs into a single, "
-            "coherent, well-structured final deliverable in markdown. Remove redundancy, ensure consistency, "
-            "and add a short executive summary at the top."
-        )
-        merge_prompt = f"Goal: {goal}\n\nAgent outputs:\n\n" + "\n\n".join(outputs)
-        final = await llm_text(merge_sys, merge_prompt, model_key)
-        credits_total += text_credits(merge_prompt, final)
-
-        # Execute video generation for video tasks (Seedance via fal.ai Universal Key)
-        video_url = None
-        video_path = None
+            credits_total += await _run_step(task_id, goal, step, steps, model_key)
+        final, used = await _merge_outputs(goal, steps, model_key)
+        credits_total += used
+        video_url = video_path = None
         if _classify(goal) == "video":
-            await db.tasks.update_one({"id": task_id}, {"$set": {"status": "running", "summary": "Membuat video dengan Seedance...", "updated_at": now_iso()}})
-            try:
-                from video_gen import generate_seedance_video
-                from storage import store_remote_video
-                video_url = await asyncio.to_thread(generate_seedance_video, goal)
-                if video_url:
-                    credits_total += 80
-                    await record_usage(user_id, "video_generation", 80, {"task_id": task_id})
-                    # Persist to permanent object storage so the clip never expires
-                    video_path = await asyncio.to_thread(store_remote_video, video_url, user_id, task_id)
-                    final += "\n\n## Video\nVideo berhasil dibuat dengan Seedance dan disimpan permanen."
-                else:
-                    final += "\n\n> Catatan: eksekusi video tidak mengembalikan hasil."
-            except Exception as ve:
-                final += f"\n\n> Catatan: eksekusi video gagal ({str(ve)[:120]}). Rencana di atas tetap tersedia."
-
+            final, video_url, video_path, used = await _attach_video(task_id, user_id, goal, final)
+            credits_total += used
         await record_usage(user_id, "multi_agent_task", credits_total, {"task_id": task_id})
         await db.tasks.update_one({"id": task_id}, {"$set": {
             "status": "completed", "final_output": final, "credits_used": credits_total,

@@ -66,7 +66,7 @@ class TestRegister:
         assert u["credits"] == 700
         assert u["daily_credit_limit"] == 100
         assert u.get("trial_ends_at")
-        assert u.get("is_platform_admin") is False
+        assert not (u.get("is_platform_admin"))
 
     def test_me_matches(self, trial_user):
         r = requests.get(f"{BASE}/api/auth/me", headers=_hdr(trial_user["token"]), timeout=20)
@@ -76,7 +76,7 @@ class TestRegister:
         assert u["credits"] == 700
         assert u["daily_credit_limit"] == 100
         assert u["role"] == "admin"
-        assert u["is_platform_admin"] is False
+        assert not (u["is_platform_admin"])
         assert u["trial_ends_at"]
 
 

@@ -1,4 +1,7 @@
-import asyncio, json, os, subprocess
+import asyncio
+import json
+import os
+import subprocess
 import websockets
 
 API = "https://ai-companion-test-5.preview.emergentagent.com/api"

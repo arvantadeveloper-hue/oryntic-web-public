@@ -96,18 +96,8 @@ async def delete_reminder(rid: str, u: dict = Depends(current_user)):
     return {"ok": True}
 
 
-@router.post("/{rid}/respond")
-async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
-    r = await db.reminders.find_one({"id": rid, "user_id": u["id"]})
-    if not r:
-        raise HTTPException(404, "Reminder not found")
-    if x.action == "decline":
-        await db.reminders.update_one({"id": rid}, {"$set": {"status": "declined"}})
-        return {"status": "declined"}
-    # accept -> generate reminder message from real data only
-    persona = await _reminder_persona(r, u)
-    persona_name = persona["name"] if persona else "Asisten"
-    pending = await db.tasks.count_documents({"user_id": u["id"], "status": {"$in": ["queued", "running"]}})
+async def _reminder_message(r: dict, u: dict, persona_name: str, pending: int):
+    """LLM-spoken reminder (TTS path). Returns (message, credits)."""
     sys = (
         f"You are {persona_name}, delivering a short, warm, friendly PROACTIVE VOICE reminder, as if speaking on a phone call. "
         f"You MUST speak in {_lang_name(u)}. Sound human, caring and natural (not robotic). Greet the user by name. "
@@ -117,38 +107,57 @@ async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
         f"User name: {u.get('name')}. Reminder title: {r['title']}. Details: {r['description']}. "
         f"Scheduled start: {r['start_at']}. The user currently has {pending} task(s) still in progress."
     )
+    msg = await llm_text(sys, prompt)
+    used = text_credits(prompt, msg)
+    await record_usage(u["id"], "reminder_call", used, {"reminder_id": r["id"]})
+    return msg, used
+
+
+async def _private_conv(u: dict, persona: dict) -> dict:
+    """Find or create the 1:1 conversation used for the reminder call."""
+    conv = await db.conversations.find_one({"user_id": u["id"], "type": "private", "persona_id": persona["id"]}, {"_id": 0})
+    if conv:
+        return conv
+    conv = {
+        "id": new_id(), "user_id": u["id"], "workspace_id": u.get("owner_id") or u["id"],
+        "participants": [u["id"]], "type": "private",
+        "persona_ids": [persona["id"]], "persona_id": persona["id"],
+        "members": [{"id": persona["id"], "name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}],
+        "title": f"Chat dengan {persona['name']}", "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
+    }
+    await db.conversations.insert_one(dict(conv))
+    return conv
+
+
+async def _store_opening(conv: dict, persona: dict, msg: str, used: int):
+    await db.messages.insert_one({
+        "id": new_id(), "conversation_id": conv["id"], "role": "assistant", "content": msg,
+        "persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"),
+        "credits": used, "created_at": now_iso(),
+    })
+    await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "last_message": msg[:120]}})
+
+
+@router.post("/{rid}/respond")
+async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
+    r = await db.reminders.find_one({"id": rid, "user_id": u["id"]})
+    if not r:
+        raise HTTPException(404, "Reminder not found")
+    if x.action == "decline":
+        await db.reminders.update_one({"id": rid}, {"$set": {"status": "declined"}})
+        return {"status": "declined"}
+    persona = await _reminder_persona(r, u)
+    persona_name = persona["name"] if persona else "Asisten"
+    pending = await db.tasks.count_documents({"user_id": u["id"], "status": {"$in": ["queued", "running"]}})
     opening = (f"Judul pengingat: {r['title']}. Detail: {r.get('description') or '-'}. Jadwal mulai: {r['start_at']}. "
                f"Tugas yang masih berjalan: {pending}.")
-    if x.realtime and persona:
-        msg, used = None, 0
-    else:
-        msg = await llm_text(sys, prompt)
-        used = text_credits(prompt, msg)
-        await record_usage(u["id"], "reminder_call", used, {"reminder_id": rid})
+    msg, used = (None, 0) if (x.realtime and persona) else await _reminder_message(r, u, persona_name, pending)
     await db.reminders.update_one({"id": rid}, {"$set": {"status": "answered", "message": msg or ""}})
-
     result = {"status": "answered", "message": msg, "persona_name": persona_name, "opening": opening}
-    # If a persona is attached, set up/continue a real voice call conversation
     if persona:
-        conv = await db.conversations.find_one({"user_id": u["id"], "type": "private", "persona_id": persona["id"]}, {"_id": 0})
-        if not conv:
-            cid = new_id()
-            conv = {
-                "id": cid, "user_id": u["id"], "workspace_id": u.get("owner_id") or u["id"],
-                "participants": [u["id"]], "type": "private",
-                "persona_ids": [persona["id"]], "persona_id": persona["id"],
-                "members": [{"id": persona["id"], "name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}],
-                "title": f"Chat dengan {persona['name']}", "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
-            }
-            await db.conversations.insert_one(dict(conv))
+        conv = await _private_conv(u, persona)
         if msg:
-            # store the spoken reminder as the assistant's opening message in the call
-            await db.messages.insert_one({
-                "id": new_id(), "conversation_id": conv["id"], "role": "assistant", "content": msg,
-                "persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"),
-                "credits": used, "created_at": now_iso(),
-            })
-            await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "last_message": msg[:120]}})
+            await _store_opening(conv, persona, msg, used)
         result["persona"] = {"id": persona["id"], "name": persona["name"], "portrait": persona.get("portrait"), "voice": persona.get("voice", "alloy")}
         result["conversation"] = conv
     return result

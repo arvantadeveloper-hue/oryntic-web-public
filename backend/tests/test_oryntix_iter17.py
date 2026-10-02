@@ -176,7 +176,7 @@ class TestImageTool:
                           headers=demo_h, timeout=30)
         assert c.status_code == 200, c.text
         body = c.json()
-        assert body.get("tool_cancelled") is True
+        assert body.get("tool_cancelled")
         assert not body.get("pending_tool")
 
     def test_image_pending_then_run(self, demo_h):

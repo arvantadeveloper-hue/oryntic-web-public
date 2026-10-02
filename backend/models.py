@@ -5,5 +5,5 @@ router = APIRouter(prefix="/api", tags=["models"])
 
 
 @router.get("/models")
-async def list_models():
+async def list_models() -> dict:
     return {"models": MODEL_CATALOG, "default": DEFAULT_MODEL_KEY}

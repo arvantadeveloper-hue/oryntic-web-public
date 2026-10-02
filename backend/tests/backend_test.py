@@ -64,7 +64,7 @@ class TestAuth:
         assert "access_token" in data
         assert data["user"]["email"] == TEST_EMAIL.lower()
         assert data["user"]["credits"] == 500
-        assert data["user"]["onboarded"] is False
+        assert not (data["user"]["onboarded"])
         state["token"] = data["access_token"]
         state["user_id"] = data["user"]["id"]
 
@@ -103,7 +103,7 @@ class TestAuth:
             "interests": "ai, testing"
         }, headers=auth_headers(state["token"]))
         assert r.status_code == 200
-        assert r.json()["onboarded"] is True
+        assert r.json()["onboarded"]
         assert r.json()["settings"]["app_language"] == "en"
 
     def test_admin_login(self, s):
@@ -358,7 +358,7 @@ class TestWallet:
                    headers=auth_headers(state["token"]))
         assert r.status_code == 200
         assert r.json()["added"] == 500
-        assert r.json()["simulated"] is True
+        assert r.json()["simulated"]
         after = s.get(f"{API}/wallet", headers=auth_headers(state["token"])).json()["available"]
         assert after - before == 500
 

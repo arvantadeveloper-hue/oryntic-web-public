@@ -16,7 +16,8 @@ SEEDANCE_ENDPOINT = os.environ.get("SEEDANCE_ENDPOINT", "fal-ai/bytedance/seedan
 def _headers(extra=None):
     h = {"Authorization": f"Bearer {EMERGENT_LLM_KEY}", "Content-Type": "application/json"}
     if os.environ.get("job_id"):
-        h["X-App-ID"] = os.environ["job_id"]; h["X-Job-ID"] = os.environ["job_id"]
+        h["X-App-ID"] = os.environ["job_id"]
+        h["X-Job-ID"] = os.environ["job_id"]
     if os.environ.get("run_id"):
         h["X-Environment-ID"] = os.environ["run_id"]
     if extra:

@@ -112,7 +112,7 @@ class TestModerate:
         msgs = requests.get(f"{API}/conversations/{meeting_conv}/messages", headers=_h(admin_token), timeout=30).json()["messages"]
         mod_msgs = [m for m in msgs if m.get("persona_id") == "__moderator__"]
         assert len(mod_msgs) >= 1, "moderator message not persisted"
-        assert mod_msgs[-1].get("is_moderator") is True
+        assert mod_msgs[-1].get("is_moderator")
 
         # admin credits should drop (meeting_moderation recorded)
         me2 = requests.get(f"{API}/auth/me", headers=_h(admin_token), timeout=30).json()

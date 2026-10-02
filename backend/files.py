@@ -27,22 +27,26 @@ def _verify(token: str) -> str:
         raise HTTPException(401, "Invalid or expired token") from exc
 
 
+def _bearer(authorization: Optional[str], auth: Optional[str]) -> str:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1]
+    if auth:
+        return auth
+    raise HTTPException(401, "Not authenticated")
+
+
+def _path_parts(path: str) -> list:
+    """Files are namespaced by owner user id: aivora/{kind}/{user_id}/..."""
+    parts = path.split("/")
+    if any(seg in ("", ".", "..") for seg in parts) or "\\" in path or len(parts) < 4 or parts[0] != "aivora":
+        raise HTTPException(403, "Forbidden")
+    return parts
+
+
 @router.get("/{path:path}")
 async def serve_file(path: str, authorization: Optional[str] = Header(None), auth: Optional[str] = Query(None)):
-    token = None
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(" ", 1)[1]
-    elif auth:
-        token = auth
-    if not token:
-        raise HTTPException(401, "Not authenticated")
-    uid = _verify(token)
-    # Files are namespaced by owner user id: aivora/{kind}/{user_id}/...; readable by the whole workspace
-    parts = path.split("/")
-    if any(seg in ("", ".", "..") for seg in parts) or "\\" in path:
-        raise HTTPException(403, "Forbidden")
-    if len(parts) < 4 or parts[0] != "aivora":
-        raise HTTPException(403, "Forbidden")
+    uid = _verify(_bearer(authorization, auth))
+    parts = _path_parts(path)
     if parts[2] != uid and not await _same_workspace(uid, parts[2]):
         raise HTTPException(403, "Forbidden")
     try:
