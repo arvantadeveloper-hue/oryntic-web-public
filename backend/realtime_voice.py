@@ -15,6 +15,8 @@ from chat import _can_access, _persona_system, _history_text
 from realtime import notify
 from ratelimit import rate_limit, get_limits, set_limits
 from pricing import usd_to_credits, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates
+from tools import get_routing
+from llm import MODEL_CATALOG
 
 router = APIRouter(prefix="/api", tags=["realtime-voice"])
 
@@ -90,10 +92,53 @@ async def admin_set_limits(x: LimitsIn, _: dict = Depends(require_platform_admin
     return await set_limits(x.model_dump())
 
 
-MULTI_STYLE = ("You are in a LIVE SPOKEN MEETING with the user and other AI assistants: {others}. You hear the user directly. "
-               "What the other assistants say is delivered to you as text messages prefixed with their name in brackets. "
-               "Speak ONLY when a response is requested from you. Keep each turn to 1-3 short spoken sentences, build on what "
-               "others said without repeating them, never speak for them, and address the user by name now and then.")
+MODERATOR_STYLE = ("You are the MODERATOR of a LIVE SPOKEN MEETING between the user and these AI assistants:\n{panel}\n"
+                   "You are the one who talks with the user: listen, answer directly and naturally, and keep the meeting moving. "
+                   "The other assistants speak ONLY when the user asks them by name or when you hand them the floor. Hand over "
+                   "(call the `delegate` tool) ONLY when the topic clearly matches another assistant's specialty — e.g. IT/coding "
+                   "questions go to the IT expert. When you delegate: say ONE short handover sentence (e.g. \"Let me ask {{name}} to "
+                   "explain this\"), then call the tool; never answer on their behalf. After they finish, their words come back as the "
+                   "tool result: complement or agree in 1-2 short sentences, then hand back to the user. What the other assistants "
+                   "say otherwise arrives as text prefixed with their name in brackets. Keep each turn to 1-4 short spoken sentences.")
+PANELIST_STYLE = ("You are a PARTICIPANT in a LIVE SPOKEN MEETING with the user, the moderator {moderator} and other assistants: {others}. "
+                  "You do NOT hear audio: everything the user and the others say reaches you as text prefixed with the speaker's name in "
+                  "brackets. Speak ONLY when a response is requested from you (the moderator handed you the floor or the user asked you by "
+                  "name). Answer the actual question in 2-5 short spoken sentences, no greetings, do not repeat what others said, "
+                  "never speak for the others, and end by handing back to the moderator or the user.")
+PROVIDER_HINT = {"anthropic": "IT, coding, writing & deep analysis", "gemini": "research, multimodal & long documents", "openai": "general, creative & everyday tasks"}
+
+
+def delegate_tool(names: list) -> dict:
+    return {"type": "function", "name": "delegate",
+            "description": "Hand the floor to another assistant whose specialty matches the user's current question. Say one short handover sentence before calling.",
+            "parameters": {"type": "object", "properties": {
+                "assistant": {"type": "string", "enum": names, "description": "Name of the assistant who should answer"},
+                "brief": {"type": "string", "description": "One sentence: what the user wants them to explain"}},
+                "required": ["assistant", "brief"]}}
+
+
+def _specialty(p: dict, routing: dict) -> str:
+    m = next((x for x in MODEL_CATALOG if x["id"] == p.get("model")), MODEL_CATALOG[0])
+    hints = []
+    if p.get("model") == routing.get("it_model"):
+        hints.append("THE IT/CODING EXPERT")
+    if p.get("model") == routing.get("research_model"):
+        hints.append("THE RESEARCH EXPERT")
+    hints.append(PROVIDER_HINT.get(m["provider"], ""))
+    desc = ((p.get("profile") or {}).get("system_instructions") or "").strip().replace("\n", " ")[:160]
+    return f"- {p['name']} — model {m['label']} ({'; '.join(h for h in hints if h)}). Profile: {desc}"
+
+
+async def _voice_context(cid: str) -> str:
+    """Compact context for the voice session: short memory summary + last 6 messages (keeps cached prefix small)."""
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0, "memory_summary": 1}) or {}
+    parts = []
+    if conv.get("memory_summary"):
+        parts.append(f"[Summary of earlier conversation]: {conv['memory_summary'][:600]}")
+    recent = (await _history_text(cid, limit=6, with_summary=False)).strip()
+    if recent:
+        parts.append(recent[-1000:])
+    return "\n".join(parts)
 
 
 class CallIn(BaseModel):
@@ -126,21 +171,31 @@ async def _close_stale_calls(user_id: str):
                                         {"$set": {"status": "ended", "ended_at": now_iso(), "stale": True}})
 
 
-async def _session_instructions(persona: dict, u: dict, roster: list, history: str, opening, is_first: bool, title: str = "") -> str:
+async def _session_instructions(persona: dict, u: dict, roster: list, history: str, opening, role: str, title: str = "", panel: str = "") -> str:
+    """Static persona/style first (cacheable prefix), per-call context last."""
     text = await _persona_system(persona, u, None, voice_mode=True) + "\n\n" + SPEAKING_STYLE
-    if len(roster) > 1:
-        text += "\n\n" + MULTI_STYLE.format(others=", ".join(n for n in roster if n != persona["name"])) + "\n" + NO_REPEAT
-    if history.strip():
-        text += f"\n\nRecent conversation with the user (for context):\n{history[-3000:]}"
     uname = u.get("name") or "the user"
-    if is_first and opening:
+    if role == "moderator":
+        text += "\n\n" + MODERATOR_STYLE.format(panel=panel) + "\n" + NO_REPEAT
+    elif role == "panelist":
+        others = [n for n in roster if n not in (persona["name"], roster[0])]
+        text += "\n\n" + PANELIST_STYLE.format(moderator=roster[0], others=", ".join(others) or "none") + "\n" + NO_REPEAT
+    if history.strip():
+        text += f"\n\nRecent conversation with the user (for context):\n{history}"
+    if role == "solo" and opening:
         text += (f"\n\nYOU ARE CALLING THE USER. Open the call immediately by delivering this reminder warmly in 2-3 short "
                  f"spoken sentences, greeting {uname} by name, then ask if they need anything: {opening}")
-    elif is_first and len(roster) > 1:
+    elif role == "moderator":
         text += "\n\n" + MODERATOR_OPENING.format(uname=uname, roster=", ".join(roster), title=title or "meeting")
-    elif is_first:
+    elif role == "solo":
         text += f"\n\nThe user just joined. Greet {uname} briefly and warmly, then let them talk."
     return text
+
+
+def _order_personas(personas: list, conv: dict) -> list:
+    mod_id = conv.get("moderator_persona_id")
+    idx = next((i for i, p in enumerate(personas) if p["id"] == mod_id), 0)
+    return [personas[idx]] + [p for i, p in enumerate(personas) if i != idx]
 
 
 @router.post("/realtime/calls")
@@ -151,28 +206,48 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
     await rate_limit(u, "calls")
-    personas = await _call_personas(conv, u)
+    personas = _order_personas(await _call_personas(conv, u), conv)
     cpm = credits_per_min(await get_pricing())
     await _ensure_affordable(u, len(personas), cpm)
     await _close_stale_calls(u["id"])
 
-    history = await _history_text(conv["id"], limit=12)
+    history = await _voice_context(conv["id"])
     roster = [q["name"] for q in personas]
+    multi = len(personas) > 1
+    routing = await get_routing()
+    panel = "\n".join(_specialty(p, routing) for p in personas[1:]) if multi else ""
     group_id = new_id()
     sessions = []
     for i, persona in enumerate(personas):
+        role = "solo" if not multi else ("moderator" if i == 0 else "panelist")
         call = {"id": new_id(), "group_id": group_id, "conversation_id": conv["id"], "user_id": u["id"], "persona_id": persona["id"],
-                "voice": VOICE_MAP.get(persona.get("voice", "alloy"), "marin"),
-                "instructions": await _session_instructions(persona, u, roster, history, x.opening, i == 0, conv.get("title", "")),
-                "multi": len(personas) > 1, "primary": i == 0, "status": "created", "billed_minutes": 0, "credits": 0, "credits_per_min": cpm,
+                "voice": VOICE_MAP.get(persona.get("voice", "alloy"), "marin"), "role": role, "roster": roster,
+                "instructions": await _session_instructions(persona, u, roster, history, x.opening, role, conv.get("title", ""), panel),
+                "multi": multi, "primary": i == 0, "status": "created", "billed_minutes": 0, "credits": 0, "credits_per_min": cpm,
                 "created_at": now_iso(), "started_at": None, "ended_at": None, "seconds": 0}
         await db.realtime_calls.insert_one(dict(call))
-        sessions.append({"call_id": call["id"], "voice": call["voice"], "primary": i == 0,
+        sessions.append({"call_id": call["id"], "voice": call["voice"], "primary": i == 0, "role": role,
                          "persona": {"id": persona["id"], "name": persona["name"], "portrait": persona.get("portrait")}})
     first = sessions[0]
     return {"call_id": first["call_id"], "voice": first["voice"], "persona": first["persona"], "model": REALTIME_MODEL,
-            "credits_per_min": cpm, "credits_per_min_total": cpm * len(sessions), "multi": len(personas) > 1, "group_id": group_id,
+            "credits_per_min": cpm, "credits_per_min_total": cpm * len(sessions), "multi": multi, "group_id": group_id,
+            "moderator_persona_id": personas[0]["id"],
             "sessions": sessions, "language": ((u.get("settings") or {}).get("conversation_language") or "id")}
+
+
+class ModeratorIn(BaseModel):
+    persona_id: str
+
+
+@router.patch("/conversations/{cid}/moderator")
+async def set_moderator(cid: str, x: ModeratorIn, u: dict = Depends(current_user)):
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    if x.persona_id not in (conv.get("persona_ids") or []):
+        raise HTTPException(400, "Persona bukan peserta meeting ini")
+    await db.conversations.update_one({"id": cid}, {"$set": {"moderator_persona_id": x.persona_id, "updated_at": now_iso()}})
+    return {"ok": True, "moderator_persona_id": x.persona_id}
 
 
 async def _own_call(call_id: str, u: dict) -> dict:
@@ -199,9 +274,12 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
     settings = u.get("settings") or {}
     lang = settings.get("conversation_language") or "id"
     multi = bool(call.get("multi"))
-    audio_in = {"turn_detection": vad_config(request.query_params.get("sensitivity") or settings.get("mic_sensitivity"), multi)}
-    if not multi or call.get("primary"):
-        audio_in["transcription"] = {"model": "gpt-4o-mini-transcribe", "language": lang}
+    role = call.get("role") or ("moderator" if multi and call.get("primary") else "panelist" if multi else "solo")
+    if role == "panelist":
+        audio_in = {"turn_detection": None}  # no mic audio: the user's words arrive as text (saves audio input tokens)
+    else:
+        audio_in = {"turn_detection": vad_config(request.query_params.get("sensitivity") or settings.get("mic_sensitivity"), multi),
+                    "transcription": {"model": "gpt-4o-mini-transcribe", "language": lang}}
     session = {
         "type": "realtime",
         "model": REALTIME_MODEL,
@@ -209,6 +287,9 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         "output_modalities": ["audio"],
         "audio": {"input": audio_in, "output": {"voice": call["voice"]}},
     }
+    if role == "moderator":
+        session["tools"] = [delegate_tool([n for n in call.get("roster", [])[1:]])]
+        session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post("https://api.openai.com/v1/realtime/calls",
                               headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},

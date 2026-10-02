@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
-import { vadUpdate, reportUsage } from "../lib/realtimeSession";
+import { vadUpdate, reportUsage, ContextPruner } from "../lib/realtimeSession";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
@@ -40,6 +40,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
   const endedRef = useRef(false);
   const tickRef = useRef(null);
   const runIdRef = useRef(0);
+  const prunerRef = useRef(null);
 
   const secs = () => (startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0);
 
@@ -76,6 +77,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
 
   const handleEvent = (ev) => {
     reportUsage(callIdRef.current, ev);
+    prunerRef.current?.onEvent(ev);
     switch (ev.type) {
       case "session.created":
       case "session.updated":
@@ -102,9 +104,10 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
       }
       case "response.done":
         flushLive();
+        prunerRef.current?.prune();
         setPhase((p) => (p === "user_speaking" ? p : "listening")); break;
       case "error":
-        toast.error(ev.error?.message || "Realtime error"); break;
+        if (!/item/i.test(ev.error?.message || "")) toast.error(ev.error?.message || "Realtime error"); break;
       default: break;
     }
   };
@@ -124,6 +127,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
       pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; monitor(e.streams[0]); };
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
       const dc = pc.createDataChannel("oai-events"); dcRef.current = dc;
+      prunerRef.current = new ContextPruner({ send });
       dc.onmessage = (e) => { try { handleEvent(JSON.parse(e.data)); } catch (err) {} };
       dc.onopen = () => {
         startedAtRef.current = Date.now(); setPhase("listening");

@@ -193,6 +193,14 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **UI**: `ErrorBoundary` global (anti layar putih), PDF dideteksi dari ekstensi + batas 8MB, sidebar sticky `h-screen` (Workspace Usage & Logout selalu tampil), login Microsoft & "Lihat Video" dihapus, tombol Google (placeholder menunggu Client ID/Secret).
 - Bug "layar putih upload PDF" **tidak tereproduksi** di preview (PDF 16KB & 3MB OK) — ErrorBoundary + validasi ditambahkan; minta user cek ulang di versi deploy terbaru.
 
+## Update 2026-06 (v) — Hemat token Realtime + meeting dipandu Moderator (belum diuji suara nyata)
+- **Konteks kompak** (`_voice_context`): ringkasan ≤600 char + 6 pesan terakhir ≤1000 char (sebelumnya 12 pesan/3000 char); instruksi statis di depan, konteks di akhir (prefix cache stabil).
+- **Pemangkasan konteks klien** (`ContextPruner` di `realtimeSession.js`): item audio lama (≥14 item, sisakan 6) dihapus (`conversation.item.delete`) dan diganti 1 item teks ringkas di `previous_item_id:"root"`; dipanggil antar giliran (`response.done` di RealtimeCall, saat antrian kosong di RealtimeMeeting).
+- **Meeting Moderator** (`realtime_voice.py`): persona pertama / `conversation.moderator_persona_id` = moderator (`role: moderator`, mic + transkripsi + tool `delegate` enum nama panelis); panelis (`role: panelist`) **tanpa audio masuk** (`turn_detection: null`, WebRTC `recvonly`), menerima ucapan user & agen lain sebagai teks `[Nama]: ...`, bicara hanya saat disebut namanya atau didelegasikan. Alur: moderator `response.function_call_arguments.done` → panelis menjawab → `function_call_output` ke moderator → moderator melengkapi 1-2 kalimat. `PATCH /conversations/{cid}/moderator` + picker di header meeting (menyambung ulang).
+- **Hanya bicara saat diminta**: moderator TTS terpisah, `/moderate` silence 20 dtk & "stuck" dihapus dari RealtimeMeeting (endpoint masih ada untuk VideoRoom lama). Bug `reportUsage(ev)` sebelum parse di RealtimeSession diperbaiki (usage meeting kini tertagih).
+- Spesialisasi panel dari `get_routing()` (it_model → "THE IT/CODING EXPERT", research_model → "THE RESEARCH EXPERT") + `PROVIDER_HINT`.
+
+
 ## Backlog batch berikut (menunggu kunci dari user)
 - SMTP Gmail (host, user, app-password, from) → verifikasi email + undangan tim via email (status menunggu/bergabung/ditolak, tim buat akun sendiri).
 - Google OAuth sendiri (Client ID/Secret) → login Google.

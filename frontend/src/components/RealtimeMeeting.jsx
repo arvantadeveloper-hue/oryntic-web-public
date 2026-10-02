@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap, Gavel } from "lucide-react";
 import { toast } from "sonner";
-import { api, API_BASE, getToken } from "../lib/api";
+import { api } from "../lib/api";
 import { RealtimeSession } from "../lib/realtimeSession";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
@@ -12,13 +12,13 @@ import { Tile } from "./VideoRoom";
 import { useAuth } from "../context/AuthContext";
 
 const ME = "__me__";
-const MOD = "__moderator__";
-const SILENCE_MS = 20000;
+const nameIn = (text, name) => !!name && new RegExp(`(^|[^\\p{L}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "iu").test(text);
 
-// Multi-assistant meeting where every agent has its own Realtime voice; the browser orchestrates turns.
+// Moderator-led meeting: one assistant (the moderator) hears the user and talks; panelists only receive text and speak when asked or delegated to.
 export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }) {
   const { user } = useAuth();
   const members = conv.members || [];
+  const [modId, setModId] = useState(conv.moderator_persona_id || members[0]?.id);
   const [phase, setPhase] = useState("connecting"); // connecting|listening|user_speaking|responding|ending
   const [statusMap, setStatusMap] = useState({});
   const [levels, setLevels] = useState({});
@@ -33,7 +33,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const [layout, setLayout] = useMeetingLayout();
   const notulen = useNotulenGate(cid);
 
-  const sessionsRef = useRef([]); // RealtimeSession[]
+  const sessionsRef = useRef([]); // RealtimeSession[], [0] = moderator
   const pipeRef = useRef(null);
   const bargeTimerRef = useRef(null);
   const startedAtRef = useRef(null);
@@ -41,21 +41,22 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const runIdRef = useRef(0);
   const tickRef = useRef(null);
   const rafRef = useRef(null);
-  const queueRef = useRef([]); // callIds waiting to speak this turn
+  const queueRef = useRef([]); // [{callId, instructions}]
   const activeRef = useRef(null); // callId currently speaking
   const liveRef = useRef({}); // callId -> transcript buffer
-  const rotateRef = useRef(0);
+  const saidRef = useRef({}); // callId -> last full transcript
+  const delegationRef = useRef(null); // {call_id, assistant, brief} from the moderator's tool call
+  const returnRef = useRef(null); // {call_id, name, callId} panelist answering on behalf of the moderator
   const doneTimerRef = useRef(null);
   const userTimerRef = useRef(null);
-  const silenceTimerRef = useRef(null);
-  const modAudioRef = useRef(null);
-  const userTurnsRef = useRef(0);
-  const turnHadAgentRef = useRef(false);
   const msgCountRef = useRef(0);
 
   const secs = () => (startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0);
   const setStatus = (id, s) => setStatusMap((m) => ({ ...m, [id]: s }));
   const byCall = (callId) => sessionsRef.current.find((s) => s.callId === callId);
+  const mod = () => sessionsRef.current[0];
+  const panelists = () => sessionsRef.current.slice(1);
+  const listening = () => { setPhase("listening"); setStatusMap({ [ME]: "listening" }); };
 
   const saveTranscript = (callId, role, content) => {
     if (!content.trim()) return;
@@ -72,49 +73,13 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     });
   };
 
-  // ---------- moderator (TTS, only when stuck or silent) ----------
-  const stopModerator = () => {
-    const a = modAudioRef.current; if (!a) return;
-    try { a.onended = null; a.pause(); URL.revokeObjectURL(a.src); } catch (e) {}
-    modAudioRef.current = null; setStatus(MOD, "");
-  };
-  const clearSilence = () => { if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; } };
-  const armSilence = () => {
-    clearSilence();
-    silenceTimerRef.current = setTimeout(() => { if (!endedRef.current && !activeRef.current && queueRef.current.length === 0 && !modAudioRef.current) moderatorSpeak("silence"); }, SILENCE_MS);
-  };
-  const moderatorSpeak = async (reason) => {
-    if (endedRef.current || modAudioRef.current) return;
-    try {
-      setStatus(MOD, "thinking");
-      const r = await api.post(`/conversations/${cid}/moderate`, { reason });
-      if (endedRef.current || activeRef.current || !r.data.content) { setStatus(MOD, ""); if (!activeRef.current && reason !== "silence") armSilence(); return; }
-      const text = r.data.content;
-      setCaption({ name: "Moderator", text });
-      sessionsRef.current.forEach((o) => o.inject(`[Moderator]: ${text}`));
-      const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: text.slice(0, 1500), voice: r.data.voice || "onyx" }) });
-      if (!res.ok || endedRef.current) { setStatus(MOD, ""); return; }
-      const a = new Audio(URL.createObjectURL(await res.blob())); modAudioRef.current = a;
-      setStatus(MOD, "speaking"); setPhase("responding");
-      a.onended = () => { stopModerator(); if (!endedRef.current) { setPhase("listening"); setStatusMap({ [ME]: "listening" }); if (reason !== "silence") armSilence(); } };
-      await a.play();
-      onRefresh && onRefresh();
-    } catch (e) { setStatus(MOD, ""); }
-  };
-
   // ---------- orchestration ----------
+  const enqueue = (s, instructions) => queueRef.current.push({ callId: s.callId, instructions });
+
   const planTurn = (userText) => {
-    const t = userText.toLowerCase();
-    const mentioned = sessionsRef.current.filter((s) => t.includes((s.persona.name || "").toLowerCase()) && s.persona.name);
-    let order;
-    if (mentioned.length === 1) order = mentioned;
-    else {
-      const all = sessionsRef.current;
-      const start = rotateRef.current % all.length; rotateRef.current += 1;
-      order = [...all.slice(start), ...all.slice(0, start)];
-      if (mentioned.length > 1) order = [...mentioned, ...order.filter((s) => !mentioned.includes(s))];
-    }
-    queueRef.current = order.map((s) => s.callId);
+    const asked = panelists().filter((s) => nameIn(userText, s.persona.name));
+    if (asked.length) asked.forEach((s) => enqueue(s, `${user?.name || "The user"} asked you directly. Answer the question in 2-5 short spoken sentences.`));
+    else enqueue(mod(), undefined);
     startNext();
   };
 
@@ -123,35 +88,51 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     if (doneTimerRef.current) { clearTimeout(doneTimerRef.current); doneTimerRef.current = null; }
     const next = queueRef.current.shift();
     if (!next) {
-      activeRef.current = null; setPhase("listening"); setStatusMap({ [ME]: "listening" });
-      if (turnHadAgentRef.current && userTurnsRef.current >= 2) { turnHadAgentRef.current = false; moderatorSpeak("stuck"); } else armSilence();
+      activeRef.current = null; listening();
+      sessionsRef.current.forEach((s) => s.pruner.prune());
       return;
     }
-    turnHadAgentRef.current = true;
-    activeRef.current = next;
-    setPhase("responding"); setStatusMap({ [byCall(next).persona.id]: "thinking" });
-    const isFirst = !liveRef.current.__turnStarted;
-    liveRef.current.__turnStarted = true;
-    byCall(next).respond(isFirst ? undefined : "Respond briefly to the user and to what the other assistants just said; add something new or a short agreement.");
+    const s = byCall(next.callId);
+    if (!s) { startNext(); return; }
+    activeRef.current = next.callId;
+    setPhase("responding"); setStatusMap({ [s.persona.id]: "thinking" });
+    s.respond(next.instructions);
   };
 
   const finishedSpeaking = (callId) => {
     if (activeRef.current !== callId) return;
-    setStatus(byCall(callId).persona.id, "");
+    const s = byCall(callId);
+    setStatus(s.persona.id, "");
+    if (s === mod() && delegationRef.current) {
+      const d = delegationRef.current; delegationRef.current = null;
+      const target = panelists().find((p) => p.persona.name === d.assistant) || panelists().find((p) => nameIn(d.assistant || "", p.persona.name));
+      if (target) {
+        returnRef.current = { call_id: d.call_id, name: target.persona.name, callId: target.callId };
+        enqueue(target, `The moderator handed you the floor: ${d.brief || "please answer the user's question"}. Answer in 2-5 short spoken sentences.`);
+      } else mod().toolOutput(d.call_id, { error: "assistant not found" });
+    } else if (returnRef.current?.callId === callId) {
+      const r = returnRef.current; returnRef.current = null;
+      mod().toolOutput(r.call_id, { assistant: r.name, said: saidRef.current[callId] || "" });
+      enqueue(mod(), `${r.name} just answered. Briefly complement or agree in 1-2 short sentences, then hand back to the user.`);
+    }
     startNext();
   };
 
+  const settleTools = () => {
+    if (delegationRef.current) { mod().toolOutput(delegationRef.current.call_id, { status: "interrupted by user" }); delegationRef.current = null; }
+    if (returnRef.current) { mod().toolOutput(returnRef.current.call_id, { status: "interrupted by user" }); returnRef.current = null; }
+  };
+
   const userInterrupted = () => {
-    clearSilence(); stopModerator();
-    queueRef.current = []; liveRef.current.__turnStarted = false;
+    queueRef.current = [];
     const act = activeRef.current;
     if (act) { byCall(act)?.cancel(); setStatus(byCall(act).persona.id, ""); }
-    activeRef.current = null;
+    activeRef.current = null; settleTools();
     if (doneTimerRef.current) { clearTimeout(doneTimerRef.current); doneTimerRef.current = null; }
     setPhase("user_speaking"); setStatus(ME, "speaking");
   };
 
-  // Like ChatGPT Voice: only a sustained voice near the mic (gate open ≥300ms) interrupts; stray sounds are ignored.
+  // Like ChatGPT Voice: only a sustained voice near the mic interrupts; stray sounds are ignored.
   const confirmInterrupt = () => {
     const openFor = pipeRef.current ? pipeRef.current.openFor() : Infinity;
     if (openFor >= BARGE_CONFIRM_MS) { userInterrupted(); return; }
@@ -174,27 +155,27 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     const pid = s.persona.id;
     switch (ev.type) {
       case "input_audio_buffer.speech_started":
-        if (s.primary) confirmInterrupt(); break;
+        confirmInterrupt(); break;
       case "input_audio_buffer.speech_stopped":
-        if (s.primary) {
-          setStatus(ME, "listening");
-          if (userTimerRef.current) clearTimeout(userTimerRef.current);
-          userTimerRef.current = setTimeout(() => { if (!activeRef.current && queueRef.current.length === 0 && !endedRef.current) { setPhase("listening"); setStatusMap({ [ME]: "listening" }); } }, 7000);
-        }
+        setStatus(ME, "listening");
+        if (userTimerRef.current) clearTimeout(userTimerRef.current);
+        userTimerRef.current = setTimeout(() => { if (!activeRef.current && queueRef.current.length === 0 && !endedRef.current) listening(); }, 7000);
         break;
       case "conversation.item.input_audio_transcription.failed":
-        if (s.primary && !activeRef.current) { setPhase("listening"); setStatusMap({ [ME]: "listening" }); }
+        if (!activeRef.current) listening();
         break;
-      case "conversation.item.input_audio_transcription.completed":
+      case "conversation.item.input_audio_transcription.completed": {
         if (userTimerRef.current) clearTimeout(userTimerRef.current);
-        if (s.primary && !(ev.transcript || "").trim()) { if (!activeRef.current) { setPhase("listening"); setStatusMap({ [ME]: "listening" }); } break; }
-        if (s.primary && ev.transcript) {
-          setCaption({ name: user?.name || "Anda", text: ev.transcript });
-          saveTranscript(s.callId, "user", ev.transcript);
-          userTurnsRef.current += 1;
-          liveRef.current.__turnStarted = false;
-          planTurn(ev.transcript);
-        }
+        const t = (ev.transcript || "").trim();
+        if (!t) { if (!activeRef.current) listening(); break; }
+        setCaption({ name: user?.name || "Anda", text: t });
+        saveTranscript(s.callId, "user", t);
+        panelists().forEach((o) => o.inject(`[${user?.name || "User"}]: ${t}`));
+        planTurn(t);
+        break;
+      }
+      case "response.function_call_arguments.done":
+        if (s === mod() && ev.name === "delegate") { let a = {}; try { a = JSON.parse(ev.arguments || "{}"); } catch (e) {} delegationRef.current = { call_id: ev.call_id, ...a }; }
         break;
       case "output_audio_buffer.started":
       case "response.output_audio.delta":
@@ -207,13 +188,15 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         const t = ev.transcript || liveRef.current[s.callId] || "";
         liveRef.current[s.callId] = "";
         if (t) {
+          saidRef.current[s.callId] = t;
           saveTranscript(s.callId, "assistant", t);
-          sessionsRef.current.forEach((o) => { if (o !== s) o.inject(`[${s.persona.name}]: ${t}`); });
+          const skipMod = returnRef.current?.callId === s.callId; // the moderator gets this via the tool result instead
+          sessionsRef.current.forEach((o) => { if (o !== s && !(skipMod && o === mod())) o.inject(`[${s.persona.name}]: ${t}`); });
         }
         break;
       }
       case "response.done":
-        if (liveRef.current[s.callId]) { const t = liveRef.current[s.callId]; liveRef.current[s.callId] = ""; saveTranscript(s.callId, "assistant", t); }
+        if (liveRef.current[s.callId]) { const t = liveRef.current[s.callId]; liveRef.current[s.callId] = ""; saidRef.current[s.callId] = t; saveTranscript(s.callId, "assistant", t); }
         // audio may still be playing; wait for the buffer to drain (fallback timer)
         if (activeRef.current === s.callId) { if (doneTimerRef.current) clearTimeout(doneTimerRef.current); doneTimerRef.current = setTimeout(() => finishedSpeaking(s.callId), 15000); }
         break;
@@ -221,7 +204,8 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
       case "output_audio_buffer.cleared":
         finishedSpeaking(s.callId); break;
       case "error":
-        if (ev.error?.code !== "response_cancel_not_active") toast.error(ev.error?.message || "Realtime error"); break;
+        if (!["response_cancel_not_active", "item_not_found"].includes(ev.error?.code) && !/item/i.test(ev.error?.message || "")) toast.error(ev.error?.message || "Realtime error");
+        break;
       default: break;
     }
   };
@@ -234,20 +218,18 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
       const c = await api.post("/realtime/calls", { conversation_id: cid });
       created = c.data.sessions;
       if (stale()) { created.forEach((x) => api.post(`/realtime/calls/${x.call_id}/end`, { elapsed_seconds: 0 }).catch(() => {})); return; }
-      setCpmTotal(c.data.credits_per_min_total);
+      setCpmTotal(c.data.credits_per_min_total); setModId(c.data.moderator_persona_id);
       const mic = new MicPipeline(micPrefs);
       const stream = await mic.start();
       if (stale()) { mic.stop(); return; }
       pipeRef.current = mic; setPipe(mic);
-      const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, stream, sensitivity: micPrefs.sensitivity, createResponse: created.length === 1, onEvent: handleEvent, onError: () => { if (!endedRef.current) { toast.message("Koneksi salah satu peserta terputus"); } } }));
+      const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, role: x.role, stream, sendAudio: x.role !== "panelist", sensitivity: micPrefs.sensitivity, createResponse: false, onEvent: handleEvent, onError: () => { if (!endedRef.current) toast.message("Koneksi salah satu peserta terputus"); } }));
       sessionsRef.current = sessions;
       await Promise.all(sessions.map((s) => s.connect()));
       if (stale()) return;
       startedAtRef.current = Date.now();
-      setPhase("listening"); setStatusMap({ [ME]: "listening" });
-      // the first assistant greets the room
-      activeRef.current = sessions[0].callId; setPhase("responding"); setStatus(sessions[0].persona.id, "thinking");
-      sessions[0].respond();
+      // the moderator opens the meeting
+      enqueue(sessions[0], undefined); startNext();
       tickRef.current = setInterval(async () => {
         try { await Promise.all(sessionsRef.current.map((s) => api.post(`/realtime/calls/${s.callId}/tick`, { elapsed_seconds: secs() }))); onRefresh && onRefresh(); }
         catch (e) { toast.error(e?.response?.data?.detail || "Kredit habis"); hangupAll(false); }
@@ -267,7 +249,6 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
     if (userTimerRef.current) clearTimeout(userTimerRef.current);
     if (bargeTimerRef.current) clearTimeout(bargeTimerRef.current);
-    clearSilence(); stopModerator();
     sessionsRef.current.forEach((s) => s.close());
     try { pipeRef.current?.stop(); } catch (e) {}
   };
@@ -275,6 +256,17 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const endSessions = () => {
     const s = secs();
     sessionsRef.current.forEach((x) => api.post(`/realtime/calls/${x.callId}/end`, { elapsed_seconds: s }).catch(() => {}));
+  };
+
+  const changeModerator = async (pid) => {
+    if (!pid || pid === modId) return;
+    try { await api.patch(`/conversations/${cid}/moderator`, { persona_id: pid }); } catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengganti moderator"); return; }
+    setModId(pid);
+    toast.message(`Moderator: ${members.find((m) => m.id === pid)?.name || "asisten"} — menyambungkan ulang...`);
+    flushLive(); cleanup(); endSessions();
+    sessionsRef.current = []; queueRef.current = []; activeRef.current = null; delegationRef.current = null; returnRef.current = null; liveRef.current = {}; startedAtRef.current = null;
+    setStatusMap({}); setCaption(null); setPhase("connecting");
+    connect(++runIdRef.current);
   };
 
   const hangupAll = async (withSummary) => {
@@ -303,8 +295,9 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
 
   const toggleMute = () => { const nv = !muted; setMuted(nv); pipeRef.current?.setMuted(nv); };
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0"), ss = String(elapsed % 60).padStart(2, "0");
-  const label = { connecting: "Menyambungkan semua peserta...", listening: "Mendengarkan Anda — bicara saja, sebut nama untuk bertanya ke agen tertentu. Moderator hanya menyela saat buntu/hening.", user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
-  const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait })), { id: MOD, isMod: true, name: "Moderator" }];
+  const modName = members.find((m) => m.id === modId)?.name || "Moderator";
+  const label = { connecting: "Menyambungkan semua peserta...", listening: `Mendengarkan Anda — ${modName} memandu; sebut nama asisten lain untuk minta pendapatnya.`, user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
+  const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait, isMod: m.id === modId }))];
 
   const participants = tiles.map((tl) => ({ ...tl, status: statusMap[tl.id] || "", level: tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0) }));
   const stage = (
@@ -343,9 +336,15 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
 
   return (
     <div className="fixed inset-0 z-[96] flex flex-col" style={{ background: "radial-gradient(1200px 500px at 50% -10%, #16213e 0%, #0a0f1f 60%)" }} data-testid="realtime-meeting">
-      <div className="flex items-center gap-3 px-4 py-3 text-white sm:px-6">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3 text-white sm:px-6">
         <span className="flex h-9 items-center gap-2 rounded-full bg-white/10 px-3 text-sm font-semibold backdrop-blur"><span className={`h-2 w-2 rounded-full ${phase === "connecting" ? "bg-amber-400 animate-pulse" : "bg-emerald-400"}`} /> {conv.title}</span>
-        <span className="flex items-center gap-1 rounded-full bg-[#2F6BFF]/20 px-2.5 py-1 text-[11px] font-bold text-[#8FB0FF]" data-testid="rtm-badge"><Zap size={11} /> Realtime · {members.length} agen + Moderator</span>
+        <span className="flex items-center gap-1 rounded-full bg-[#2F6BFF]/20 px-2.5 py-1 text-[11px] font-bold text-[#8FB0FF]" data-testid="rtm-badge"><Zap size={11} /> Realtime · {members.length} agen</span>
+        <label className="flex h-9 items-center gap-1.5 rounded-full bg-amber-400/15 px-3 text-xs font-semibold text-amber-200" data-testid="rtm-moderator-picker">
+          <Gavel size={13} /> Moderator
+          <select value={modId || ""} onChange={(e) => changeModerator(e.target.value)} disabled={phase === "connecting" || phase === "ending"} data-testid="rtm-moderator-select" className="rounded-md bg-transparent text-xs font-bold text-white outline-none disabled:opacity-60 [&>option]:text-slate-900">
+            {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </label>
         <span className="ml-auto font-mono text-sm text-white/80" data-testid="rtm-timer">{mm}:{ss}</span>
         {cpmTotal && <span className="hidden text-xs text-white/50 sm:block">{cpmTotal} kredit/mnt</span>}
       </div>

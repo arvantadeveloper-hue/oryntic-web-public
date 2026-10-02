@@ -269,7 +269,7 @@ export default function Chat() {
             <>
               <div className="flex -space-x-2">{(conv.members || []).slice(0, 4).map((m) => <div key={m.id} className="rounded-full ring-2 ring-white"><Avatar name={m.name} portrait={m.portrait} size={32} /></div>)}</div>
               <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{conv.title}</p>
-                <p className="truncate text-xs text-slate-400">{conv.type === "meeting" ? `Meeting · ${conv.members?.length} asisten${(conv.members?.length || 0) > 1 ? " + Moderator" : ""}` : conv.type === "group" ? `Chat grup · ${conv.members?.length} asisten` : "Chat privat"}</p></div>
+                <p className="truncate text-xs text-slate-400">{conv.type === "meeting" ? `Meeting · ${conv.members?.length} asisten${(conv.members?.length || 0) > 1 ? " · 1 moderator" : ""}` : conv.type === "group" ? `Chat grup · ${conv.members?.length} asisten` : "Chat privat"}</p></div>
             </>
           ) : <p className="truncate text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
           {conv && (
