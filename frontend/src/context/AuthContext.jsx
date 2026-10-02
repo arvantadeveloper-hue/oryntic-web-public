@@ -24,11 +24,15 @@ export function AuthProvider({ children }) {
   };
 
   const register = async (email, password, name) => {
-    const r = await api.post("/auth/register", { email, password, name });
-    setAuthToken(r.data.access_token);
-    setUser(r.data.user);
-    return r.data.user;
+    const r = await api.post("/auth/register", { email, password, name, app_url: window.location.origin });
+    if (r.data.access_token) { setAuthToken(r.data.access_token); setUser(r.data.user); }
+    return r.data;
   };
+
+  // apply a {access_token, user} payload (email verification, invite acceptance, workspace switch)
+  const applyAuth = (data) => { setAuthToken(data.access_token); setUser(data.user); return data.user; };
+
+  const switchWorkspace = async (workspaceId) => applyAuth((await api.post("/auth/switch-workspace", { workspace_id: workspaceId })).data);
 
   const logout = () => { setAuthToken(null); setUser(null); };
 
@@ -39,7 +43,7 @@ export function AuthProvider({ children }) {
   const setCredits = (c) => setUser((u) => (u ? { ...u, credits: c } : u));
 
   return (
-    <AuthContext.Provider value={{ user, setUser, loading, login, register, logout, refreshUser, setCredits }}>
+    <AuthContext.Provider value={{ user, setUser, loading, login, register, logout, refreshUser, setCredits, applyAuth, switchWorkspace }}>
       {children}
     </AuthContext.Provider>
   );

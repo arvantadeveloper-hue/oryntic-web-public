@@ -15,6 +15,7 @@ INVITE_DEFAULT_DAILY_LIMIT = 100
 
 class InviteIn(BaseModel):
     email: EmailStr
+    app_url: Optional[str] = Field(default=None, max_length=200)
 
 
 class AcceptIn(BaseModel):
@@ -60,17 +61,21 @@ async def create_invite(x: InviteIn, request: Request, admin: dict = Depends(req
     else:
         await db.workspace_invites.update_one({"id": inv["id"]}, {"$set": {"status": "pending", "user_id": (target or {}).get("id"), "responded_at": None, "updated_at": now_iso()}})
         inv["status"] = "pending"
-    out = await _send_invite(inv, admin, app_url(request))
+    out = await _send_invite(inv, admin, app_url(request, x.app_url))
     return {**_public_invite(await db.workspace_invites.find_one({"id": inv["id"]}, {"_id": 0})), **out, "existing_user": bool(target)}
 
 
+class ResendIn(BaseModel):
+    app_url: Optional[str] = Field(default=None, max_length=200)
+
+
 @router.post("/invites/{iid}/resend")
-async def resend_invite(iid: str, request: Request, admin: dict = Depends(require_admin)):
+async def resend_invite(iid: str, request: Request, x: ResendIn = ResendIn(), admin: dict = Depends(require_admin)):
     inv = await db.workspace_invites.find_one({"id": iid, "workspace_id": workspace_id(admin)}, {"_id": 0})
     if not inv or inv.get("status") not in ("pending", "rejected"):
         raise HTTPException(404, "Undangan tidak ditemukan atau sudah bergabung")
     await db.workspace_invites.update_one({"id": iid}, {"$set": {"status": "pending", "responded_at": None}})
-    return {"ok": True, **(await _send_invite(inv, admin, app_url(request)))}
+    return {"ok": True, **(await _send_invite(inv, admin, app_url(request, x.app_url)))}
 
 
 @router.delete("/invites/{iid}")

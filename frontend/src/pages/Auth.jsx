@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { toast } from "sonner";
-import { Mail, Lock, Eye, EyeOff, ArrowRight, Globe, BarChart3, FileText, Users, Sparkles, MessageSquare, Video } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Globe, BarChart3, FileText, Users, Sparkles, MessageSquare, Video, MailCheck } from "lucide-react";
 import { Logo, BRAND_HERO, TAGLINE } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
+import { api } from "../lib/api";
 import { useI18n } from "../i18n";
 import { useNavigate } from "react-router-dom";
 
@@ -28,18 +29,49 @@ export default function Auth() {
   const [name, setName] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(null); // {email, mail_sent} → "check your inbox" screen
+  const [unverified, setUnverified] = useState(false);
+
+  const resend = async () => {
+    try { const r = await api.post("/auth/resend-verification", { email: pending?.email || email, app_url: window.location.origin }); setPending({ email: pending?.email || email, mail_sent: r.data.mail_sent !== false }); toast.success("Tautan verifikasi dikirim ulang"); }
+    catch (err) { toast.error(err?.response?.data?.detail || "Gagal mengirim ulang"); }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
-    setBusy(true);
+    setBusy(true); setUnverified(false);
     try {
-      const u = mode === "login" ? await login(email, password) : await register(email, password, name);
-      toast.success(mode === "login" ? "Selamat datang kembali" : "Akun berhasil dibuat");
-      nav(u.onboarded ? "/home" : "/onboarding");
+      if (mode === "register") {
+        const r = await register(email, password, name);
+        if (r.pending_verification) { setPending({ email: r.email, mail_sent: r.mail_sent }); return; }
+        toast.success("Akun berhasil dibuat"); nav(r.user?.onboarded ? "/home" : "/onboarding"); return;
+      }
+      const u = await login(email, password);
+      toast.success("Selamat datang kembali");
+      const after = sessionStorage.getItem("after_login"); sessionStorage.removeItem("after_login");
+      nav(after || (u.onboarded ? "/home" : "/onboarding"));
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Terjadi kesalahan");
+      const d = err?.response?.data?.detail;
+      if (d?.code === "unverified") { setUnverified(true); toast.error(d.message); return; }
+      toast.error((typeof d === "string" && d) || d?.message || "Terjadi kesalahan");
     } finally { setBusy(false); }
   };
+
+  if (pending) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white p-6">
+        <div className="w-full max-w-md text-center fade-up" data-testid="verify-pending">
+          <Logo size={40} />
+          <span className="mx-auto mt-8 flex h-16 w-16 items-center justify-center rounded-full bg-[#EEF3FF] text-[#2F6BFF]"><MailCheck size={30} /></span>
+          <h2 className="mt-6 text-2xl font-bold text-slate-900">Cek email Anda</h2>
+          <p className="mt-2 text-sm text-slate-500">Kami mengirim tautan verifikasi ke <b className="text-slate-800">{pending.email}</b>. Klik tautan tersebut untuk mengaktifkan akun dan masuk.</p>
+          {pending.mail_sent === false && <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700" data-testid="verify-mail-warning">Email belum terkirim (server email bermasalah). Coba kirim ulang atau hubungi admin.</p>}
+          <button onClick={resend} className="mt-6 rounded-xl border border-[#E7ECF3] px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50" data-testid="verify-resend-btn">Kirim ulang tautan</button>
+          <p className="mt-6 text-sm text-slate-500">Sudah verifikasi? <button className="font-semibold text-[#2F6BFF]" onClick={() => { setPending(null); setMode("login"); }} data-testid="verify-back-login">Masuk</button></p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-white">
@@ -118,6 +150,13 @@ export default function Auth() {
               <label className="flex items-center gap-2 text-slate-500"><input type="checkbox" className="h-4 w-4 rounded accent-[#2F6BFF]" defaultChecked /> Ingat saya</label>
               <span className="font-semibold text-[#2F6BFF]">Lupa password?</span>
             </div>
+
+            {unverified && (
+              <div className="flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="login-unverified">
+                <span>Email belum diverifikasi.</span>
+                <button type="button" onClick={resend} className="font-bold text-[#2F6BFF]" data-testid="login-resend-btn">Kirim ulang tautan</button>
+              </div>
+            )}
 
             <button className="btn-grad flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm" disabled={busy} data-testid="auth-submit-btn">
               {busy ? "..." : (mode === "login" ? "Masuk" : "Daftar")} <ArrowRight size={17} />

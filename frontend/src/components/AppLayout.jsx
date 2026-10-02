@@ -5,6 +5,7 @@ import { Logo } from "./Logo";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 import { IncomingCall } from "./IncomingCall";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 export function AppLayout() {
   const { user, logout } = useAuth();
@@ -34,7 +35,8 @@ export function AppLayout() {
 
   const SidebarInner = (
     <div className="flex h-full flex-col sidebar-dark text-white">
-      <div className="px-5 pb-4 pt-6"><Logo light size={32} /></div>
+      <div className="px-5 pb-3 pt-6"><Logo light size={32} /></div>
+      <WorkspaceSwitcher />
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3">
         {items.map((it) => (
           <NavLink key={it.id} to={it.to} data-testid={`nav-${it.id}`} onClick={() => setOpen(false)}

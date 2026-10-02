@@ -94,8 +94,9 @@ def role_for(u: dict) -> str:
     return "admin" if (u.get("owner_id") or u["id"]) == u["id"] else "user"
 
 
-def app_url(request: Request) -> str:
-    return (request.headers.get("origin") or os.environ.get("APP_URL") or "").rstrip("/")
+def app_url(request: Request, hint: Optional[str] = None) -> str:
+    """Public frontend URL for email links: APP_URL env (production), else the URL the browser reports, else Origin."""
+    return (os.environ.get("APP_URL") or hint or request.headers.get("origin") or "").rstrip("/")
 
 
 def token_hash(raw: str) -> str:
@@ -127,6 +128,7 @@ class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=72)
     name: Optional[str] = None
+    app_url: Optional[str] = Field(default=None, max_length=200)
 
 
 class LoginIn(BaseModel):
@@ -197,7 +199,7 @@ async def register(x: RegisterIn, request: Request):
         raise HTTPException(409, "Email already registered")
     if existing:  # unverified leftover: refresh credentials and resend the link
         await db.users.update_one({"id": existing["id"]}, {"$set": {"password_hash": pw_hash(x.password), "name": x.name or existing.get("name")}})
-        out = await issue_verification({**existing, "name": x.name or existing.get("name")}, app_url(request))
+        out = await issue_verification({**existing, "name": x.name or existing.get("name")}, app_url(request, x.app_url))
         return {"pending_verification": True, "email": email, **out}
     trial = await get_trial()
     uid = new_id()
@@ -227,12 +229,13 @@ async def register(x: RegisterIn, request: Request):
         "id": new_id(), "user_id": uid, "type": "grant", "amount": int(trial["trial_credits"]),
         "balance_after": int(trial["trial_credits"]), "description": f"Paket percobaan {trial['trial_days']} hari", "created_at": now_iso(),
     })
-    out = await issue_verification(doc, app_url(request))
+    out = await issue_verification(doc, app_url(request, x.app_url))
     return {"pending_verification": True, "email": email, **out}
 
 
 class EmailIn(BaseModel):
     email: EmailStr
+    app_url: Optional[str] = Field(default=None, max_length=200)
 
 
 @router.post("/resend-verification")
@@ -242,7 +245,7 @@ async def resend_verification(x: EmailIn, request: Request):
     if not login_allowed(ip, email):
         raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi dalam 5 menit.")
     u = await db.users.find_one({"email": email}, {"_id": 0})
-    out = await issue_verification(u, app_url(request)) if u and not u.get("verified", True) else {}
+    out = await issue_verification(u, app_url(request, x.app_url)) if u and not u.get("verified", True) else {}
     return {"ok": True, **out}
 
 

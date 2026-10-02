@@ -86,13 +86,15 @@ async def create_workspace_user(x: CreateUserIn, admin: dict = Depends(require_a
 
 @router.delete("/users/{uid}")
 async def delete_workspace_user(uid: str, admin: dict = Depends(require_admin)):
+    """Remove a member from this workspace (their own account and home workspace stay intact)."""
     if uid == admin["id"]:
         raise HTTPException(400, "Tidak bisa menghapus akun sendiri")
-    target = await db.users.find_one({"id": uid})
-    if not target or target.get("owner_id") != workspace_id(admin):
-        raise HTTPException(404, "Pengguna tidak ditemukan di workspace ini")
-    await db.users.delete_one({"id": uid})
-    await db.conversations.update_many({"participants": uid}, {"$pull": {"participants": uid}})
+    await _member_or_404(uid, admin)
+    wid = workspace_id(admin)
+    await db.workspace_members.delete_one({"workspace_id": wid, "user_id": uid})
+    await db.workspace_invites.update_many({"workspace_id": wid, "user_id": uid}, {"$set": {"status": "removed", "updated_at": now_iso()}})
+    await db.users.update_one({"id": uid, "owner_id": wid}, [{"$set": {"owner_id": "$id", "role": "admin"}}])
+    await db.conversations.update_many({"workspace_id": wid, "participants": uid}, {"$pull": {"participants": uid}})
     return {"ok": True}
 
 
@@ -219,7 +221,7 @@ async def usage_report(days: int = 30, admin: dict = Depends(require_admin)):
     now = datetime.now(timezone.utc)
     since = (now - timedelta(days=days)).isoformat()
     events = await db.usage_events.find({"user_id": wid, "created_at": {"$gte": since}}, {"_id": 0, "feature": 1, "credits": 1, "meta": 1, "created_at": 1}).to_list(50000)
-    members = await db.users.find({"$or": [{"id": wid}, {"owner_id": wid}]}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}).to_list(500)
+    members = await db.users.find({"id": {"$in": await member_ids(wid)}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}).to_list(500)
     names = {m["id"]: m for m in members}
     by_user, by_feature, daily = _aggregate_usage(events, wid)
     users_out = sorted([{"user_id": uid, "name": names.get(uid, {}).get("name") or "Pengguna terhapus", "email": names.get(uid, {}).get("email"),

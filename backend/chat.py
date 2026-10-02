@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, EmailStr
 
 from db import db, now_iso, new_id, clean
-from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, public_user
+from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, public_user, member_ids, is_member
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit
@@ -122,8 +122,8 @@ async def _resolve_participants(u: dict, ids: list) -> list:
     """Creator + invited humans from the same workspace (deduplicated)."""
     participants = [u["id"]]
     if ids:
-        valid = await db.users.find({"id": {"$in": ids}, "owner_id": workspace_id(u)}, {"_id": 0, "id": 1}).to_list(50)
-        participants += [v["id"] for v in valid if v["id"] not in participants]
+        allowed = set(await member_ids(workspace_id(u)))
+        participants += [i for i in dict.fromkeys(ids) if i in allowed and i not in participants]
     return participants
 
 
@@ -172,8 +172,8 @@ async def add_participants(cid: str, x: InviteIn, u: dict = Depends(current_user
     if conv.get("type") == "private":
         raise HTTPException(400, "Undangan hanya untuk grup atau meeting")
     wid = workspace_id(u)
-    valid = await db.users.find({"id": {"$in": x.user_ids}, "owner_id": wid}, {"_id": 0, "id": 1}).to_list(50)
-    add = [v["id"] for v in valid]
+    allowed = set(await member_ids(wid))
+    add = [i for i in dict.fromkeys(x.user_ids) if i in allowed]
     await db.conversations.update_one({"id": cid}, {"$addToSet": {"participants": {"$each": add}}, "$set": {"updated_at": now_iso()}})
     await notify(cid, {"type": "participants"})
     return {"ok": True, "added": add}
@@ -219,8 +219,10 @@ async def invite_info(token: str):
 @router.post("/invites/{token}/join")
 async def invite_join(token: str, u: dict = Depends(current_user)):
     conv = await _conv_by_invite(token)
-    if (u.get("owner_id") or u["id"]) != conv.get("workspace_id"):
+    if not await is_member(u["id"], conv.get("workspace_id")):
         raise HTTPException(403, "Akun Anda bukan bagian dari workspace ini")
+    if workspace_id(u) != conv.get("workspace_id"):
+        await db.users.update_one({"id": u["id"]}, {"$set": {"owner_id": conv["workspace_id"], "role": "user" if conv["workspace_id"] != u["id"] else "admin"}})
     await db.conversations.update_one({"id": conv["id"]}, {"$addToSet": {"participants": u["id"]}})
     await notify(conv["id"], {"type": "participants"})
     return {"conversation_id": conv["id"]}
@@ -253,6 +255,7 @@ async def invite_register(token: str, x: InviteRegisterIn):
         "created_at": now_iso(),
     }
     await db.users.insert_one(doc)
+    await db.workspace_members.insert_one({"id": new_id(), "workspace_id": wid, "user_id": uid, "email": email, "status": "joined", "joined_at": now_iso()})
     await db.conversations.update_one({"id": conv["id"]}, {"$addToSet": {"participants": uid}})
     await notify(conv["id"], {"type": "participants"})
     return {"access_token": make_token(uid, "user"), "user": public_user(doc), "conversation_id": conv["id"]}

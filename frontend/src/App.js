@@ -21,6 +21,8 @@ import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
 import Team from "./pages/Team";
 import JoinMeeting from "./pages/JoinMeeting";
+import VerifyEmail from "./pages/VerifyEmail";
+import InvitePage from "./pages/InvitePage";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -57,6 +59,8 @@ function App() {
               <Route path="/" element={<Gate />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/join/:token" element={<JoinMeeting />} />
+              <Route path="/verify-email" element={<VerifyEmail />} />
+              <Route path="/invite/:token" element={<InvitePage />} />
               <Route element={<Protected><AppLayout /></Protected>}>
                 <Route path="/home" element={<Home />} />
                 <Route path="/personas" element={<AdminOnly><Personas /></AdminOnly>} />
