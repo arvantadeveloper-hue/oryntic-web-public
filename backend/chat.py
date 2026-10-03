@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
-from auth import current_user, workspace_id, _lang_name, member_ids
+from auth import current_user, workspace_id, _lang_name
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit
@@ -152,30 +152,38 @@ def _conv_title(ctype: str, personas: list) -> str:
 
 
 async def _resolve_participants(u: dict, ids: list) -> list:
-    """Creator + invited humans from the same workspace (deduplicated)."""
+    """Creator + invited friends (deduplicated)."""
+    from friends import friend_ids
     participants = [u["id"]]
     if ids:
-        allowed = set(await member_ids(workspace_id(u)))
+        allowed = set(await friend_ids(u["id"]))
         participants += [i for i in dict.fromkeys(ids) if i in allowed and i not in participants]
     return participants
+
+
+def view_title(conv: dict, uid: str) -> dict:
+    """Direct human chats are titled with the *other* person's name."""
+    t = (conv.get("titles") or {}).get(uid)
+    return {**conv, "title": t} if t else conv
 
 
 @router.post("/conversations")
 async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
     personas = await _get_personas(x.persona_ids, workspace_id(u))
-    if not personas:
-        raise HTTPException(400, "Pilih minimal satu persona untuk memulai percakapan")
-    multi = x.type in ("group", "meeting") and (len(personas) > 1 or x.type == "meeting")
+    participants = await _resolve_participants(u, x.participant_ids or [])
+    if not personas and len(participants) < 2:
+        raise HTTPException(400, "Pilih minimal satu asisten atau teman untuk memulai percakapan")
+    multi = x.type in ("group", "meeting") and (len(personas) > 1 or x.type == "meeting" or len(participants) > 1)
     ctype = x.type if multi else "private"
-    participants = await _resolve_participants(u, x.participant_ids if ctype == "meeting" else [])
+    humans = [h async for h in db.users.find({"id": {"$in": participants}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "avatar": 1})] if len(participants) > 1 else []
     doc = {
         "id": new_id(), "user_id": u["id"], "workspace_id": workspace_id(u),
-        "participants": participants,
+        "participants": participants, "humans": humans,
         "type": ctype,
         "persona_ids": [p["id"] for p in personas],
-        "persona_id": personas[0]["id"],
+        "persona_id": personas[0]["id"] if personas else None,
         "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")} for p in personas],
-        "title": x.title or _conv_title(ctype, personas), "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
+        "title": x.title or (_conv_title(ctype, personas) if personas else "Grup " + ", ".join(h["name"] for h in humans)), "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
     }
     await db.conversations.insert_one(dict(doc))
     return clean(doc)
@@ -187,9 +195,11 @@ async def list_conv(q: Optional[str] = None, limit: int = Query(200, ge=1, le=20
     if q:
         query["title"] = {"$regex": q, "$options": "i"}
     rows = await db.conversations.find(query, {"_id": 0, "invite_token": 0}).sort("updated_at", -1).skip(offset).to_list(limit)
+    out = []
     for c in rows:
         c["unread"] = bool(c.get("last_message")) and (c.get("updated_at") or "") > ((c.get("read_at") or {}).get(u["id"]) or "")
-    return rows
+        out.append(view_title(c, u["id"]))
+    return out
 
 
 class DirectIn(BaseModel):
@@ -262,7 +272,7 @@ async def get_messages(cid: str, before: Optional[str] = None, limit: int = Quer
     page = await db.messages.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit + 1)
     has_more = len(page) > limit
     msgs = list(reversed(page[:limit]))
-    out = {"conversation": conv, "messages": msgs, "has_more": has_more}
+    out = {"conversation": view_title(conv, u["id"]), "messages": msgs, "has_more": has_more}
     if not before and not archived:
         out["archived_count"] = await db.messages.count_documents({"conversation_id": cid, "archived": True})
         out["long_chat"] = await _long_chat(cid, conv)
@@ -279,14 +289,42 @@ async def _long_chat(cid: str, conv: dict) -> bool:
     return len(live) - snooze >= LONG_CHAT_MSGS or sum(len(m.get("content") or "") for m in live[snooze:]) >= LONG_CHAT_CHARS
 
 
+CORE_SUMMARY_CAP = 1500
+PERIOD_SUMMARY_CAP = 1200
+
+
 async def _merge_summary(cid: str, u: dict, conv: dict, instruction: str) -> tuple:
+    """Two tiers: (core, detailed, credits). Core = always-on facts/decisions/preferences (<=1500 chars, merged with the
+    previous core); detailed = full period summary stored with the archive and only injected when relevant."""
     history = await _history_text(cid, limit=120, with_summary=False)
     prev = conv.get("memory_summary") or ""
-    sys = (f"You write entirely in {_lang_name(u)}. {instruction} Output markdown, compact but complete; keep every decision, number, "
-           "name, deadline and open question. If an earlier summary is given, MERGE it with the new discussion into one updated summary.")
-    prompt = (f"Earlier summary:\n{prev}\n\n" if prev else "") + f"Discussion since then:\n{history}\n\nUpdated summary:"
-    text = await llm_text(sys, prompt)
-    return text, text_credits(prompt, text)
+    lang = _lang_name(u)
+    detailed = await llm_text(f"You write entirely in {lang}. {instruction} Output markdown, compact but complete; keep every decision, number, name, deadline and open question.",
+                              f"Discussion:\n{history}\n\nDetailed summary:")
+    core_prompt = (f"Earlier core memory:\n{prev}\n\n" if prev else "") + f"New period summary:\n{detailed}\n\nUpdated core memory:"
+    core = await llm_text(f"You write entirely in {lang}. Produce the CORE MEMORY of this conversation: only durable facts, decisions, user preferences, names, numbers and open commitments, "
+                          f"as terse bullet points, max {CORE_SUMMARY_CAP} characters. MERGE the earlier core memory with the new period summary; drop chit-chat and superseded details.",
+                          core_prompt)
+    core = core[:CORE_SUMMARY_CAP]
+    return core, detailed, text_credits(history, detailed) + text_credits(core_prompt, core)
+
+
+def _keywords(text: str) -> set:
+    return {w.strip(".,?!:;\"'()").lower() for w in (text or "").split() if len(w.strip(".,?!:;\"'()")) > 3}
+
+
+async def _relevant_periods(cid: str, query: str, cap: int = 2) -> list:
+    """Detailed period summaries from this chat's archives that share keywords with the current message."""
+    kws = _keywords(query)
+    if not kws:
+        return []
+    out = []
+    async for a in db.chat_archives.find({"conversation_id": cid, "restored": {"$ne": True}}, {"_id": 0, "summary": 1, "period_start": 1, "period_end": 1}).sort("created_at", -1).limit(12):
+        score = len(kws & _keywords(a.get("summary") or ""))
+        if score >= 2:
+            out.append((score, a))
+    out.sort(key=lambda t: -t[0])
+    return [a for _, a in out[:cap]]
 
 
 @router.post("/conversations/{cid}/compact")
@@ -379,13 +417,14 @@ MEETING_CHAT_STYLE = ("MEETING CHAT PANEL: a live voice meeting is in progress a
 
 def _relevant_memories(mems: list, query: str, cap: int = 10) -> list:
     """Always-on (pinned) memories + those sharing words with the current message; everything if the list is small."""
-    if len(mems) <= cap or not query:
+    if len(mems) <= cap:
         return mems
-    words = {w.strip(".,?!:;\"'()").lower() for w in query.split() if len(w) > 3}
-    scored = sorted(mems, key=lambda m: -len(words & {w.lower() for w in m["content"].split()}))
+    if not query:
+        return [m for m in mems if m.get("pinned")] + [m for m in mems if not m.get("pinned")][:cap]
+    words = _keywords(query)
     pinned = [m for m in mems if m.get("pinned")]
-    out = pinned + [m for m in scored if m not in pinned]
-    return out[:cap]
+    rest = sorted([m for m in mems if not m.get("pinned")], key=lambda m: -len(words & _keywords(m["content"])))
+    return pinned + rest[:max(0, cap - len(pinned))]
 
 
 async def _persona_system(persona, user, roster=None, voice_mode=False, query=None):
@@ -411,13 +450,15 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     return "\n".join(parts)
 
 
-async def _history_text(cid: str, limit=14, with_summary=True) -> str:
+async def _history_text(cid: str, limit=14, with_summary=True, query: str = "") -> str:
     msgs = await db.messages.find({"conversation_id": cid, "archived": {"$ne": True}, "is_summary": {"$ne": True}}, {"_id": 0}).sort("created_at", 1).to_list(1000)
     lines = []
     if with_summary:
         conv = await db.conversations.find_one({"id": cid}, {"_id": 0, "memory_summary": 1}) or {}
         if conv.get("memory_summary"):
-            lines.append(f"[Rangkuman percakapan sebelumnya]: {conv['memory_summary'][:4000]}")
+            lines.append(f"[Memori inti percakapan]: {conv['memory_summary'][:CORE_SUMMARY_CAP + 500]}")
+        for a in await _relevant_periods(cid, query):
+            lines.append(f"[Rincian periode {a.get('period_start', '')[:10]}–{a.get('period_end', '')[:10]}, relevan dengan pertanyaan]: {(a.get('summary') or '')[:PERIOD_SUMMARY_CAP]}")
     for m in msgs[-limit:]:
         if m["role"] == "user":
             who = m.get("sender_name") or "User"
@@ -443,7 +484,7 @@ async def _load_ai_conv(cid: str, u: dict):
     if over:
         raise HTTPException(402, quota_message(over))
     personas = await _get_personas(conv.get("persona_ids", []))
-    if not personas:
+    if not personas and len(conv.get("participants") or []) < 2:
         raise HTTPException(400, "Percakapan ini tidak memiliki persona")
     return conv, personas
 
@@ -743,6 +784,14 @@ def _pick_responders(x: MsgIn, personas: list) -> list:
     return personas[:1] if x.channel == "meeting_chat" else personas  # text side-channel: one assistant answers
 
 
+AI_ADDRESS_RE = re.compile(r"\b(tolong|bisa(kah)?|buatkan|carikan|jelaskan|rangkum|ringkas|analisis|hitung|terjemahkan|asisten|ai\b|bot|menurut(mu)?|bantu|please|can you|could you)\b|\?\s*$", re.I)
+
+
+def _addressed_to_ai(text: str, personas: list) -> bool:
+    low = (text or "").lower()
+    return any(p["name"].lower() in low for p in personas) or bool(AI_ADDRESS_RE.search(text or ""))
+
+
 async def _route_group(x: MsgIn, personas: list, cid: str) -> list:
     """Group chat without @mention: let only the 1-2 most relevant assistants answer (saves N× context tokens)."""
     text = (x.content or "").strip()
@@ -794,17 +843,22 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     conv, personas = await _load_ai_conv(cid, u)
     attach_text, attach_meta = await _process_attachments(x.attachments, u["id"])
     await _store_user_message(cid, x, u, attach_text, attach_meta)
-    responders = _pick_responders(x, personas)
-    if conv.get("type") == "group" and len(personas) > 1 and not _mentioned(x.content, personas) and x.channel != "meeting_chat":
+    responders = _pick_responders(x, personas) if personas else []
+    humans_chat = len(conv.get("participants") or []) > 1 and conv.get("type") != "meeting"
+    if humans_chat and personas and not _mentioned(x.content, personas):
+        # people talking to each other: assistants only step in when clearly addressed
+        responders = (await _route_group(x, personas, cid)) if _addressed_to_ai(x.content, personas) else []
+    elif conv.get("type") == "group" and len(personas) > 1 and not _mentioned(x.content, personas) and x.channel != "meeting_chat":
         responders = await _route_group(x, personas, cid)
     roster = [p["name"] for p in personas] if len(personas) > 1 else None
     extra = _reply_extra(x, attach_text)
+    bill_user = u if u["id"] == conv.get("user_id") or not responders else (await db.users.find_one({"id": conv["user_id"]}, {"_id": 0}) or u)
 
     async def stream():
         totals = [0]
         for persona in responders:
-            prompt = (await _history_text(cid)) + extra + f"\n{persona['name']}:"
-            ctx = ReplyCtx(cid=cid, user=u, persona=persona, roster=roster, prompt=prompt, voice_mode=x.voice_mode,
+            prompt = (await _history_text(cid, query=x.content)) + extra + f"\n{persona['name']}:"
+            ctx = ReplyCtx(cid=cid, user=bill_user, persona=persona, roster=roster, prompt=prompt, voice_mode=x.voice_mode,
                            via=x.channel, user_text=x.content, attach_len=len(attach_text))
             async for ev in _collect(_persona_reply(ctx), totals):
                 yield ev
@@ -1040,6 +1094,8 @@ async def update_memory(mid: str, body: dict, u: dict = Depends(current_user)):
         fields["content"] = body["content"]
     if "enabled" in body:
         fields["enabled"] = bool(body["enabled"])
+    if "pinned" in body:
+        fields["pinned"] = bool(body["pinned"])
     await db.memory_items.update_one({"id": mid, "user_id": u["id"]}, {"$set": fields})
     return await db.memory_items.find_one({"id": mid}, {"_id": 0})
 

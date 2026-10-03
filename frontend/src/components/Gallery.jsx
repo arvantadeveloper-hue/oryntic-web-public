@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Image as ImageIcon, Video, Download, ExternalLink, Loader2, Check, Users } from "lucide-react";
+import { FileText, Image as ImageIcon, Video, Download, ExternalLink, Loader2, Check, Users, Share2, Search } from "lucide-react";
 import { api, API_BASE, getToken } from "../lib/api";
 import { fileUrl, downloadUrl } from "./MessageExtras";
 
@@ -11,7 +11,7 @@ export const GALLERY_FILTERS = [
 ];
 
 // Cursor-paginated gallery feed (newest first) with infinite scrolling.
-export function useGallery(type = "all", limit = 24) {
+export function useGallery(type = "all", limit = 24, q = "") {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
@@ -23,11 +23,11 @@ export function useGallery(type = "all", limit = 24) {
     busy.current = true; setLoading(true);
     try {
       const before = reset ? "" : cursor.current ? `&before=${encodeURIComponent(cursor.current)}` : "";
-      const r = await api.get(`/gallery?type=${type}&limit=${limit}${before}`);
+      const r = await api.get(`/gallery?type=${type}&limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ""}${before}`);
       setItems((prev) => (reset ? r.data.items : [...prev, ...r.data.items]));
       setHasMore(!!r.data.has_more); cursor.current = r.data.next_before;
     } catch (e) { setHasMore(false); } finally { busy.current = false; setLoading(false); }
-  }, [type, limit]);
+  }, [type, limit, q]);
 
   useEffect(() => { cursor.current = null; setItems([]); fetchPage(true); }, [fetchPage]);
   const loadMore = () => { if (hasMore && !busy.current) fetchPage(false); };
@@ -48,12 +48,12 @@ export function Sentinel({ onVisible, root }) {
 const exportUrl = (taskId, fmt) => `${API_BASE}/tasks/${taskId}/export/${fmt}?auth=${getToken()}`;
 const KIND_ICON = { document: FileText, image: ImageIcon, video: Video };
 
-export function GalleryCard({ item, selectable = false, selected = false, onSelect }) {
+export function GalleryCard({ item, selectable = false, selected = false, onSelect, onOpen, onShare }) {
   const Icon = KIND_ICON[item.kind] || FileText;
   const date = new Date(item.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
-  const click = selectable ? () => onSelect(item) : undefined;
+  const click = selectable ? () => onSelect(item) : onOpen ? () => onOpen(item) : undefined;
   return (
-    <div onClick={click} data-testid={`gallery-item-${item.kind}`} className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-white transition ${selectable ? "cursor-pointer" : ""} ${selected ? "border-[#2F6BFF] ring-2 ring-[#2F6BFF]/30" : "border-[#E7ECF3] hover:shadow-md"}`}>
+    <div onClick={click} data-testid={`gallery-item-${item.kind}`} className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-white transition ${selectable || onOpen ? "cursor-pointer" : ""} ${selected ? "border-[#2F6BFF] ring-2 ring-[#2F6BFF]/30" : "border-[#E7ECF3] hover:shadow-md"}`}>
       {selectable && <span className={`absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md border bg-white ${selected ? "btn-grad border-transparent" : "border-slate-300"}`} data-testid="gallery-select-mark">{selected && <Check size={13} />}</span>}
       <div className="flex h-36 items-center justify-center overflow-hidden bg-slate-50">
         {item.kind === "image" ? <img src={fileUrl(item.path)} alt={item.name} loading="lazy" className="h-full w-full object-cover" />
@@ -73,6 +73,7 @@ export function GalleryCard({ item, selectable = false, selected = false, onSele
               <a href={fileUrl(item.path)} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-[#EEF3FF] px-2 py-1 text-[11px] font-semibold text-[#2F6BFF] hover:bg-[#E0E9FF]" data-testid="gallery-open"><ExternalLink size={11} /> Buka</a>
               <a href={downloadUrl(item.path)} download={item.name} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-dl-file"><Download size={11} /> Unduh</a>
             </>)}
+            {onShare && <button onClick={() => onShare(item)} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-share"><Share2 size={11} /> Bagikan</button>}
           </div>
         )}
       </div>
@@ -80,18 +81,27 @@ export function GalleryCard({ item, selectable = false, selected = false, onSele
   );
 }
 
-export function GalleryGrid({ type, selectable = false, selectedIds = [], onSelect, scrollRoot, emptyText = "Belum ada berkas. Minta asisten membuat dokumen, gambar, atau video dari chat." }) {
-  const g = useGallery(type);
+export function GalleryGrid({ type, q = "", selectable = false, selectedIds = [], onSelect, onOpen, onShare, scrollRoot, emptyText = "Belum ada berkas. Minta asisten membuat dokumen, gambar, atau video dari chat." }) {
+  const g = useGallery(type, 24, q);
   return (
     <div data-testid="gallery-grid">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {g.items.map((it) => <GalleryCard key={it.id} item={it} selectable={selectable} selected={selectedIds.includes(it.id)} onSelect={onSelect} />)}
+        {g.items.map((it) => <GalleryCard key={it.id} item={it} selectable={selectable} selected={selectedIds.includes(it.id)} onSelect={onSelect} onOpen={onOpen} onShare={onShare} />)}
       </div>
       {g.loading && <p className="flex items-center justify-center gap-2 py-6 text-sm text-slate-400" data-testid="gallery-loading"><Loader2 size={16} className="animate-spin" /> Memuat berkas…</p>}
-      {!g.loading && g.items.length === 0 && <p className="py-12 text-center text-sm text-slate-400" data-testid="gallery-empty">{emptyText}</p>}
+      {!g.loading && g.items.length === 0 && <p className="py-12 text-center text-sm text-slate-400" data-testid="gallery-empty">{q ? `Tidak ada berkas yang cocok dengan «${q}».` : emptyText}</p>}
       {!g.loading && g.hasMore && <Sentinel onVisible={g.loadMore} root={scrollRoot} />}
       {!g.loading && !g.hasMore && g.items.length > 0 && <p className="py-4 text-center text-[11px] text-slate-300">Semua berkas sudah ditampilkan</p>}
     </div>
+  );
+}
+
+export function GallerySearch({ value, onChange }) {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => onChange(v.trim()), 350); return () => clearTimeout(t); }, [v]); // eslint-disable-line
+  return (
+    <div className="relative w-full sm:w-72"><Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+      <input className="input-dark py-2 pl-10" placeholder="Cari judul atau isi dokumen…" value={v} onChange={(e) => setV(e.target.value)} data-testid="gallery-search" /></div>
   );
 }
 

@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -14,9 +15,12 @@ def _ext(path: str) -> str:
     return (path or "").rsplit(".", 1)[-1].lower() if "." in (path or "") else ""
 
 
-async def _media_items(u: dict, kinds: tuple, before: Optional[str], limit: int) -> list:
+async def _media_items(u: dict, kinds: tuple, before: Optional[str], limit: int, q_text: str = "") -> list:
     conv_ids = [c["id"] async for c in db.conversations.find({"$or": [{"workspace_id": workspace_id(u)}, {"user_id": u["id"]}]}, {"_id": 0, "id": 1})]
     q = {"conversation_id": {"$in": conv_ids}, "media": {"$elemMatch": {"type": {"$in": list(kinds)}, "path": {"$exists": True}}}}
+    if q_text:
+        rx = {"$regex": re.escape(q_text), "$options": "i"}
+        q["$or"] = [{"media.name": rx}, {"content": rx}]
     if before:
         q["created_at"] = {"$lt": before}
     out = []
@@ -28,8 +32,11 @@ async def _media_items(u: dict, kinds: tuple, before: Optional[str], limit: int)
     return out
 
 
-async def _document_items(u: dict, before: Optional[str], limit: int, with_video: bool) -> list:
+async def _document_items(u: dict, before: Optional[str], limit: int, with_video: bool, q_text: str = "") -> list:
     q = {**task_access(u), "status": "completed", "parent_id": {"$exists": False}}
+    if q_text:
+        rx = {"$regex": re.escape(q_text), "$options": "i"}
+        q["$or"] = [{"goal": rx}, {"final_output": rx}]
     if before:
         q["created_at"] = {"$lt": before}
     out = []
@@ -44,13 +51,14 @@ async def _document_items(u: dict, before: Optional[str], limit: int, with_video
 
 
 @router.get("")
-async def list_gallery(type: str = Query("all", pattern="^(all|image|video|document)$"), before: Optional[str] = None, limit: int = Query(24, ge=1, le=60), u: dict = Depends(current_user)):
-    """Everything the assistants produced, newest first. Cursor = `before` (created_at of the last item)."""
+async def list_gallery(type: str = Query("all", pattern="^(all|image|video|document)$"), before: Optional[str] = None, q: Optional[str] = Query(None, max_length=120), limit: int = Query(24, ge=1, le=60), u: dict = Depends(current_user)):
+    """Everything the assistants produced, newest first. Cursor = `before` (created_at of the last item). `q` searches titles and document contents."""
     items = []
+    q_text = (q or "").strip()
     if type in ("all", "image", "video"):
-        items += await _media_items(u, MEDIA_KINDS if type == "all" else (type,), before, limit + 1)
+        items += await _media_items(u, MEDIA_KINDS if type == "all" else (type,), before, limit + 1, q_text)
     if type in ("all", "document", "video"):
-        items += await _document_items(u, before, limit + 1, with_video=type in ("all", "video"))
+        items += await _document_items(u, before, limit + 1, with_video=type in ("all", "video"), q_text=q_text)
         if type == "video":
             items = [i for i in items if i["kind"] == "video"]
     items.sort(key=lambda i: i["created_at"], reverse=True)

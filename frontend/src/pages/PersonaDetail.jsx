@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, MessageSquare, RefreshCw, Wand2, Copy, Trash2, Brain, Plus, Volume2, Loader2 } from "lucide-react";
+import { ArrowLeft, MessageSquare, RefreshCw, Wand2, Copy, Trash2, Brain, Plus, Volume2, Loader2, Star } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -79,6 +79,7 @@ export default function PersonaDetail() {
     setNewMem(""); loadMem(); toast.success("Memori disimpan");
   };
   const toggleMem = async (m) => { await api.put(`/memory/${m.id}`, { enabled: !m.enabled }); loadMem(); };
+  const pinMem = async (m) => { await api.put(`/memory/${m.id}`, { pinned: !m.pinned }); loadMem(); };
   const delMem = async (m) => { await api.delete(`/memory/${m.id}`); loadMem(); };
 
   return (
@@ -178,10 +179,12 @@ export default function PersonaDetail() {
                 <input className="input-dark" placeholder="Tambah memori (mis. Saya suka kopi hitam)" value={newMem} onChange={(e) => setNewMem(e.target.value)} data-testid="mem-input" />
                 <button onClick={addMem} data-testid="mem-add" className="btn-grad rounded-xl px-4"><Plus size={18} /></button>
               </div>
-              {mems.length === 0 ? <p className="text-sm text-slate-500">Belum ada memori untuk persona ini.</p> : mems.map((m) => (
+              <p className="mb-3 text-xs text-slate-500">Memori ⭐ <b>prioritas</b> selalu ikut di setiap percakapan; memori lain dipilih otomatis sesuai relevansi pesan (maks 10) untuk menghemat token.</p>
+              {mems.length === 0 ? <p className="text-sm text-slate-500">Belum ada memori untuk persona ini.</p> : [...mems].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map((m) => (
                 <div key={m.id} className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3" data-testid={`mem-${m.id}`}>
-                  <span className={`text-sm ${m.enabled ? "text-slate-700" : "text-slate-500 line-through"}`}>{m.content}</span>
+                  <span className={`flex items-center gap-2 text-sm ${m.enabled ? "text-slate-700" : "text-slate-500 line-through"}`}>{m.pinned && <Star size={13} className="shrink-0 fill-[#F59E0B] text-[#F59E0B]" />}{m.content}</span>
                   <div className="flex items-center gap-3">
+                    <button onClick={() => pinMem(m)} title={m.pinned ? "Lepas prioritas" : "Jadikan prioritas (selalu diingat)"} className={m.pinned ? "text-[#F59E0B]" : "text-slate-400 hover:text-[#F59E0B]"} data-testid={`mem-pin-${m.id}`}><Star size={15} className={m.pinned ? "fill-[#F59E0B]" : ""} /></button>
                     <button onClick={() => toggleMem(m)} className="text-xs text-[#2F6BFF]">{m.enabled ? "Nonaktif" : "Aktif"}</button>
                     <button onClick={() => delMem(m)} className="text-slate-500 hover:text-[#EF4444]"><Trash2 size={14} /></button>
                   </div>

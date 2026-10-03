@@ -238,6 +238,8 @@ async def register(x: RegisterIn, request: Request):
         "created_at": now_iso(),
     }
     await db.users.insert_one(doc)
+    from friends import convert_email_invites
+    await convert_email_invites(doc)
     await db.credit_transactions.insert_one({
         "id": new_id(), "user_id": uid, "type": "grant", "amount": int(trial["trial_credits"]),
         "balance_after": int(trial["trial_credits"]), "description": f"Paket percobaan {trial['trial_days']} hari", "created_at": now_iso(),

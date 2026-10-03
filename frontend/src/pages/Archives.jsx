@@ -108,7 +108,7 @@ export default function Archives() {
   const onRestored = (a) => setItems((p) => p.map((x) => (x.id === a.id ? { ...x, restored: true } : x)));
 
   return (
-    <div className="mx-auto max-w-4xl p-5 sm:p-8 fade-up" data-testid="archives-page">
+    <div className="mx-auto max-w-4xl p-5 sm:p-8" data-testid="archives-page">
       <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 sm:text-3xl"><Archive size={26} className="text-[#2F6BFF]" /> Arsip Percakapan</h1>
       <p className="mt-1 text-sm text-slate-500">Percakapan yang tidak aktif dirangkum dan diarsipkan otomatis (atur jedanya di Settings). Cari, lihat isinya, pulihkan ke chat, atau jadikan pengingat.</p>
       <div className="relative mt-5"><Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />

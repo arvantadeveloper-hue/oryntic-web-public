@@ -66,10 +66,19 @@ def reset_email(name: str, link: str) -> tuple:
     return subject, html, text
 
 
-def invite_email(inviter: str, workspace: str, link: str) -> tuple:
-    i, w = escape(inviter or BRAND), escape(workspace or BRAND)
-    subject = f"{inviter} mengundang Anda ke workspace {workspace} — {BRAND}"
-    body = f"{i} mengundang Anda bergabung ke workspace <b>{w}</b> di {BRAND}. Buka tautan untuk menerima atau menolak undangan."
-    html = _layout("Undangan bergabung ke tim", body, "Lihat Undangan", link, "Undangan ini tidak kedaluwarsa dan dapat dibatalkan oleh pengundang.")
-    text = f"{inviter} mengundang Anda bergabung ke workspace {workspace} di {BRAND}.\nBuka tautan untuk menerima atau menolak undangan:\n{link}"
+def friend_request_email(inviter: str, link: str) -> tuple:
+    i = escape(inviter or BRAND)
+    subject = f"{inviter} ingin berteman dengan Anda — {BRAND}"
+    body = f"{i} mengirim permintaan pertemanan di {BRAND}. Setelah Anda setujui, kalian bisa chat dan berbagi grup bersama asisten AI."
+    html = _layout("Permintaan pertemanan", body, "Lihat Permintaan", link, "Anda bisa menerima atau menolak permintaan ini dari menu Teman.")
+    text = f"{inviter} ingin berteman dengan Anda di {BRAND}.\nLihat permintaan di: {link}"
+    return subject, html, text
+
+
+def friend_invite_email(inviter: str, link: str) -> tuple:
+    i = escape(inviter or BRAND)
+    subject = f"{inviter} mengajak Anda bergabung di {BRAND}"
+    body = f"{i} ingin berteman dengan Anda di {BRAND} — platform asisten AI pribadi. Daftar gratis dengan alamat email ini; permintaan pertemanannya otomatis menunggu Anda."
+    html = _layout("Ajakan bergabung", body, "Daftar Sekarang", link, "Gunakan alamat email yang sama saat mendaftar agar permintaan pertemanan langsung muncul.")
+    text = f"{inviter} mengajak Anda bergabung di {BRAND}.\nDaftar di: {link}"
     return subject, html, text

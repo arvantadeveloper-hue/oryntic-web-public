@@ -29,7 +29,7 @@ async def archive_conversation(conv: dict, u: dict, reason: str) -> Optional[dic
     live = await db.messages.find({"conversation_id": cid, "archived": {"$ne": True}, "is_summary": {"$ne": True}}, {"_id": 0, "id": 1, "created_at": 1}).sort("created_at", 1).to_list(5000)
     if len(live) < MIN_LIVE_MSGS:
         return None
-    summary, used = await _merge_summary(cid, u, conv, "Summarize this conversation so the assistant can continue it later without the raw transcript.")
+    core, summary, used = await _merge_summary(cid, u, conv, "Summarize this conversation so the assistant can continue it later without the raw transcript.")
     await record_usage(u["id"], "chat_summary", used, {"conversation_id": cid})
     aid = new_id()
     ids = [m["id"] for m in live]
@@ -41,9 +41,9 @@ async def archive_conversation(conv: dict, u: dict, reason: str) -> Optional[dic
     await db.messages.insert_one(dict(note))
     entry = {"id": aid, "user_id": conv.get("user_id") or u["id"], "conversation_id": cid, "title": conv.get("title") or "Percakapan", "conversation_type": conv.get("type"),
              "persona_names": [m["name"] for m in conv.get("members") or []], "period_start": live[0]["created_at"], "period_end": live[-1]["created_at"],
-             "summary": summary, "message_ids": ids, "message_count": len(ids), "reason": reason, "restored": False, "created_at": now_iso()}
+             "summary": summary, "core": core, "message_ids": ids, "message_count": len(ids), "reason": reason, "restored": False, "created_at": now_iso()}
     await db.chat_archives.insert_one(dict(entry))
-    await db.conversations.update_one({"id": cid}, {"$set": {"memory_summary": summary, "summary_snoozed_at_count": 0, "archive_checked_at": now_iso()}})
+    await db.conversations.update_one({"id": cid}, {"$set": {"memory_summary": core, "summary_snoozed_at_count": 0, "archive_checked_at": now_iso()}})
     return clean(entry)
 
 

@@ -194,7 +194,7 @@ class AddPersonaIn(BaseModel):
 @router.post("/conversations/{cid}/personas")
 async def add_persona(cid: str, x: AddPersonaIn, u: dict = Depends(current_user)):
     """Invite another assistant into an existing chat/meeting."""
-    conv = await db.conversations.find_one({"id": cid, "workspace_id": workspace_id(u)}, {"_id": 0})
+    conv = await db.conversations.find_one({"id": cid, "$or": [{"workspace_id": workspace_id(u)}, {"participants": u["id"]}]}, {"_id": 0})
     if not conv:
         raise HTTPException(404, "Conversation not found")
     p = await db.personas.find_one({"id": x.persona_id, "user_id": workspace_id(u), "deleted": {"$ne": True}}, {"_id": 0})
@@ -205,6 +205,8 @@ async def add_persona(cid: str, x: AddPersonaIn, u: dict = Depends(current_user)
     members = (conv.get("members") or []) + [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")}]
     ctype = "group" if conv.get("type") == "private" else conv.get("type")
     upd = {"members": members, "type": ctype, "updated_at": now_iso()}
+    if not conv.get("persona_id"):
+        upd["persona_id"] = p["id"]
     if conv.get("type") == "private":
         upd["title"] = _conv_title("group", [{"name": m["name"]} for m in members])
     await db.conversations.update_one({"id": cid}, {"$addToSet": {"persona_ids": p["id"]}, "$set": upd})

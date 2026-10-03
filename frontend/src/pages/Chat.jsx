@@ -51,6 +51,8 @@ export default function Chat() {
   const [liveMap, setLiveMap] = useState({});
   const [liveOrder, setLiveOrder] = useState([]);
   const [personas, setPersonas] = useState(null);
+  const [friends, setFriends] = useState([]);
+  const [pickedFriends, setPickedFriends] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [picked, setPicked] = useState([]);
   const [mode, setMode] = useState("chat");
@@ -89,7 +91,7 @@ export default function Chat() {
       requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - prevH; });
     } catch (e) {} finally { setLoadingOlder(false); }
   };
-  useEffect(() => { loadConvs(); api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {}); }, [user?.id]);
+  useEffect(() => { loadConvs(); api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {}); api.get("/friends").then((r) => setFriends(r.data.friends || [])).catch(() => {}); }, [user?.id]);
   useEffect(() => {
     if (id) { setMsgsLoading(true); setMessages([]); api.get(`/conversations/${id}/messages?limit=50`).then((r) => {
       setConv(r.data.conversation); applyPage(r.data);
@@ -130,11 +132,19 @@ export default function Chat() {
   useEffect(() => { if (id) { api.post(`/conversations/${id}/read`).catch(() => {}); setConvs((cs) => cs.map((c) => (c.id === id ? { ...c, unread: false } : c))); } }, [id, messages.length]);
   const togglePick = (pid) => setPicked((p) => p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid]);
   const [groupTitle, setGroupTitle] = useState("");
+  const canCreate = picked.length + pickedFriends.length >= 2 && (picked.length > 0 || pickedFriends.length > 0);
   const startConv = async () => {
-    if (picked.length < 2) { toast.error("Pilih minimal dua asisten untuk grup"); return; }
-    const r = await api.post("/conversations", { persona_ids: picked, type: "group", title: groupTitle.trim() || undefined });
-    setShowModal(false); setGroupTitle(""); loadConvs();
-    nav(`/chat/${r.data.id}`);
+    if (!canCreate) { toast.error("Pilih minimal dua anggota (asisten dan/atau teman)"); return; }
+    try {
+      const r = await api.post("/conversations", { persona_ids: picked, participant_ids: pickedFriends, type: "group", title: groupTitle.trim() || undefined });
+      setShowModal(false); setGroupTitle(""); setPickedFriends([]); loadConvs();
+      nav(`/chat/${r.data.id}`);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Gagal membuat grup"); }
+  };
+  const dmOf = (fid) => convs.find((c) => c.type === "dm" && (c.participants || []).includes(fid));
+  const openFriend = async (f, mobile) => {
+    try { const r = await api.post(`/friends/${f.id}/chat`); if (mobile) setShowConvList(false); nav(`/chat/${r.data.id}`); loadConvs(); }
+    catch (e) { toast.error("Gagal membuka chat"); }
   };
 
   const onFiles = async (e) => {
@@ -232,8 +242,8 @@ export default function Chat() {
   const isMulti = conv && conv.type !== "private";
 
   const ql = q.trim().toLowerCase();
-  const groups = convs.filter((c) => c.type !== "private" && (!ql || (c.title || "").toLowerCase().includes(ql)));
-  const asst = (personas || []).filter((p) => !ql || p.name.toLowerCase().includes(ql));
+  const groups = convs.filter((c) => c.type !== "private" && c.type !== "dm" && (!ql || (c.title || "").toLowerCase().includes(ql)));
+  const asst = (personas || []).filter((p) => !ql || p.name.toLowerCase().includes(ql)).sort((a, b) => { const ta = directOf(a.id)?.updated_at || "", tb = directOf(b.id)?.updated_at || ""; return ta !== tb ? (tb > ta ? 1 : -1) : a.name.localeCompare(b.name); });
   const Row = ({ onClick, active, avatar, title, sub, time, unread, testid, icon }) => (
     <div onClick={onClick} data-testid={testid} className={`group flex cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2.5 ${active ? "bg-[#EEF3FF]" : "hover:bg-slate-50"}`}>
       {avatar}
@@ -257,11 +267,18 @@ export default function Chat() {
             avatar={<Avatar name={p.name} portrait={p.portrait} size={40} />} title={p.name} sub={c?.last_message || p.summary || "Ketuk untuk mulai chat"} time={c ? fmtTime(c.updated_at) : ""} unread={!!c?.unread} />
         ); })}
         {personas && asst.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">Tidak ada asisten.</p>}
+        {friends.length > 0 && (<>
+          <div className="flex items-center justify-between px-2 pt-3"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Teman</p><button onClick={() => nav("/friends")} className="text-[11px] font-semibold text-[#2F6BFF]" data-testid="side-friends">Kelola</button></div>
+          {friends.filter((f) => !ql || f.name.toLowerCase().includes(ql)).sort((a, b) => ((dmOf(b.id)?.updated_at || "") > (dmOf(a.id)?.updated_at || "") ? 1 : -1)).map((f) => { const c = dmOf(f.id); return (
+            <Row key={f.id} onClick={() => (c ? (nav(`/chat/${c.id}`), mobile && setShowConvList(false)) : openFriend(f, mobile))} active={c && c.id === id} testid={`${mobile ? "friend-m-" : "friend-"}${f.id}`}
+              avatar={<span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#10B981] text-sm font-bold text-white">{(f.name || "?")[0].toUpperCase()}</span>} title={f.name} sub={c?.last_message || "Teman · ketuk untuk chat"} time={c ? fmtTime(c.updated_at) : ""} unread={!!c?.unread} />
+          ); })}
+        </>)}
         <div className="flex items-center justify-between px-2 pt-3"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Grup</p><button onClick={() => { openModal("group"); if (mobile) setShowConvList(false); }} className="text-[11px] font-semibold text-[#2F6BFF]" data-testid={mobile ? "new-group-btn-mobile" : "new-group-btn"}>+ Grup Baru</button></div>
         {groups.map((c) => (
           <Row key={c.id} onClick={() => { nav(`/chat/${c.id}`); if (mobile) setShowConvList(false); }} active={c.id === id} testid={`${mobile ? "conv-m-" : "conv-"}${c.id}`}
             avatar={<span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0B132B] text-white">{c.type === "meeting" ? <Video size={17} /> : <Users size={17} />}</span>}
-            title={c.title} sub={c.last_message || `${c.members?.length || 0} asisten`} time={fmtTime(c.updated_at)} unread={!!c.unread}
+            title={c.title} sub={c.last_message || `${c.members?.length || 0} asisten${(c.humans || []).length > 1 ? ` · ${c.humans.length} orang` : ""}`} time={fmtTime(c.updated_at)} unread={!!c.unread}
             icon={<button onClick={(e) => delConv(c, e)} className="shrink-0 text-slate-300 transition hover:text-[#EF4444] md:opacity-0 md:group-hover:opacity-100" data-testid={`del-${c.id}`}><Trash2 size={13} /></button>} />
         ))}
         {!convsLoading && groups.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">Belum ada grup. Buat grup untuk mengajak beberapa asisten sekaligus.</p>}
@@ -293,7 +310,7 @@ export default function Chat() {
             <>
               <div className="flex -space-x-2">{(conv.members || []).slice(0, 4).map((m) => <div key={m.id} className="rounded-full ring-2 ring-white"><Avatar name={m.name} portrait={m.portrait} size={32} /></div>)}</div>
               <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{conv.title}</p>
-                <p className="truncate text-xs text-slate-400">{conv.type === "private" ? (conv.members?.[0]?.summary || "Asisten AI") : `Grup · ${(conv.members || []).map((m) => m.name).join(", ")}`}</p></div>
+                <p className="truncate text-xs text-slate-400">{conv.type === "dm" ? `Teman${(conv.members || []).length ? ` · asisten: ${conv.members.map((m) => m.name).join(", ")}` : " · tambahkan asisten dengan tombol +"}` : conv.type === "private" ? (conv.members?.[0]?.summary || "Asisten AI") : `Grup · ${[...(conv.humans || []).filter((h) => h.id !== user?.id).map((h) => h.name), ...(conv.members || []).map((m) => m.name)].join(", ")}`}</p></div>
             </>
           ) : <p className="truncate text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
           {conv && (
@@ -418,9 +435,18 @@ export default function Chat() {
           <div className="relative w-full max-w-md rounded-3xl border border-[#E7ECF3] bg-white p-6 shadow-2xl fade-up" data-testid="new-chat-modal">
             <button onClick={() => setShowModal(false)} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
             <h3 className="text-lg font-bold text-slate-900">Grup Baru</h3>
-            <p className="mt-1 text-sm text-slate-500">Pilih dua asisten atau lebih. Di grup, asisten yang paling relevan yang menjawab — atau sebut @Nama.</p>
+            <p className="mt-1 text-sm text-slate-500">Pilih asisten dan/atau teman (minimal dua anggota). Di grup, asisten yang relevan yang menjawab — atau sebut @Nama. Bila ada teman, asisten hanya menjawab saat jelas ditanya.</p>
             <input className="input-dark mt-3 py-2.5" placeholder="Nama grup (opsional)" value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} data-testid="group-title-input" />
             <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
+              {friends.length > 0 && <p className="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Teman</p>}
+              {friends.map((f) => { const on = pickedFriends.includes(f.id); return (
+                <button key={f.id} onClick={() => setPickedFriends((p) => (p.includes(f.id) ? p.filter((x) => x !== f.id) : [...p, f.id]))} data-testid={`pick-friend-${f.id}`} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${on ? "border-[#10B981] bg-emerald-50" : "border-[#E7ECF3] hover:bg-slate-50"}`}>
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#10B981] text-sm font-bold text-white">{(f.name || "?")[0].toUpperCase()}</span>
+                  <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold text-slate-900">{f.name}</span><span className="block truncate text-xs text-slate-400">{f.email}</span></span>
+                  <span className={`flex h-5 w-5 items-center justify-center rounded-md border ${on ? "border-transparent bg-[#10B981] text-white" : "border-slate-300"}`}>{on && <Check size={13} />}</span>
+                </button>
+              ); })}
+              {friends.length > 0 && <p className="px-1 pt-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Asisten</p>}
               {(personas || []).map((p) => {
                 const on = picked.includes(p.id);
                 return (
@@ -433,8 +459,8 @@ export default function Chat() {
               })}
             </div>
             <div className="mt-4 flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500">{picked.length === 0 ? "Belum dipilih" : `${picked.length} asisten dipilih`}</span>
-              <button onClick={startConv} disabled={picked.length < 2} className="btn-grad flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm disabled:opacity-50" data-testid="start-conv-btn"><Users size={15} /> Buat Grup</button>
+              <span className="text-xs font-semibold text-slate-500">{picked.length + pickedFriends.length === 0 ? "Belum dipilih" : `${picked.length} asisten${pickedFriends.length ? ` · ${pickedFriends.length} teman` : ""}`}</span>
+              <button onClick={startConv} disabled={!canCreate} className="btn-grad flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm disabled:opacity-50" data-testid="start-conv-btn"><Users size={15} /> Buat Grup</button>
             </div>
           </div>
         </div>

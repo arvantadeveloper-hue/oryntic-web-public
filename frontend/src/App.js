@@ -22,6 +22,8 @@ import Admin from "./pages/Admin";
 import VerifyEmail from "./pages/VerifyEmail";
 import Gallery from "./pages/Gallery";
 import Archives from "./pages/Archives";
+import SharePage from "./pages/SharePage";
+import Friends from "./pages/Friends";
 import ResetPassword from "./pages/ResetPassword";
 import Calendar from "./pages/Calendar";
 
@@ -61,6 +63,7 @@ function App() {
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/verify-email" element={<VerifyEmail />} />
               <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/s/:code" element={<SharePage />} />
               <Route element={<Protected><AppLayout /></Protected>}>
                 <Route path="/home" element={<Home />} />
                 <Route path="/personas" element={<AdminOnly><Personas /></AdminOnly>} />
@@ -74,6 +77,7 @@ function App() {
                 <Route path="/calendar" element={<Calendar />} />
                 <Route path="/gallery" element={<Gallery />} />
                 <Route path="/archives" element={<Archives />} />
+                <Route path="/friends" element={<Friends />} />
                 <Route path="/wallet" element={<AdminOnly><WalletPage /></AdminOnly>} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/admin" element={<AdminOnly platform><Admin /></AdminOnly>} />
