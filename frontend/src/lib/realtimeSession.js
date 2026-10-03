@@ -51,8 +51,8 @@ export class ContextPruner {
 
 // One OpenAI Realtime WebRTC session (negotiated via our backend). sendAudio=false → receive-only (panelists get the user's words as text).
 export class RealtimeSession {
-  constructor({ callId, persona, primary, role, stream, onEvent, onError, sensitivity = "medium", createResponse = false, sendAudio = true }) {
-    this.callId = callId; this.persona = persona; this.primary = primary; this.role = role; this.stream = stream;
+  constructor({ callId, persona, primary, role, stream, onEvent, onError, onTrack, sensitivity = "medium", createResponse = false, sendAudio = true }) {
+    this.callId = callId; this.persona = persona; this.primary = primary; this.role = role; this.stream = stream; this.onTrack = onTrack;
     this.onEvent = onEvent; this.onError = onError; this.sensitivity = sensitivity; this.createResponse = createResponse; this.sendAudio = sendAudio;
     this.pc = null; this.dc = null; this.audioEl = null; this.ac = null; this.analyser = null; this.buf = null;
     this.level = 0; this.closed = false;
@@ -62,7 +62,7 @@ export class RealtimeSession {
   async connect() {
     const pc = new RTCPeerConnection(); this.pc = pc;
     const audioEl = document.createElement("audio"); audioEl.autoplay = true; document.body.appendChild(audioEl); this.audioEl = audioEl;
-    pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; this._monitor(e.streams[0]); };
+    pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; this._monitor(e.streams[0]); this.onTrack?.(e.streams[0]); };
     if (this.sendAudio && this.stream) this.stream.getTracks().forEach((t) => pc.addTrack(t, this.stream));
     else pc.addTransceiver("audio", { direction: "recvonly" });
     const dc = pc.createDataChannel("oai-events"); this.dc = dc;

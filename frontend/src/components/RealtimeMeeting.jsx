@@ -3,6 +3,7 @@ import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap, Gavel } from "lucide-rea
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { RealtimeSession, runVoiceTool } from "../lib/realtimeSession";
+import { PeerMesh, createMixer } from "../lib/peerAudio";
 import { PresentationPanel } from "./PresentationPanel";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
@@ -35,6 +36,15 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const notulen = useNotulenGate(cid);
 
   const sessionsRef = useRef([]); // RealtimeSession[], [0] = moderator
+  // humans: WebRTC mesh; the host (group owner) runs the single assistant session and mixes audio both ways
+  const humans = (conv.humans || []).filter((h) => h.id !== user?.id);
+  const isHost = !conv.user_id || conv.user_id === user?.id;
+  const hasAI = (conv.persona_ids || members.map((m) => m.id)).length > 0;
+  const runAI = isHost && hasAI;
+  const meshRef = useRef(null);
+  const mixRef = useRef(null); // { ac, inMix, outMix, audioEls: {} }
+  const [peers, setPeers] = useState([]);
+  const [turn, setTurn] = useState(null);
   const pipeRef = useRef(null);
   const bargeTimerRef = useRef(null);
   const startedAtRef = useRef(null);
@@ -237,15 +247,40 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     const stale = () => run !== runIdRef.current;
     let created = [];
     try {
-      const c = await api.post("/realtime/calls", { conversation_id: cid });
-      created = c.data.sessions;
-      if (stale()) { created.forEach((x) => api.post(`/realtime/calls/${x.call_id}/end`, { elapsed_seconds: 0 }).catch(() => {})); return; }
-      setCpmTotal(c.data.credits_per_min_total); setModId(c.data.moderator_persona_id);
+      if (runAI) {
+        const c = await api.post("/realtime/calls", { conversation_id: cid });
+        created = c.data.sessions;
+        if (stale()) { created.forEach((x) => api.post(`/realtime/calls/${x.call_id}/end`, { elapsed_seconds: 0 }).catch(() => {})); return; }
+        setCpmTotal(c.data.credits_per_min_total); setModId(c.data.moderator_persona_id);
+      }
       const mic = new MicPipeline(micPrefs);
       const stream = await mic.start();
       if (stale()) { mic.stop(); return; }
       pipeRef.current = mic; setPipe(mic);
-      const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, role: x.role, stream, sendAudio: x.role !== "panelist", sensitivity: micPrefs.sensitivity, createResponse: false, onEvent: handleEvent, onError: () => { if (!endedRef.current) toast.message("Koneksi salah satu peserta terputus"); } }));
+      let aiInput = stream;
+      if (humans.length > 0) {
+        const ac = new (window.AudioContext || window.webkitAudioContext)();
+        const inMix = createMixer(ac); const outMix = createMixer(ac);
+        inMix.add(stream); outMix.add(stream);
+        mixRef.current = { ac, inMix, outMix, audioEls: {} };
+        if (runAI) aiInput = inMix.stream; // assistant hears me + every friend
+        const mesh = new PeerMesh({
+          cid, myId: user?.id, localStream: runAI ? outMix.stream : stream, // friends hear me (+ the assistant when I host it)
+          onPeers: setPeers,
+          onRemoteStream: (pid, rs) => {
+            const m = mixRef.current; if (!m) return;
+            const old = m.audioEls[pid];
+            if (old) { try { if (old.srcObject) m.inMix.remove(old.srcObject); old.srcObject = null; old.remove(); } catch (e) {} delete m.audioEls[pid]; }
+            if (rs) { const el = document.createElement("audio"); el.autoplay = true; el.srcObject = rs; document.body.appendChild(el); m.audioEls[pid] = el; if (runAI) m.inMix.add(rs); }
+          },
+        });
+        meshRef.current = mesh;
+        await mesh.start(); setTurn(mesh.turn);
+        if (stale()) { mesh.close(); return; }
+      }
+      if (!runAI) { startedAtRef.current = Date.now(); listening(); return; }
+      const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, role: x.role, stream: aiInput, sendAudio: x.role !== "panelist", sensitivity: micPrefs.sensitivity, createResponse: false, onEvent: handleEvent, onError: () => { if (!endedRef.current) toast.message("Koneksi salah satu peserta terputus"); },
+        onTrack: (rs) => { if (mixRef.current) mixRef.current.outMix.add(rs); } }));
       sessionsRef.current = sessions;
       await Promise.all(sessions.map((s) => s.connect()));
       if (stale()) return;
@@ -272,6 +307,8 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     if (userTimerRef.current) clearTimeout(userTimerRef.current);
     if (bargeTimerRef.current) clearTimeout(bargeTimerRef.current);
     sessionsRef.current.forEach((s) => s.close());
+    try { meshRef.current?.close(); } catch (e) {}
+    try { const m = mixRef.current; if (m) { Object.values(m.audioEls).forEach((el) => { el.srcObject = null; el.remove(); }); m.inMix.close(); m.outMix.close(); m.ac.close(); mixRef.current = null; } } catch (e) {}
     try { pipeRef.current?.stop(); } catch (e) {}
   };
 
@@ -318,8 +355,10 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const toggleMute = () => { const nv = !muted; setMuted(nv); pipeRef.current?.setMuted(nv); };
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0"), ss = String(elapsed % 60).padStart(2, "0");
   const modName = members.find((m) => m.id === modId)?.name || "Moderator";
-  const label = { connecting: "Menyambungkan semua peserta...", listening: `Mendengarkan Anda — ${modName} memandu; sebut nama asisten lain untuk minta pendapatnya.`, user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
-  const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" }, ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait, isMod: m.id === modId }))];
+  const label = { connecting: "Menyambungkan semua peserta...", listening: !runAI ? (hasAI ? "Terhubung dengan teman — asisten aktif saat pemilik grup bergabung." : "Panggilan suara dengan teman (WebRTC)."), [`listening`]: !runAI ? (hasAI ? "Terhubung dengan teman — asisten aktif saat pemilik grup bergabung." : "Panggilan suara dengan teman (WebRTC).") : `Mendengarkan Anda — ${modName} memandu; sebut nama asisten lain untuk minta pendapatnya.`, user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
+  const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" },
+    ...humans.map((h) => { const p = peers.find((x) => x.id === h.id); return { id: h.id, name: h.name, isHuman: true, online: !!p, state: p?.state }; }),
+    ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait, isMod: m.id === modId }))];
 
   const participants = tiles.map((tl) => ({ ...tl, status: statusMap[tl.id] || "", level: tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0) }));
   const stage = (
@@ -329,7 +368,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         {conv.task_id && <PresentationPanel taskId={conv.task_id} refreshKey={taskTick} />}
         <div className={conv.task_id ? "flex w-56 shrink-0 flex-col gap-3 overflow-y-auto" : "mx-auto grid w-full max-w-6xl gap-4"} style={conv.task_id ? {} : { gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
           {tiles.map((tl) => (
-            <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={statusMap[tl.id] || ""} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} />
+            <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={tl.isHuman ? (tl.online ? (tl.state === "connected" ? "terhubung" : "menyambung…") : "belum bergabung") : (statusMap[tl.id] || "")} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} />
           ))}
         </div>
       </div>
@@ -361,6 +400,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     <div className="fixed inset-0 z-[96] flex flex-col" style={{ background: "radial-gradient(1200px 500px at 50% -10%, #16213e 0%, #0a0f1f 60%)" }} data-testid="realtime-meeting">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 text-white sm:px-6">
         <span className="flex h-9 items-center gap-2 rounded-full bg-white/10 px-3 text-sm font-semibold backdrop-blur"><span className={`h-2 w-2 rounded-full ${phase === "connecting" ? "bg-amber-400 animate-pulse" : "bg-emerald-400"}`} /> {conv.title}</span>
+        {humans.length > 0 && <span className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3 text-xs font-semibold text-white/80 backdrop-blur" data-testid="rtm-humans" title={turn === false ? "Tanpa server TURN (hanya STUN) — di jaringan ketat suara teman bisa gagal tersambung" : "WebRTC + TURN aktif"}>{peers.filter((p) => p.state === "connected").length}/{humans.length} teman terhubung{runAI ? " · asisten via host" : hasAI ? " · asisten dijalankan host" : ""}</span>}
         <span className="flex items-center gap-1 rounded-full bg-[#2F6BFF]/20 px-2.5 py-1 text-[11px] font-bold text-[#8FB0FF]" data-testid="rtm-badge"><Zap size={11} /> Realtime · {members.length} agen</span>
         <label className="flex h-9 items-center gap-1.5 rounded-full bg-amber-400/15 px-3 text-xs font-semibold text-amber-200" data-testid="rtm-moderator-picker">
           <Gavel size={13} /> Moderator

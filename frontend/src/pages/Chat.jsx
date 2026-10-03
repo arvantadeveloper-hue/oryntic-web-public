@@ -129,7 +129,7 @@ export default function Chat() {
   };
   const directOf = (pid) => convs.find((c) => c.type === "private" && (c.persona_ids || [])[0] === pid);
   const fmtTime = (iso) => { if (!iso) return ""; const d = new Date(iso); const today = new Date().toDateString() === d.toDateString(); return today ? d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString("id-ID", { day: "numeric", month: "short" }); };
-  useEffect(() => { if (id) { api.post(`/conversations/${id}/read`).catch(() => {}); setConvs((cs) => cs.map((c) => (c.id === id ? { ...c, unread: false } : c))); } }, [id, messages.length]);
+  useEffect(() => { if (id) { api.post(`/conversations/${id}/read`).then(() => window.dispatchEvent(new Event("oryntix:badges"))).catch(() => {}); setConvs((cs) => cs.map((c) => (c.id === id ? { ...c, unread: false } : c))); } }, [id, messages.length]);
   const togglePick = (pid) => setPicked((p) => p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid]);
   const [groupTitle, setGroupTitle] = useState("");
   const canCreate = picked.length + pickedFriends.length >= 2 && (picked.length > 0 || pickedFriends.length > 0);
@@ -423,7 +423,7 @@ export default function Chat() {
       {showArchive && conv && <ArchiveModal cid={id} onClose={() => setShowArchive(false)} />}
       {videoOpen && conv && (conv.type === "private" && rt.enabled
         ? <RealtimeCall conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />
-        : conv.type !== "private" && rt.enabled
+        : conv.type !== "private" && (rt.enabled || (conv.humans || []).length > 1)
         ? <RealtimeMeeting conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />
         : <VideoRoom conv={conv} cid={id} messages={messages} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />)}
 

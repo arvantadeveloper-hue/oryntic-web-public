@@ -756,7 +756,7 @@ async def _persona_reply(ctx: ReplyCtx):
 
 async def _finish_stream(cid: str, u: dict, total: int, last_message: str):
     bal = ((await db.users.find_one({"id": workspace_id(u)}, {"_id": 0, "credits": 1})) or {}).get("credits", 0)
-    await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso(), "last_message": last_message[:120]}})
+    await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso(), "last_message": last_message[:120], "last_sender_id": u["id"], f"read_at.{u['id']}": now_iso()}})
     return f"data: {json.dumps({'done': True, 'credits_used': total, 'credits': bal})}\n\ndata: [DONE]\n\n"
 
 

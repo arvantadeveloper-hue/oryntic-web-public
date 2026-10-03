@@ -23,8 +23,8 @@ class ConnectionManager:
                 if not conns:
                     self.rooms.pop(cid, None)
 
-    async def broadcast(self, cid: str, payload: dict):
-        conns = list(self.rooms.get(cid, set()))
+    async def broadcast(self, cid: str, payload: dict, exclude=None):
+        conns = [w for w in self.rooms.get(cid, set()) if w is not exclude]
         dead = []
         for ws in conns:
             try:

@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { NavLink, useNavigate, Outlet } from "react-router-dom";
 import { Home, MessageSquare, Bot, FileText, Bell, Wallet, User, Shield, LogOut, Menu, X, Sparkles, Search, HelpCircle, Plus, Settings, CalendarDays, Images, Archive, Users } from "lucide-react";
 import { Logo } from "./Logo";
 import { useAuth } from "../context/AuthContext";
+import { api } from "../lib/api";
 import { useI18n } from "../i18n";
 import { IncomingCall } from "./IncomingCall";
 import { TaskNotifier } from "./TaskChatTools";
@@ -13,6 +14,19 @@ export function AppLayout() {
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [badges, setBadges] = useState({ friend_requests: 0, unread_chats: 0 });
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const pull = () => api.get("/notifications/badges").then((r) => alive && setBadges(r.data)).catch(() => {});
+    pull();
+    const t = setInterval(pull, 20000);
+    const onVis = () => { if (document.visibilityState === "visible") pull(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("oryntix:badges", pull);
+    return () => { alive = false; clearInterval(t); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("oryntix:badges", pull); };
+  }, [user?.id]); // eslint-disable-line
+  const badgeOf = (id) => (id === "friends" ? badges.friend_requests : id === "chat" ? badges.unread_chats : 0);
 
   const isAdmin = user?.role === "admin";
   const allItems = [
@@ -44,7 +58,8 @@ export function AppLayout() {
           <NavLink key={it.id} to={it.to} data-testid={`nav-${it.id}`} onClick={() => setOpen(false)}
             className={({ isActive }) => `nav-item flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium md:text-sm ${isActive ? "active" : ""}`}>
             <it.icon size={18} className="nav-ico" />
-            {it.label}
+            <span className="flex-1">{it.label}</span>
+            {badgeOf(it.id) > 0 && <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#EF4444] px-1.5 text-[11px] font-bold text-white" data-testid={`badge-${it.id}`}>{badgeOf(it.id) > 99 ? "99+" : badgeOf(it.id)}</span>}
           </NavLink>
         ))}
       </nav>

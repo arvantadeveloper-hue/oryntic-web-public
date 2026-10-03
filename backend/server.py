@@ -3,6 +3,7 @@ import asyncio
 import logging
 
 import jwt
+import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from starlette.middleware.cors import CORSMiddleware
 
@@ -18,6 +19,7 @@ from gallery import router as gallery_router
 from archives import router as archives_router, archive_tick
 from shares import router as shares_router
 from friends import router as friends_router
+from rtc import router as rtc_router
 from workspace import router as workspace_router
 from assignments import router as assignments_router, tasks_tick
 from models import router as models_router
@@ -48,6 +50,7 @@ app.include_router(gallery_router)
 app.include_router(archives_router)
 app.include_router(shares_router)
 app.include_router(friends_router)
+app.include_router(rtc_router)
 app.include_router(workspace_router)
 app.include_router(assignments_router)
 app.include_router(models_router)
@@ -73,12 +76,21 @@ async def ws_meeting(ws: WebSocket, cid: str, token: str = ""):
         await ws.close(code=4403)
         return
     await manager.connect(cid, ws)
+    me = {"from": u["id"], "from_name": u.get("name") or "Peserta"}
     try:
         while True:
-            await ws.receive_text()
+            raw = await ws.receive_text()
+            try:
+                msg = json.loads(raw)
+            except Exception:
+                continue
+            if isinstance(msg, dict) and msg.get("type") == "rtc":  # WebRTC signaling relay (offer/answer/ice/join/leave)
+                await manager.broadcast(cid, {**msg, **me}, exclude=ws)
     except WebSocketDisconnect:
+        await manager.broadcast(cid, {"type": "rtc", "kind": "leave", **me})
         await manager.disconnect(cid, ws)
     except Exception:
+        await manager.broadcast(cid, {"type": "rtc", "kind": "leave", **me})
         await manager.disconnect(cid, ws)
 
 app.add_middleware(
