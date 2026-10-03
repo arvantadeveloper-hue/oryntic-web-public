@@ -123,8 +123,7 @@ async def accept_pending(conv: dict, u: dict, mode: str) -> dict:
     tz = (u.get("settings") or {}).get("timezone") or "Asia/Jakarta"
     if mode == "team":
         task = await create_team_task(u, persona, conv, plan, "chat")
-        who = ", ".join(f"{s['persona_name']} → {s['title']}" for s in task.get("subtasks") or [])
-        text = (f"Siap, tugas **{task['goal']}** saya bagi ke tim dan masuk Ruang Kerja. Pembagian: {who or 'saya kerjakan sendiri'}. "
+        text = (f"Siap, tugas **{task['goal']}** saya bagi ke tim dan masuk Ruang Kerja. {team_summary(task)} "
                 f"Dikerjakan {when_text(task.get('scheduled_at'), tz)}; setelah semua bagian selesai saya rangkai jadi satu dan kabari di sini. [Lihat di Ruang Kerja](/workspace/{task['id']})")
         return await _save_ai_msg(conv["id"], persona, text, 0, "text", {"tool": "task_assigned", "task_id": task["id"]})
     if mode == "delegate":
@@ -158,6 +157,7 @@ class AssignIn(BaseModel):
     scheduled_at: Optional[str] = None
     persona_id: Optional[str] = None
     team: bool = False
+    assignments: Optional[list] = Field(default=None, max_length=10)  # [{assistant, part}] explicit "bagian X minta Nova"
 
 
 @router.post("/conversations/{cid}/tasks")
@@ -170,13 +170,16 @@ async def assign_task(cid: str, x: AssignIn, u: dict = Depends(current_user)):
     persona = (await _get_personas([pid]) or [None])[0]
     if not persona:
         raise HTTPException(400, "Asisten tidak ditemukan")
-    plan = {"title": x.title, "brief": x.brief, "scheduled_at": x.scheduled_at}
+    assignments = [a for a in (x.assignments or []) if isinstance(a, dict) and a.get("assistant")]
+    plan = {"title": x.title, "brief": x.brief, "scheduled_at": x.scheduled_at, "assignments": assignments}
     src = "meeting" if conv.get("type") == "meeting" else "call"
-    task = await (create_team_task(u, persona, conv, plan, src) if x.team else create_assigned_task(u, persona, conv, plan, src))
+    team = x.team or bool(assignments)
+    task = await (create_team_task(u, persona, conv, plan, src) if team else create_assigned_task(u, persona, conv, plan, src))
     tz = (u.get("settings") or {}).get("timezone") or "Asia/Jakarta"
-    await _save_ai_msg(cid, persona, f"📌 Tugas **{task['goal']}** dicatat ke Ruang Kerja, dikerjakan {when_text(task.get('scheduled_at'), tz)}. [Lihat](/workspace/{task['id']})", 0, "text", {"tool": "task_assigned", "task_id": task["id"]})
+    detail = f" {team_summary(task)}" if task.get("team") else ""
+    await _save_ai_msg(cid, persona, f"📌 Tugas **{task['goal']}** dicatat ke Ruang Kerja, dikerjakan {when_text(task.get('scheduled_at'), tz)}.{detail} [Lihat](/workspace/{task['id']})", 0, "text", {"tool": "task_assigned", "task_id": task["id"]})
     return {"task_id": task["id"], "status": task["status"], "when": when_text(task.get("scheduled_at"), tz), "assistant": persona["name"],
-            "subtasks": [f"{s['persona_name']}: {s['title']}" for s in task.get("subtasks") or []]}
+            "subtasks": [f"{s['persona_name']}: {s['title']}" for s in task.get("subtasks") or []], "unmatched_assistants": task.get("unmatched") or []}
 
 
 @router.get("/task-notifications")
@@ -409,48 +412,83 @@ async def conv_workspace_search(cid: str, x: SearchIn, u: dict = Depends(current
 
 
 # ---------- team delegation (lead splits a task into sub-tasks for other assistants) ----------
-async def plan_subtasks(title: str, brief: str, personas: list) -> list:
+def _find_persona(name: Optional[str], personas: list) -> Optional[dict]:
+    n = (name or "").strip().lower()
+    if not n:
+        return None
+    return next((p for p in personas if p["name"].lower() == n), None) or next((p for p in personas if n in p["name"].lower() or p["name"].lower().split()[0] == n), None)
+
+
+def names_mentioned(text: str, personas: list, exclude_id: Optional[str] = None) -> list:
+    import re as _re
+    low = (text or "").lower()
+    return [p["name"] for p in personas if p["id"] != exclude_id and _re.search(r"\b" + _re.escape(p["name"].lower()) + r"\b", low)]
+
+
+async def plan_subtasks(title: str, brief: str, personas: list, directives: str = "") -> list:
     from llm import llm_json
     roster = "\n".join(f"- {p['name']} (model {p.get('model')})" for p in personas)
     try:
-        r = await llm_json("Split the task into 2-5 independent sub-tasks for a team of AI assistants. Reply JSON {\"subtasks\":[{\"title\":str,\"brief\":str,\"specialty\":\"it\"|\"research\"|\"writing\"|\"general\"}]}. Indonesian titles.",
-                           f"Task: {title}\nDetails: {brief}\nTeam:\n{roster}")
+        r = await llm_json("Split the task into 2-5 independent sub-tasks for a team of AI assistants. Reply JSON {\"subtasks\":[{\"title\":str,\"brief\":str,\"specialty\":\"it\"|\"research\"|\"writing\"|\"general\",\"assignee\":str|null}]}. "
+                           "Indonesian titles. assignee: when the user EXPLICITLY names which assistant should handle a part (e.g. 'bagian keuangan minta Nova'), create a sub-task for that part and set assignee to the exact name as the user wrote it; "
+                           "every other sub-task gets assignee null. Never invent assignees.",
+                           f"Task: {title}\nDetails: {brief}\nUser's assignment instructions: {directives or '(none)'}\nTeam:\n{roster}")
         subs = r.get("subtasks") if isinstance(r, dict) else None
         return [s for s in (subs or []) if s.get("title")][:5]
     except Exception:
         return []
 
 
-async def _assign_personas(subtasks: list, personas: list, lead: dict) -> list:
+async def _assign_personas(subtasks: list, personas: list, lead: dict) -> tuple:
+    """Honor explicit assignees first; others by specialty / round-robin. Returns ([(subtask, persona)], unmatched_names)."""
     from tools import get_routing
     routing = await get_routing()
     by_spec = {"it": [p for p in personas if p.get("model") == routing.get("it_model")], "research": [p for p in personas if p.get("model") == routing.get("research_model")]}
     others = [p for p in personas if p["id"] != lead["id"]] or [lead]
-    out, i = [], 0
+    out, unmatched, i = [], [], 0
     for s in subtasks:
-        pool = by_spec.get(s.get("specialty")) or others
-        out.append((s, pool[i % len(pool)])); i += 1
-    return out
+        chosen = _find_persona(s.get("assignee"), personas)
+        s["_pinned"] = chosen is not None
+        if s.get("assignee") and not chosen:
+            unmatched.append(str(s["assignee"]).strip())
+        if not chosen:
+            pool = by_spec.get(s.get("specialty")) or others
+            chosen = pool[i % len(pool)]; i += 1
+        out.append((s, chosen))
+    return out, list(dict.fromkeys(unmatched))
+
+
+def _directives(plan: dict) -> str:
+    parts = [plan.get("directives") or ""]
+    parts += [f"{a.get('assistant')}: {a.get('part')}" for a in (plan.get("assignments") or []) if a.get("assistant")]
+    return "\n".join(p for p in parts if p).strip()
+
+
+def team_summary(task: dict) -> str:
+    who = ", ".join(f"{s['persona_name']} → {s['title']}" for s in task.get("subtasks") or [])
+    note = f" Catatan: {', '.join(task['unmatched'])} tidak ada di tim, jadi bagian itu saya pilihkan asisten otomatis." if task.get("unmatched") else ""
+    return f"Pembagian: {who or 'saya kerjakan sendiri'}.{note}"
 
 
 async def create_team_task(u: dict, lead: dict, conv: dict, plan: dict, source: str) -> dict:
     wid = workspace_id(u)
     personas = await db.personas.find({"user_id": wid, "deleted": {"$ne": True}}, {"_id": 0}).to_list(50)
-    subs = plan.get("subtasks") or await plan_subtasks(plan.get("title") or "", plan.get("brief") or "", personas)
+    subs = plan.get("subtasks") or await plan_subtasks(plan.get("title") or "", plan.get("brief") or "", personas, _directives(plan))
     if len(subs) < 2:
         return await create_assigned_task(u, lead, conv, plan, source)
     sched = _utc(plan.get("scheduled_at"))
     future = bool(sched) and sched > now_iso()
+    assigned, unmatched = await _assign_personas(subs, personas, lead)
     parent = {"id": new_id(), "user_id": u["id"], "workspace_id": wid, "goal": plan.get("title") or "", "brief": plan.get("brief") or "", "type": "assigned", "team": True,
               "status": "scheduled" if future else "running", "scheduled_at": sched, "steps": [], "summary": f"Dibagi ke tim oleh {lead['name']}", "final_output": "", "credits_used": 0,
               "persona_id": lead["id"], "persona_name": lead["name"], "source": source, "conversation_ids": [conv["id"]] if conv else [], "version": 1, "notified": False,
-              "subtasks": [], "created_at": now_iso(), "updated_at": now_iso()}
-    for s, p in await _assign_personas(subs, personas, lead):
+              "subtasks": [], "unmatched": unmatched, "created_at": now_iso(), "updated_at": now_iso()}
+    for s, p in assigned:
         child = {"id": new_id(), "user_id": u["id"], "workspace_id": wid, "goal": s["title"], "brief": s.get("brief") or "", "type": "assigned", "parent_id": parent["id"],
                  "status": "scheduled" if future else "queued", "scheduled_at": sched, "steps": [], "summary": f"Sub-tugas dari «{parent['goal']}»", "final_output": "", "credits_used": 0,
-                 "persona_id": p["id"], "persona_name": p["name"], "source": source, "conversation_ids": [], "version": 1, "notified": True, "created_at": now_iso(), "updated_at": now_iso()}
+                 "persona_id": p["id"], "persona_name": p["name"], "source": source, "conversation_ids": [], "version": 1, "notified": True, "pinned": bool(s.get("_pinned")), "created_at": now_iso(), "updated_at": now_iso()}
         await db.tasks.insert_one(dict(child))
-        parent["subtasks"].append({"id": child["id"], "title": child["goal"], "persona_id": p["id"], "persona_name": p["name"], "status": child["status"]})
+        parent["subtasks"].append({"id": child["id"], "title": child["goal"], "persona_id": p["id"], "persona_name": p["name"], "status": child["status"], "pinned": child["pinned"]})
         if not future:
             asyncio.create_task(execute_assigned_task(child["id"]))
     await db.tasks.insert_one(dict(parent))
@@ -462,7 +500,7 @@ async def _maybe_assemble(parent_id: str):
     if not parent or parent.get("status") == "completed":
         return
     kids = await db.tasks.find({"parent_id": parent_id}, {"_id": 0}).to_list(20)
-    await db.tasks.update_one({"id": parent_id}, {"$set": {"subtasks": [{"id": k["id"], "title": k["goal"], "persona_id": k.get("persona_id"), "persona_name": k.get("persona_name"), "status": k["status"]} for k in kids], "updated_at": now_iso()}})
+    await db.tasks.update_one({"id": parent_id}, {"$set": {"subtasks": [{"id": k["id"], "title": k["goal"], "persona_id": k.get("persona_id"), "persona_name": k.get("persona_name"), "status": k["status"], "pinned": bool(k.get("pinned"))} for k in kids], "updated_at": now_iso()}})
     if any(k["status"] not in ("completed", "failed") for k in kids):
         return
     claimed = await db.tasks.find_one_and_update({"id": parent_id, "status": {"$nin": ["assembling", "completed"]}}, {"$set": {"status": "assembling"}})

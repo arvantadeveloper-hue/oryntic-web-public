@@ -23,6 +23,7 @@ import Team from "./pages/Team";
 import JoinMeeting from "./pages/JoinMeeting";
 import VerifyEmail from "./pages/VerifyEmail";
 import InvitePage from "./pages/InvitePage";
+import ResetPassword from "./pages/ResetPassword";
 import Calendar from "./pages/Calendar";
 
 function Protected({ children }) {
@@ -62,6 +63,7 @@ function App() {
               <Route path="/join/:token" element={<JoinMeeting />} />
               <Route path="/verify-email" element={<VerifyEmail />} />
               <Route path="/invite/:token" element={<InvitePage />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
               <Route element={<Protected><AppLayout /></Protected>}>
                 <Route path="/home" element={<Home />} />
                 <Route path="/personas" element={<AdminOnly><Personas /></AdminOnly>} />

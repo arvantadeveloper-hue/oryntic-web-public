@@ -139,7 +139,7 @@ export default function TaskDetail() {
             {task.subtasks.map((s) => (
               <button key={s.id} onClick={() => nav(`/workspace/${s.id}`)} className="aivora-card flex w-full items-center gap-3 p-4 text-left hover:border-[#2F6BFF]/40" data-testid={`subtask-${s.id}`}>
                 <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#7C3AED] text-xs font-bold text-white">{(s.persona_name || "A")[0]}</span>
-                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-900">{s.title}</span><span className="block text-xs text-slate-500">{s.persona_name}</span></span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-900">{s.title}</span><span className="block text-xs text-slate-500">{s.persona_name}{s.pinned && <span className="ml-1.5 rounded-full bg-[#EEF3FF] px-1.5 py-0.5 text-[10px] font-semibold text-[#2F6BFF]" data-testid="subtask-pinned">ditunjuk Anda</span>}</span></span>
                 <StatusBadge status={s.status} />
               </button>
             ))}

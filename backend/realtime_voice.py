@@ -123,7 +123,10 @@ ASSIGN_TOOL = {"type": "function", "name": "assign_task",
                    "title": {"type": "string", "description": "Short title of the task (Indonesian, max 10 words)"},
                    "brief": {"type": "string", "description": "What exactly must be produced, 1-3 sentences"},
                    "scheduled_at": {"type": "string", "description": "ISO-8601 datetime with timezone offset if the user named a time (e.g. 'besok jam 9'), else omit"},
-                   "team": {"type": "boolean", "description": "true when the user wants the work split among the other assistants (delegate sub-tasks); offer this for big tasks when there are several assistants"}},
+                   "team": {"type": "boolean", "description": "true when the user wants the work split among the other assistants (delegate sub-tasks); offer this for big tasks when there are several assistants"},
+                   "assignments": {"type": "array", "description": "Only when the user explicitly names who handles which part (e.g. 'bagian keuangan minta Nova'): one entry per named part", "items": {"type": "object", "properties": {
+                       "assistant": {"type": "string", "description": "Exact assistant name as the user said it"},
+                       "part": {"type": "string", "description": "Which part of the task they should handle"}}, "required": ["assistant", "part"]}}},
                    "required": ["title", "brief"]}}
 SEARCH_TOOL = {"type": "function", "name": "search_workspace",
                "description": "Search the user's Workspace (saved task results, documents, meeting minutes) by keywords and drop clickable links into the chat panel. Use when the user asks to find or look up existing material.",

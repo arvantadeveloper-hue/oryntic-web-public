@@ -602,7 +602,8 @@ DISCUSS_RE = re.compile(r"\b(satu per satu|bahas (dulu|bersama|saja)|diskusi(kan
 TASK_RE_STRONG = re.compile(r"\b(buatkan|susun(kan)?|kerjakan|siapkan|rancang|tulis(kan)?)\b", re.I)
 TEAM_RE = re.compile(r"\b(bagi(kan)? (tugas(nya)? )?ke tim|bagi tugas|delegasikan|kerjakan bersama tim|libatkan (tim|asisten lain)|split to team)\b", re.I)
 SEARCH_RE = re.compile(r"\b(cari(kan)?|carilah|temukan|ada (dokumen|hasil|notulen|laporan|file|berkas|tugas)|dokumen (tentang|mengenai|soal)|di ruang kerja|workspace)\b", re.I)
-TEAM_OFFER = "\n\nAtau, karena tim kita ada beberapa asisten, saya juga bisa **bagi ke tim**: saya pecah jadi sub-tugas untuk asisten yang paling cocok, lalu saya rangkai hasilnya."
+TEAM_OFFER = ("\n\nAtau, karena tim kita ada beberapa asisten, saya juga bisa **bagi ke tim**: saya pecah jadi sub-tugas untuk asisten yang paling cocok, lalu saya rangkai hasilnya. "
+              "Anda juga boleh menunjuk langsung, misalnya «bagian keuangan minta Nova».")
 
 
 async def _search_turn(ctx):
@@ -620,12 +621,17 @@ async def _task_offer_turn(ctx):
     if (conv.get("persona_ids") or [ctx.persona["id"]])[0] != ctx.persona["id"]:
         return  # in group chats only the first assistant handles task offers (avoids duplicate offers)
     if conv.get("pending_task"):
-        mode = "team" if TEAM_RE.search(ctx.user_text) else "delegate" if DELEGATE_RE.search(ctx.user_text) else "discuss" if DISCUSS_RE.search(ctx.user_text) else None
+        from assignments import accept_pending, names_mentioned
+        named = []
+        if conv["pending_task"].get("team_possible"):
+            roster = await db.personas.find({"user_id": workspace_id(ctx.user), "deleted": {"$ne": True}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
+            named = names_mentioned(ctx.user_text, roster, exclude_id=ctx.persona["id"])
+        mode = "team" if (TEAM_RE.search(ctx.user_text) or named) else "delegate" if DELEGATE_RE.search(ctx.user_text) else "discuss" if DISCUSS_RE.search(ctx.user_text) else None
         if mode:
-            from assignments import accept_pending
             yield ctx.sse(start=True)
-            yield ctx.sse(status="Mencatat tugas..." if mode == "delegate" else "Menyusun langkah...")
-            msg = await accept_pending({"id": ctx.cid, **conv, "persona_id": ctx.persona["id"]}, ctx.user, mode)
+            yield ctx.sse(status="Mencatat tugas..." if mode == "delegate" else "Membagi tugas ke tim..." if mode == "team" else "Menyusun langkah...")
+            pending = {**conv["pending_task"], "directives": ((conv["pending_task"].get("directives") or "") + "\n" + ctx.user_text).strip()}
+            msg = await accept_pending({"id": ctx.cid, **conv, "pending_task": pending, "persona_id": ctx.persona["id"]}, ctx.user, mode)
             yield ctx.sse(final=True, content=msg["content"], message_id=msg["id"], credits_used=msg.get("credits", 0), **{k: msg[k] for k in ("tool", "task_id") if k in msg})
             return
         await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_task": None}})  # user moved on
@@ -634,7 +640,7 @@ async def _task_offer_turn(ctx):
         return
     from assignments import offer_text
     team_possible = bool(plan.get("long")) and await db.personas.count_documents({"user_id": workspace_id(ctx.user), "deleted": {"$ne": True}}) > 1
-    await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_task": {**plan, "persona_id": ctx.persona["id"], "team_possible": team_possible, "offered_at": now_iso()}}})
+    await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_task": {**plan, "persona_id": ctx.persona["id"], "team_possible": team_possible, "directives": ctx.user_text, "offered_at": now_iso()}}})
     yield ctx.sse(start=True)
     async for ev in _emit_final(ctx, offer_text(plan, ctx.user) + (TEAM_OFFER if team_possible else ""), 0,
                                 {"tool": "task_offer", "pending_task": {"title": plan.get("title"), "scheduled_at": plan.get("scheduled_at"), "team_possible": team_possible}}):

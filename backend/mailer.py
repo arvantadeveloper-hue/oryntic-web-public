@@ -57,6 +57,15 @@ def verification_email(name: str, link: str) -> tuple:
     return subject, html, text
 
 
+def reset_email(name: str, link: str) -> tuple:
+    n = escape(name or "")
+    subject = f"Atur ulang password — {BRAND}"
+    body = f"Halo {n}, kami menerima permintaan untuk mengatur ulang password akun {BRAND} Anda. Klik tombol di bawah untuk membuat password baru. Tautan berlaku 1 jam."
+    html = _layout("Atur ulang password", body, "Buat Password Baru", link, "Jika Anda tidak meminta ini, abaikan email ini — password Anda tidak berubah.")
+    text = f"Halo {name},\n\nAtur ulang password {BRAND} Anda lewat tautan berikut (berlaku 1 jam):\n{link}\n\nJika Anda tidak meminta ini, abaikan email ini."
+    return subject, html, text
+
+
 def invite_email(inviter: str, workspace: str, link: str) -> tuple:
     i, w = escape(inviter or BRAND), escape(workspace or BRAND)
     subject = f"{inviter} mengundang Anda ke workspace {workspace} — {BRAND}"

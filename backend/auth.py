@@ -14,7 +14,7 @@ from pydantic import BaseModel, EmailStr, Field
 from pricing import get_trial
 from ratelimit import login_allowed
 from db import db, now_iso, new_id
-from mailer import send_email, verification_email, debug_links
+from mailer import send_email, verification_email, reset_email, debug_links
 
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ISSUER = "aivora-api"
@@ -96,7 +96,12 @@ def role_for(u: dict) -> str:
 
 
 def app_url(request: Request, hint: Optional[str] = None) -> str:
-    """Public frontend URL for email links: APP_URL env (production), else the URL the browser reports, else Origin."""
+    """Public frontend URL for email links: the host this request arrived on (same domain as the app), else APP_URL env, else the browser hint."""
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    host = host.split(",")[0].strip()
+    if host and not host.startswith(("localhost", "127.", "0.0.0.0")):
+        proto = (request.headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
+        return f"{proto}://{host}"
     return (os.environ.get("APP_URL") or hint or request.headers.get("origin") or "").rstrip("/")
 
 
@@ -274,6 +279,49 @@ async def login(x: LoginIn, request: Request):
         raise HTTPException(401, "Incorrect email or password")
     if not u.get("verified", True):
         raise HTTPException(403, {"code": "unverified", "message": "Email belum diverifikasi. Cek kotak masuk Anda atau kirim ulang tautan verifikasi."})
+    u["role"] = role_for(u)
+    return {"access_token": make_token(u["id"], u["role"]), "user": public_user(u)}
+
+
+RESET_TTL_MIN = 60
+
+
+class ResetIn(BaseModel):
+    token: str = Field(min_length=10, max_length=200)
+    password: str = Field(min_length=6, max_length=72)
+
+
+@router.post("/forgot-password")
+async def forgot_password(x: EmailIn, request: Request):
+    """Always 200 (does not reveal whether the email exists); sends a 1-hour reset link when the account exists."""
+    ip = (request.headers.get("x-forwarded-for") or request.client.host or "?").split(",")[0].strip()
+    email = str(x.email).lower()
+    if not login_allowed(ip, email):
+        raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi dalam 5 menit.")
+    u = await db.users.find_one({"email": email}, {"_id": 0})
+    out = {"ok": True, "mail_sent": True}
+    if u:
+        raw = secrets.token_urlsafe(32)
+        await db.email_tokens.delete_many({"purpose": "reset", "email": email})
+        await db.email_tokens.insert_one({"purpose": "reset", "email": email, "token_hash": token_hash(raw), "created_at": now_iso(),
+                                          "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=RESET_TTL_MIN)).isoformat()})
+        link = f"{app_url(request, x.app_url)}/reset-password?token={raw}"
+        subject, html, text = reset_email(u.get("name") or "", link)
+        out["mail_sent"] = await send_email(email, subject, html, text)
+        if debug_links():
+            out["debug_link"] = link
+    return out
+
+
+@router.post("/reset-password")
+async def reset_password(x: ResetIn):
+    row = await db.email_tokens.find_one_and_delete({"purpose": "reset", "token_hash": token_hash(x.token)})
+    if not row or (row.get("expires_at") or "") < now_iso():
+        raise HTTPException(400, "Tautan reset tidak valid atau sudah kedaluwarsa. Minta tautan baru.")
+    await db.users.update_one({"email": row["email"]}, {"$set": {"password_hash": pw_hash(x.password), "verified": True, "password_changed_at": now_iso()}})
+    u = await db.users.find_one({"email": row["email"]}, {"_id": 0})
+    if not u:
+        raise HTTPException(404, "Akun tidak ditemukan")
     u["role"] = role_for(u)
     return {"access_token": make_token(u["id"], u["role"]), "user": public_user(u)}
 
