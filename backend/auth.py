@@ -7,7 +7,7 @@ from typing import Annotated, Optional
 
 import bcrypt
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
 
@@ -174,6 +174,13 @@ async def current_user(
     return u
 
 
+async def current_user_q(creds: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer)], auth: Optional[str] = Query(None)) -> dict:
+    """Like current_user but also accepts `?auth=<jwt>` (for plain <a download> links)."""
+    if not creds and auth:
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=auth)
+    return await current_user(creds)
+
+
 async def optional_user(creds: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer)]) -> Optional[dict]:
     if not creds:
         return None
@@ -326,34 +333,24 @@ async def reset_password(x: ResetIn):
     return {"access_token": make_token(u["id"], u["role"]), "user": public_user(u)}
 
 
-@router.get("/workspaces")
-async def my_workspaces(u: dict = Depends(current_user)):
-    """Home workspace + every workspace the user has joined."""
-    rows = await db.workspace_members.find({"user_id": u["id"], "status": "joined"}, {"_id": 0, "workspace_id": 1, "joined_at": 1}).to_list(100)
-    ids = [u["id"]] + [r["workspace_id"] for r in rows if r["workspace_id"] != u["id"]]
-    owners = {o["id"]: o async for o in db.users.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1})}
-    active = workspace_id(u)
-    return [{"id": wid, "name": (owners.get(wid) or {}).get("name") or "Workspace", "owner_email": (owners.get(wid) or {}).get("email"),
-             "is_home": wid == u["id"], "active": wid == active, "role": "admin" if wid == u["id"] else "user"} for wid in ids if wid in owners]
-
-
-class SwitchIn(BaseModel):
-    workspace_id: str
-
-
-@router.post("/switch-workspace")
-async def switch_workspace(x: SwitchIn, u: dict = Depends(current_user)):
-    if not await is_member(u["id"], x.workspace_id):
-        raise HTTPException(403, "Anda bukan anggota workspace ini")
-    await db.users.update_one({"id": u["id"]}, {"$set": {"owner_id": x.workspace_id, "role": "admin" if x.workspace_id == u["id"] else "user"}})
-    u2 = await db.users.find_one({"id": u["id"]}, {"_id": 0})
-    u2["role"] = role_for(u2)
-    return {"access_token": make_token(u2["id"], u2["role"]), "user": public_user(u2)}
-
-
 @router.get("/me")
 async def me(u: dict = Depends(current_user)):
     return public_user(u)
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=72)
+    new_password: str = Field(min_length=6, max_length=72)
+
+
+@router.post("/change-password")
+async def change_password(x: ChangePasswordIn, u: dict = Depends(current_user)):
+    if not pw_ok(x.current_password, u.get("password_hash") or ""):
+        raise HTTPException(400, "Password lama salah")
+    if x.current_password == x.new_password:
+        raise HTTPException(400, "Password baru harus berbeda dari password lama")
+    await db.users.update_one({"id": u["id"]}, {"$set": {"password_hash": pw_hash(x.new_password), "password_changed_at": now_iso()}})
+    return {"ok": True}
 
 
 class SettingsIn(BaseModel):

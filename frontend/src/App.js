@@ -19,10 +19,8 @@ import Reminders from "./pages/Reminders";
 import WalletPage from "./pages/Wallet";
 import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
-import Team from "./pages/Team";
-import JoinMeeting from "./pages/JoinMeeting";
 import VerifyEmail from "./pages/VerifyEmail";
-import InvitePage from "./pages/InvitePage";
+import Gallery from "./pages/Gallery";
 import ResetPassword from "./pages/ResetPassword";
 import Calendar from "./pages/Calendar";
 
@@ -60,9 +58,7 @@ function App() {
             <Routes>
               <Route path="/" element={<Gate />} />
               <Route path="/onboarding" element={<Onboarding />} />
-              <Route path="/join/:token" element={<JoinMeeting />} />
               <Route path="/verify-email" element={<VerifyEmail />} />
-              <Route path="/invite/:token" element={<InvitePage />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route element={<Protected><AppLayout /></Protected>}>
                 <Route path="/home" element={<Home />} />
@@ -75,9 +71,9 @@ function App() {
                 <Route path="/workspace/:id" element={<TaskDetail />} />
                 <Route path="/reminders" element={<Reminders />} />
                 <Route path="/calendar" element={<Calendar />} />
+                <Route path="/gallery" element={<Gallery />} />
                 <Route path="/wallet" element={<AdminOnly><WalletPage /></AdminOnly>} />
                 <Route path="/profile" element={<Profile />} />
-                <Route path="/team" element={<AdminOnly><Team /></AdminOnly>} />
                 <Route path="/admin" element={<AdminOnly platform><Admin /></AdminOnly>} />
               </Route>
             </Routes>

@@ -7,21 +7,17 @@ from dataclasses import dataclass, field
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
-from auth import current_user, workspace_id, _lang_name, pw_hash, make_token, public_user, member_ids, is_member
+from auth import current_user, workspace_id, _lang_name, member_ids
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit
 from tools import route_model, wants_tool, plan_tool, run_image_tool, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task
 from pricing import rate as tool_rate
 from llm import model_label
-import secrets
-from datetime import datetime, timezone, timedelta
 
-INVITE_TTL_DAYS = 7
-INVITE_DEFAULT_DAILY_LIMIT = 200
 MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -36,9 +32,44 @@ def _pdf_text(data: str) -> str:
     return "".join((p.extract_text() or "") + "\n" for p in reader.pages[:20])[:6000]
 
 
+async def _gallery_context(a: dict, user_id: str) -> Optional[str]:
+    """Attachment picked from the Gallery: read the stored object / task result — no re-upload."""
+    from files import _path_parts, _same_workspace
+    from storage import get_object
+    name = a.get("name", "berkas")
+    if a.get("task_id"):
+        t = await db.tasks.find_one({"id": a["task_id"]}, {"_id": 0, "goal": 1, "final_output": 1, "workspace_id": 1, "user_id": 1})
+        if not t or not (t.get("user_id") == user_id or await _same_workspace(user_id, t.get("workspace_id") or "")):
+            return None
+        return f"[Dokumen Galeri '{t.get('goal') or name}' (/workspace/{a['task_id']})]:\n{(t.get('final_output') or '')[:6000]}"
+    path = a.get("path") or ""
+    parts = _path_parts(path)
+    if parts[2] != user_id and not await _same_workspace(user_id, parts[2]):
+        return None
+    if a.get("kind") == "video":
+        return f"[Video Galeri '{name}' dilampirkan sebagai tautan]"
+    data, ctype = await asyncio.to_thread(get_object, path)
+    if a.get("kind") == "image" or (ctype or "").startswith("image/"):
+        desc = await describe_image(base64.b64encode(data).decode())
+        if not desc:
+            return None
+        await record_usage(user_id, "vision", VISION_CREDITS, {"name": name})
+        return f"[Gambar Galeri '{name}']: {desc}"
+    ext = path.rsplit(".", 1)[-1].lower()
+    if ext == "pdf":
+        return f"[PDF '{name}']:\n{_pdf_text(base64.b64encode(data).decode())}"
+    if ext == "docx":
+        from docx import Document
+        doc = Document(io.BytesIO(data))
+        return f"[Dokumen '{name}']:\n" + "\n".join(p.text for p in doc.paragraphs)[:6000]
+    return f"[Berkas '{name}']:\n{data.decode('utf-8', 'ignore')[:6000]}"
+
+
 async def _attachment_context(a: dict, user_id: str) -> Optional[str]:
     """Text the model should see for one attachment (vision description, PDF text, or raw text)."""
     atype, name, data = a.get("type", "text"), a.get("name", "file"), a.get("data", "")
+    if atype == "gallery":
+        return await _gallery_context(a, user_id)
     if atype == "image":
         desc = await describe_image(data.split(",")[-1])
         if not desc:
@@ -54,7 +85,7 @@ async def _process_attachments(attachments, user_id):
     """Return (context_text, light_meta_list). Extracts text from pdf/text, vision-describes images."""
     ctx, meta = [], []
     for a in (attachments or [])[:5]:
-        meta.append({"type": a.get("type", "text"), "name": a.get("name", "file")})
+        meta.append({"type": a.get("type", "text"), "name": a.get("name", "file"), **{k: a[k] for k in ("path", "task_id", "kind") if a.get(k)}})
         try:
             text = await _attachment_context(a, user_id)
         except Exception:
@@ -147,119 +178,6 @@ async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
     }
     await db.conversations.insert_one(dict(doc))
     return clean(doc)
-
-
-class InviteIn(BaseModel):
-    user_ids: list = []
-
-
-@router.get("/conversations/{cid}/participants")
-async def list_participants(cid: str, u: dict = Depends(current_user)):
-    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
-    if not _can_access(conv, u):
-        raise HTTPException(404, "Conversation not found")
-    ids = conv.get("participants") or [conv.get("user_id")]
-    users = await db.users.find({"id": {"$in": ids}}, {"_id": 0, "password_hash": 0}).to_list(50)
-    return [{"id": x["id"], "name": x.get("name"), "email": x.get("email"), "is_owner": x["id"] == conv.get("user_id")} for x in users]
-
-
-@router.post("/conversations/{cid}/participants")
-async def add_participants(cid: str, x: InviteIn, u: dict = Depends(current_user)):
-    conv = await db.conversations.find_one({"id": cid})
-    if not _can_access(conv, u):
-        raise HTTPException(404, "Conversation not found")
-    if conv.get("user_id") != u["id"] and u.get("role") != "admin":
-        raise HTTPException(403, "Hanya pembuat atau admin yang bisa mengundang")
-    if conv.get("type") == "private":
-        raise HTTPException(400, "Undangan hanya untuk grup atau panggilan")
-    wid = workspace_id(u)
-    allowed = set(await member_ids(wid))
-    add = [i for i in dict.fromkeys(x.user_ids) if i in allowed]
-    await db.conversations.update_one({"id": cid}, {"$addToSet": {"participants": {"$each": add}}, "$set": {"updated_at": now_iso()}})
-    await notify(cid, {"type": "participants"})
-    return {"ok": True, "added": add}
-
-
-@router.post("/conversations/{cid}/invite-link")
-async def create_invite_link(cid: str, u: dict = Depends(current_user)):
-    conv = await db.conversations.find_one({"id": cid})
-    if not _can_access(conv, u):
-        raise HTTPException(404, "Conversation not found")
-    if conv.get("user_id") != u["id"] and u.get("role") != "admin":
-        raise HTTPException(403, "Hanya pembuat atau admin yang bisa membuat tautan")
-    if conv.get("type") == "private":
-        raise HTTPException(400, "Tautan hanya untuk grup atau panggilan")
-    token = conv.get("invite_token")
-    exp = conv.get("invite_expires_at")
-    if not token or not exp or exp < now_iso():
-        token = secrets.token_urlsafe(24)
-        exp = (datetime.now(timezone.utc) + timedelta(days=INVITE_TTL_DAYS)).isoformat()
-        await db.conversations.update_one({"id": cid}, {"$set": {"invite_token": token, "invite_expires_at": exp}})
-    return {"token": token, "path": f"/join/{token}", "expires_at": exp}
-
-
-async def _conv_by_invite(token: str):
-    conv = await db.conversations.find_one({"invite_token": token})
-    if not conv or (conv.get("invite_expires_at") or "") < now_iso():
-        raise HTTPException(404, "Undangan tidak valid atau sudah kedaluwarsa")
-    return conv
-
-
-@router.get("/invites/{token}")
-async def invite_info(token: str):
-    conv = await _conv_by_invite(token)
-    owner = await db.users.find_one({"id": conv.get("workspace_id")}, {"_id": 0})
-    return {
-        "title": conv.get("title"),
-        "type": conv.get("type"),
-        "members": [{"name": m.get("name"), "portrait": m.get("portrait")} for m in conv.get("members", [])],
-        "workspace": (owner or {}).get("name") or "Oryntix",
-    }
-
-
-@router.post("/invites/{token}/join")
-async def invite_join(token: str, u: dict = Depends(current_user)):
-    conv = await _conv_by_invite(token)
-    if not await is_member(u["id"], conv.get("workspace_id")):
-        raise HTTPException(403, "Akun Anda bukan bagian dari workspace ini")
-    if workspace_id(u) != conv.get("workspace_id"):
-        await db.users.update_one({"id": u["id"]}, {"$set": {"owner_id": conv["workspace_id"], "role": "user" if conv["workspace_id"] != u["id"] else "admin"}})
-    await db.conversations.update_one({"id": conv["id"]}, {"$addToSet": {"participants": u["id"]}})
-    await notify(conv["id"], {"type": "participants"})
-    return {"conversation_id": conv["id"]}
-
-
-class InviteRegisterIn(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    email: EmailStr
-    password: str = Field(min_length=6, max_length=72)
-
-
-@router.post("/invites/{token}/register")
-async def invite_register(token: str, x: InviteRegisterIn):
-    conv = await _conv_by_invite(token)
-    email = str(x.email).lower()
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(409, "Email sudah terdaftar. Silakan masuk lalu buka tautan lagi.")
-    wid = conv.get("workspace_id")
-    owner = await db.users.find_one({"id": wid}) or {}
-    uid = new_id()
-    doc = {
-        "id": uid, "email": email, "password_hash": pw_hash(x.password),
-        "name": x.name, "role": "user", "owner_id": wid, "onboarded": True, "verified": True, "credits": 0,
-        "daily_credit_limit": INVITE_DEFAULT_DAILY_LIMIT, "joined_via_invite": True,
-        "settings": {
-            "app_language": owner.get("settings", {}).get("app_language", "id"),
-            "conversation_language": owner.get("settings", {}).get("conversation_language", "id"),
-            "timezone": owner.get("settings", {}).get("timezone", "Asia/Jakarta"), "theme": "light",
-        },
-        "created_at": now_iso(),
-    }
-    await db.users.insert_one(doc)
-    await db.workspace_members.insert_one({"id": new_id(), "workspace_id": wid, "user_id": uid, "email": email, "status": "joined", "joined_at": now_iso()})
-    await db.conversations.update_one({"id": conv["id"]}, {"$addToSet": {"participants": uid}})
-    await notify(conv["id"], {"type": "participants"})
-    return {"access_token": make_token(uid, "user"), "user": public_user(doc), "conversation_id": conv["id"]}
 
 
 @router.get("/conversations")

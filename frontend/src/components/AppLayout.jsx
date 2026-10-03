@@ -1,11 +1,10 @@
 import React, { useState } from "react";
 import { NavLink, useNavigate, Outlet } from "react-router-dom";
-import { Home, MessageSquare, Bot, FileText, Bell, Wallet, User, Shield, LogOut, Menu, X, Sparkles, Search, HelpCircle, Users, Plus, Settings, CalendarDays } from "lucide-react";
+import { Home, MessageSquare, Bot, FileText, Bell, Wallet, User, Shield, LogOut, Menu, X, Sparkles, Search, HelpCircle, Plus, Settings, CalendarDays, Images } from "lucide-react";
 import { Logo } from "./Logo";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 import { IncomingCall } from "./IncomingCall";
-import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { TaskNotifier } from "./TaskChatTools";
 
 export function AppLayout() {
@@ -23,11 +22,11 @@ export function AppLayout() {
     { to: "/workspace", icon: FileText, label: t("nav.workspace"), id: "workspace" },
     { to: "/reminders", icon: Bell, label: t("nav.reminders"), id: "reminders" },
     { to: "/calendar", icon: CalendarDays, label: "Kalender", id: "calendar" },
+    { to: "/gallery", icon: Images, label: "Galeri", id: "gallery" },
     { to: "/wallet", icon: Wallet, label: t("nav.wallet"), id: "wallet", adminOnly: true },
     { to: "/profile", icon: Settings, label: "Settings", id: "profile" },
   ];
   const items = allItems.filter((it) => !it.adminOnly || isAdmin);
-  if (isAdmin) items.splice(5, 0, { to: "/team", icon: Users, label: "Team", id: "team" });
   if (user?.is_platform_admin) items.push({ to: "/admin", icon: Shield, label: t("nav.admin"), id: "admin" });
 
   const handleLogout = () => { logout(); nav("/"); };
@@ -38,7 +37,6 @@ export function AppLayout() {
   const SidebarInner = (
     <div className="flex h-full flex-col sidebar-dark text-white">
       <div className="px-5 pb-3 pt-6"><Logo light size={32} /></div>
-      <WorkspaceSwitcher />
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3">
         {items.map((it) => (
           <NavLink key={it.id} to={it.to} data-testid={`nav-${it.id}`} onClick={() => setOpen(false)}

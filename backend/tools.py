@@ -248,7 +248,7 @@ async def run_document_tool(uid: str, system: str, title: str, instructions: str
 
 # ---------- workspace tasks: shared context & revisions ----------
 TABLE_RE = re.compile(r"^\s*\|.+\|\s*$", re.M)
-TASK_CONTEXT = ("\n\nWORKSPACE TASK UNDER DISCUSSION (id {tid}, version {ver}, status {status}):\nTitle: {goal}\n--- CURRENT RESULT ---\n{body}\n--- END ---\n"
+TASK_CONTEXT = ("\n\nWORKSPACE TASK UNDER DISCUSSION (id {tid}, version {ver}, status {status}; the ONLY valid link to it is /workspace/{tid} — never invent other URLs):\nTitle: {goal}\n--- CURRENT RESULT ---\n{body}\n--- END ---\n"
                 "The user may ask questions about this result or request changes. Discuss it in context; when they ask for a change, the system "
                 "saves a revised version to the Workspace automatically — confirm briefly what changed.")
 REVISE_RE = re.compile(r"\b(revisi|ubah|ganti|perbaiki|tambah(kan)?|hapus|kurangi|perbarui|update|rapikan|singkat|perpanjang|sesuaikan|koreksi|edit|rewrite|revise|change|tulis ulang)\b", re.I)

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
-from db import db, now_iso, new_id
-from auth import require_admin, require_platform_admin, workspace_id, pw_hash, public_user, member_ids
+from db import db
+from auth import require_admin, require_platform_admin, workspace_id, public_user, member_ids
 from wallet import get_packages
 from llm import GPT_MODEL, IMAGE_MODEL, user_today_usage
 from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES
@@ -59,43 +59,6 @@ async def update_workspace_user(uid: str, x: UpdateUserIn, admin: dict = Depends
     pu["daily_credit_limit"] = int(doc.get("daily_credit_limit") or 0)
     pu["today_usage"] = await user_today_usage(uid)
     return pu
-
-
-@router.post("/users")
-async def create_workspace_user(x: CreateUserIn, admin: dict = Depends(require_admin)):
-    email = str(x.email).lower()
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(409, "Email sudah terdaftar")
-    wid = workspace_id(admin)
-    uid = new_id()
-    doc = {
-        "id": uid, "email": email, "password_hash": pw_hash(x.password),
-        "name": x.name or email.split("@")[0], "role": "user", "owner_id": wid,
-        "onboarded": True, "verified": True, "credits": 0,
-        "settings": {
-            "app_language": admin.get("settings", {}).get("app_language", "id"),
-            "conversation_language": admin.get("settings", {}).get("conversation_language", "id"),
-            "timezone": admin.get("settings", {}).get("timezone", "Asia/Jakarta"),
-            "theme": "light",
-        },
-        "created_at": now_iso(),
-    }
-    await db.users.insert_one(doc)
-    return public_user(doc)
-
-
-@router.delete("/users/{uid}")
-async def delete_workspace_user(uid: str, admin: dict = Depends(require_admin)):
-    """Remove a member from this workspace (their own account and home workspace stay intact)."""
-    if uid == admin["id"]:
-        raise HTTPException(400, "Tidak bisa menghapus akun sendiri")
-    await _member_or_404(uid, admin)
-    wid = workspace_id(admin)
-    await db.workspace_members.delete_one({"workspace_id": wid, "user_id": uid})
-    await db.workspace_invites.update_many({"workspace_id": wid, "user_id": uid}, {"$set": {"status": "removed", "updated_at": now_iso()}})
-    await db.users.update_one({"id": uid, "owner_id": wid}, [{"$set": {"owner_id": "$id", "role": "admin"}}])
-    await db.conversations.update_many({"workspace_id": wid, "participants": uid}, {"$pull": {"participants": uid}})
-    return {"ok": True}
 
 
 @router.get("/overview")

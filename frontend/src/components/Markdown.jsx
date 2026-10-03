@@ -1,8 +1,17 @@
 import React from "react";
 
 // Lightweight markdown renderer (headings, bold, lists, code blocks, inline code, tables-ish, paragraphs)
-const safeHref = (url) => (/^(https?:\/\/[^\s"'<>]+|\/[\w\-\/#?=&.%:]*)$/i.test(url) ? url : "#");
-const isInternal = (url) => url.startsWith("/");
+const repairHref = (url) => (/^(workspace|chat|calendar|gallery|reminders)\//.test(url) ? "/" + url : url);
+const safeHref = (url) => (/^(https?:\/\/[^\s"'<>]+|\/[\w\-\/#?=&.%:]*)$/i.test(url) ? url : null);
+const isFile = (url) => /\/api\/files\//.test(url);
+
+function linkTag(label, raw) {
+  const url = safeHref(repairHref(raw));
+  if (!url) return label;
+  const abs = url.startsWith("/") ? `${window.location.origin}${url}` : url;
+  const dl = isFile(abs) ? ` download data-file="1" href="${abs}${abs.includes("?") ? "&" : "?"}download=1"` : ` href="${abs}"`;
+  return `<a${dl} target="_blank" rel="noreferrer noopener" data-link="1">${label}</a>`;
+}
 
 function inline(text) {
   let t = text
@@ -10,15 +19,12 @@ function inline(text) {
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => (isInternal(url) ? `<a href="${safeHref(url)}" data-internal="1">${label}</a>` : `<a href="${safeHref(url)}" target="_blank" rel="noreferrer noopener">${label}</a>`));
+    .replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;[^)]*&quot;)?\)/g, (_, label, url) => linkTag(label, url.replace(/&amp;/g, "&")));
   return t;
 }
 
 export function Markdown({ content = "" }) {
-  const onClick = (e) => {
-    const a = e.target.closest && e.target.closest("a[data-internal]");
-    if (a) { e.preventDefault(); window.history.pushState({}, "", a.getAttribute("href")); window.dispatchEvent(new PopStateEvent("popstate")); }
-  };
+  const onClick = (e) => { const a = e.target.closest && e.target.closest("a[data-link]"); if (a) e.stopPropagation(); };
   const lines = content.split("\n");
   const blocks = [];
   let i = 0;

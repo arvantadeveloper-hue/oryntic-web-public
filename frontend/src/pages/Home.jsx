@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageSquare, FileText, Bot, Users, Sparkles, Plus, ArrowRight, CheckCircle2, Clock, FolderKanban, Mic, Video, Bell, Search, MoreHorizontal, Zap } from "lucide-react";
+import { MessageSquare, FileText, Bot, Users, Images, Sparkles, Plus, ArrowRight, CheckCircle2, Clock, FolderKanban, Mic, Video, Bell, Search, MoreHorizontal, Zap } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { BRAND_HERO } from "../components/Logo";
@@ -71,7 +71,7 @@ export default function Home() {
     { icon: Video, title: "Panggilan", desc: "Rapat suara dengan agen", to: "/chat", tint: "#10B981" },
     { icon: FolderKanban, title: "Tugas Baru", desc: "Delegasikan pekerjaan", to: "/workspace", tint: "#7C3AED" },
     { icon: Bell, title: "Pengingat", desc: "Jadwal & panggilan", to: "/reminders", tint: "#F59E0B" },
-    { icon: Users, title: "Tim", desc: "Kelola anggota", to: isAdmin ? "/team" : "/profile", tint: "#EC4899" },
+    { icon: Images, title: "Galeri", desc: "Dokumen, gambar & video", to: "/gallery", tint: "#EC4899" },
   ];
   const TOOLS = [
     { icon: MessageSquare, label: "Chat", to: "/chat", tint: "#2F6BFF" }, { icon: FileText, label: "Dokumen", to: "/workspace", tint: "#10B981" },

@@ -3,7 +3,8 @@ import { FileText, Download, Loader2, Sparkles, Route, ImageIcon } from "lucide-
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 
-export const fileUrl = (path) => `${API_BASE}/files/${path}?auth=${getToken()}`;
+export const fileUrl = (path, download = false) => `${API_BASE}/files/${path}?auth=${getToken()}${download ? "&download=1" : ""}`;
+export const downloadUrl = (path) => fileUrl(path, true);
 const FMT = { docx: "Word", pdf: "PDF", md: "Markdown" };
 
 // Images / downloadable files produced by the assistant (media[]) + bare media URLs found in the text.
@@ -23,7 +24,7 @@ export function MediaList({ media = [], dark = false }) {
       {media.some((x) => x.type === "file") && (
         <div className="flex flex-wrap gap-1.5">
           {media.filter((x) => x.type === "file").map((x, i) => (
-            <a key={`f${i}`} href={x.url || fileUrl(x.path)} target="_blank" rel="noreferrer" download={x.name} data-testid={`media-file-${x.format || "file"}`} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${chip}`}>
+            <a key={`f${i}`} href={x.url || downloadUrl(x.path)} target="_blank" rel="noreferrer" download={x.name} data-testid={`media-file-${x.format || "file"}`} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${chip}`}>
               <FileText size={13} /> {FMT[x.format] || x.name} <Download size={12} className="opacity-60" />
             </a>
           ))}

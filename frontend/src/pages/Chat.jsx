@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, PhoneOff, MessageSquare, Video, UserPlus, Link as LinkIcon, Loader2 } from "lucide-react";
+import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -9,8 +9,10 @@ import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
 import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
-import { MediaList, ToolRequestCard, ModelBadge } from "../components/MessageExtras";
-import { SummaryPrompt, ArchiveModal, LoadMore } from "../components/ConversationTools";
+import { MediaList, ToolRequestCard, ModelBadge, downloadUrl } from "../components/MessageExtras";
+import { GalleryPicker } from "../components/GalleryPicker";
+import { Sentinel } from "../components/Gallery";
+import { SummaryPrompt, ArchiveModal } from "../components/ConversationTools";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
 import { TaskContextCard, AddPersonaMenu, TaskOfferButtons, WorkspaceResults } from "../components/TaskChatTools";
 
@@ -59,8 +61,9 @@ export default function Chat() {
   const [speaker, setSpeaker] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
   const [showConvList, setShowConvList] = useState(false);
-  const [showInvite, setShowInvite] = useState(false);
-  const [wsUsers, setWsUsers] = useState([]);
+  const [showGallery, setShowGallery] = useState(false);
+  const [convsLoading, setConvsLoading] = useState(true);
+  const [msgsLoading, setMsgsLoading] = useState(false);
   const streamingRef = useRef(false);
   const endRef = useRef(null);
   const fileRef = useRef(null);
@@ -71,8 +74,11 @@ export default function Chat() {
 
   const PAGE = 20;
   useEffect(() => { const h = () => { if (id) refreshMsgs(); }; window.addEventListener("oryntix:task-done", h); return () => window.removeEventListener("oryntix:task-done", h); /* eslint-disable-next-line */ }, [id]);
-  const loadConvs = (query = "", more = false) => api.get(`/conversations?limit=${PAGE}&offset=${more ? convs.length : 0}${query ? `&q=${encodeURIComponent(query)}` : ""}`)
-    .then((r) => { setConvs((prev) => (more ? [...prev, ...r.data] : r.data)); setConvHasMore(r.data.length === PAGE); }).catch(() => {});
+  const loadConvs = (query = "", more = false) => {
+    setConvsLoading(true);
+    return api.get(`/conversations?limit=${PAGE}&offset=${more ? convs.length : 0}${query ? `&q=${encodeURIComponent(query)}` : ""}`)
+      .then((r) => { setConvs((prev) => (more ? [...prev, ...r.data] : r.data)); setConvHasMore(r.data.length === PAGE); }).catch(() => {}).finally(() => setConvsLoading(false));
+  };
   const applyPage = (data) => { setMessages(data.messages); setMsgHasMore(!!data.has_more); setArchivedCount(data.archived_count || 0); setSummaryRequest(!!data.long_chat); };
   const loadOlder = async () => {
     if (!msgHasMore || loadingOlder || !messages.length) return;
@@ -80,21 +86,23 @@ export default function Chat() {
     const el = listRef.current; const prevH = el ? el.scrollHeight : 0;
     try {
       const r = await api.get(`/conversations/${id}/messages?limit=50&before=${encodeURIComponent(messages[0].created_at)}`);
+      skipScroll.current = true;
       setMessages((m) => [...r.data.messages, ...m]); setMsgHasMore(!!r.data.has_more);
       requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - prevH; });
     } catch (e) {} finally { setLoadingOlder(false); }
   };
   useEffect(() => { loadConvs(); api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {}); }, [user?.id]);
   useEffect(() => {
-    if (id) api.get(`/conversations/${id}/messages?limit=50`).then((r) => {
+    if (id) { setMsgsLoading(true); setMessages([]); api.get(`/conversations/${id}/messages?limit=50`).then((r) => {
       setConv(r.data.conversation); applyPage(r.data);
       if (location.state?.openMeeting) { setVideoOpen(true); nav(location.pathname, { replace: true, state: {} }); }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setMsgsLoading(false)); }
     else { setConv(null); setMessages([]); setVideoOpen(false); }
     const pre = sessionStorage.getItem("aivora_prefill");
     if (pre && id) { setInput(pre); sessionStorage.removeItem("aivora_prefill"); }
   }, [id]);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, liveMap]);
+  const skipScroll = useRef(false);
+  useEffect(() => { if (skipScroll.current) { skipScroll.current = false; return; } endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, liveMap]);
 
   // realtime: other humans' and AI messages in shared meetings/groups
   useEffect(() => {
@@ -216,12 +224,6 @@ export default function Chat() {
     } catch (e) { toast.error(e?.response?.data?.detail || "Gagal membuat notulen"); } finally { setSavingNotes(false); }
   };
 
-  const openInvite = () => { api.get("/admin/workspace-users").then((r) => setWsUsers(r.data)).catch(() => {}); setShowInvite(true); };
-  const invite = async (uid) => {
-    try { await api.post(`/conversations/${id}/participants`, { user_ids: [uid] }); toast.success("Pengguna diundang"); api.get(`/conversations/${id}/messages`).then((r) => setConv(r.data.conversation)); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengundang"); }
-  };
-
   const isMulti = conv && conv.type !== "private";
 
   const convListInner = (mobile) => (
@@ -241,8 +243,9 @@ export default function Chat() {
             <button onClick={(e) => delConv(c, e)} className="text-slate-400 transition hover:text-[#EF4444] md:opacity-0 md:group-hover:opacity-100"><Trash2 size={13} /></button>
           </div>
         ))}
-        {convs.length === 0 && <p className="px-2 py-4 text-center text-xs text-slate-400">Belum ada percakapan.</p>}
-        {convHasMore && <LoadMore onClick={() => loadConvs(q, true)} testid="conv-load-more" />}
+        {convsLoading && <p className="flex items-center justify-center gap-2 px-2 py-3 text-xs text-slate-400" data-testid="conv-loading"><Loader2 size={13} className="animate-spin" /> Memuat percakapan…</p>}
+        {!convsLoading && convs.length === 0 && <p className="px-2 py-4 text-center text-xs text-slate-400">Belum ada percakapan.</p>}
+        {!convsLoading && convHasMore && <Sentinel onVisible={() => loadConvs(q, true)} />}
       </div>
     </div>
   );
@@ -280,17 +283,17 @@ export default function Chat() {
               {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Masuk ruang panggilan" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#2F6BFF] px-2.5 text-xs font-semibold text-white sm:px-3"><Video size={15} /> <span className="hidden sm:inline">Masuk Panggilan</span></button>}
               {conv.type !== "private" && <button onClick={saveNotes} disabled={savingNotes} title="Buat & simpan notulen ke Ruang Kerja" data-testid="save-notes-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#E6EAF2] bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:px-3">{savingNotes ? <RefreshCw size={15} className="animate-spin" /> : <FileText size={15} />} <span className="hidden sm:inline">Notulen</span></button>}
               <AddPersonaMenu conv={conv} personas={personas || []} onAdded={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />
-              {conv.type === "meeting" && isAdmin && <button onClick={openInvite} title="Undang pengguna" data-testid="invite-user-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2F6BFF]/40 px-2.5 text-xs font-semibold text-[#2F6BFF] sm:px-3"><UserPlus size={15} /> <span className="hidden sm:inline">Undang</span></button>}
               <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
             </div>
           )}
         </div>
 
         <div ref={listRef} onScroll={(e) => { if (e.currentTarget.scrollTop < 60) loadOlder(); }} className="flex-1 space-y-5 overflow-y-auto p-5" data-testid="message-list">
-          {conv && msgHasMore && <div className="text-center text-xs text-slate-400" data-testid="msg-older-hint">{loadingOlder ? "Memuat pesan lama…" : "Gulir ke atas untuk pesan lama"}</div>}
+          {msgsLoading && <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-400" data-testid="msgs-loading"><Loader2 size={18} className="animate-spin" /> Memuat percakapan…</div>}
+          {conv && !msgsLoading && msgHasMore && <div className="flex items-center justify-center gap-2 text-xs text-slate-400" data-testid="msg-older-hint">{loadingOlder ? <><Loader2 size={13} className="animate-spin" /> Memuat pesan lama…</> : "Gulir ke atas untuk pesan lama"}</div>}
           {conv && archivedCount > 0 && <div className="text-center"><button onClick={() => setShowArchive(true)} data-testid="archive-btn" className="rounded-full border border-[#E7ECF3] bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">Lihat arsip ({archivedCount})</button></div>}
           {conv?.task_id && <TaskContextCard taskId={conv.task_id} refreshKey={messages.length} />}
-          {!conv && (
+          {!conv && !msgsLoading && (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <Bot size={44} className="mb-4 text-[#2F6BFF]" />
               <h3 className="text-lg font-bold text-slate-900">Mulai percakapan dengan tim Anda</h3>
@@ -306,7 +309,11 @@ export default function Chat() {
               <div key={m.id || i} className="flex flex-col items-end">
                 {isMulti && m.sender_user_id && m.sender_user_id !== user?.id && <p className="mb-1 mr-1 text-xs font-semibold text-slate-500">{m.sender_name}</p>}
                 <div className="max-w-[78%] rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }} data-testid="msg-user">
-                  {(m.attachments || []).length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">{m.attachments.map((a, k) => <span key={k} className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs">{a.type === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}</span>)}</div>}
+                  {(m.attachments || []).length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">{m.attachments.map((a, k) => a.task_id
+                    ? <a key={k} href={`${window.location.origin}/workspace/${a.task_id}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs underline-offset-2 hover:underline" data-testid="att-link-task"><FileText size={11} />{a.name}<ExternalLink size={10} /></a>
+                    : a.path
+                    ? <a key={k} href={downloadUrl(a.path)} target="_blank" rel="noreferrer" download={a.name} className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs underline-offset-2 hover:underline" data-testid="att-link-file">{a.kind === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}<ExternalLink size={10} /></a>
+                    : <span key={k} className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs">{a.type === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}</span>)}</div>}
                   <p className="whitespace-pre-wrap">{m.content}</p>
                 </div>
               </div>
@@ -357,7 +364,7 @@ export default function Chat() {
               <div className="mb-2 flex flex-wrap gap-2">
                 {attachments.map((a, k) => (
                   <span key={k} className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs text-slate-600" data-testid={`att-${k}`}>
-                    {a.type === "image" ? <ImageIcon size={12} /> : <FileText size={12} />}{a.name}
+                    {a.type === "gallery" ? <Images size={12} className="text-[#2F6BFF]" /> : a.type === "image" ? <ImageIcon size={12} /> : <FileText size={12} />}{a.name}
                     <button onClick={() => setAttachments((p) => p.filter((_, j) => j !== k))}><X size={12} /></button>
                   </span>
                 ))}
@@ -366,7 +373,8 @@ export default function Chat() {
             {isMulti && <p className="mb-2 text-xs text-slate-400">Tip: sebut @NamaAsisten untuk menuju satu asisten tertentu.</p>}
             <div className="flex items-end gap-2">
               <input ref={fileRef} type="file" multiple accept="image/*,application/pdf,.txt,.md,.csv" className="hidden" onChange={onFiles} />
-              <button onClick={() => fileRef.current?.click()} data-testid="attach-btn" className="flex h-12 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E7ECF3] text-slate-500 hover:bg-slate-50"><Paperclip size={18} /></button>
+              <button onClick={() => fileRef.current?.click()} data-testid="attach-btn" title="Unggah berkas" className="flex h-12 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E7ECF3] text-slate-500 hover:bg-slate-50"><Paperclip size={18} /></button>
+              <button onClick={() => setShowGallery(true)} data-testid="attach-gallery-btn" title="Lampirkan dari Galeri" className="hidden h-12 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E7ECF3] text-slate-500 hover:bg-slate-50 sm:flex"><Images size={18} /></button>
               <button onClick={toggleRecord} data-testid="mic-btn" className={`flex h-12 w-11 shrink-0 items-center justify-center rounded-xl border ${recording ? "animate-pulse border-[#EF4444] bg-[#EF4444] text-white" : "border-[#E7ECF3] text-slate-500 hover:bg-slate-50"}`}>{recording ? <Square size={16} /> : <Mic size={18} />}</button>
               <textarea className="input-dark max-h-32 min-h-[48px] resize-none" rows={1} placeholder={t("chat.placeholder")} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} data-testid="chat-input" />
               <button onClick={send} disabled={streaming || (!input.trim() && attachments.length === 0)} className="btn-grad flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" data-testid="chat-send-btn"><Send size={18} /></button>
@@ -382,31 +390,7 @@ export default function Chat() {
         ? <RealtimeMeeting conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />
         : <VideoRoom conv={conv} cid={id} messages={messages} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />)}
 
-      {showInvite && conv && (
-        <div className="fixed inset-0 z-[92] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowInvite(false)} />
-          <div className="relative w-full max-w-md rounded-3xl border border-[#E7ECF3] bg-white p-6 shadow-2xl fade-up" data-testid="invite-modal">
-            <button onClick={() => setShowInvite(false)} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
-            <h3 className="text-lg font-bold text-slate-900">Undang ke Panggilan</h3>
-            <p className="mt-1 text-sm text-slate-500">Pilih pengguna workspace untuk bergabung ke rapat ini secara real-time.</p>
-            <button onClick={async () => { try { const r = await api.post(`/conversations/${id}/invite-link`); const url = `${window.location.origin}${r.data.path}`; try { await navigator.clipboard.writeText(url); } catch (e) {} toast.success("Tautan undangan disalin"); } catch (e) { toast.error("Gagal membuat tautan"); } }} data-testid="copy-invite-link-btn" className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[#2F6BFF]/40 py-2.5 text-sm font-semibold text-[#2F6BFF] hover:bg-[#EEF3FF]"><LinkIcon size={15} /> Salin Tautan Undangan Sekali Klik</button>
-            <div className="mt-4 max-h-80 space-y-2 overflow-y-auto">
-              {wsUsers.filter((wu) => !wu.is_admin).map((wu) => {
-                const joined = (conv.participants || []).includes(wu.id);
-                return (
-                  <div key={wu.id} className="flex items-center gap-3 rounded-xl border border-[#E7ECF3] p-3" data-testid={`invite-row-${wu.email}`}>
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(wu.name || "U")[0].toUpperCase()}</span>
-                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold text-slate-900">{wu.name}</span><span className="block truncate text-xs text-slate-400">{wu.email}</span></span>
-                    {joined ? <span className="text-xs font-semibold text-[#10B981]">Bergabung</span>
-                      : <button onClick={() => invite(wu.id)} data-testid={`invite-btn-${wu.email}`} className="btn-grad rounded-lg px-3 py-1.5 text-xs">Undang</button>}
-                  </div>
-                );
-              })}
-              {wsUsers.filter((wu) => !wu.is_admin).length === 0 && <p className="py-4 text-center text-xs text-slate-400">Belum ada pengguna. Tambah di menu Tim.</p>}
-            </div>
-          </div>
-        </div>
-      )}
+      {showGallery && conv && <GalleryPicker onClose={() => setShowGallery(false)} onPick={(items) => setAttachments((a) => [...a, ...items].slice(0, 5))} max={5 - attachments.length} />}
 
       {showModal && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">

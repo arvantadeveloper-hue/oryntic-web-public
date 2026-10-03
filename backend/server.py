@@ -14,7 +14,7 @@ from agents import router as agents_router
 from reminders import router as reminders_router, scheduler_tick
 from wallet import router as wallet_router
 from admin import router as admin_router
-from team import router as team_router
+from gallery import router as gallery_router
 from workspace import router as workspace_router
 from assignments import router as assignments_router, tasks_tick
 from models import router as models_router
@@ -41,7 +41,7 @@ app.include_router(agents_router)
 app.include_router(reminders_router)
 app.include_router(wallet_router)
 app.include_router(admin_router)
-app.include_router(team_router)
+app.include_router(gallery_router)
 app.include_router(workspace_router)
 app.include_router(assignments_router)
 app.include_router(models_router)

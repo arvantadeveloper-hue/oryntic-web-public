@@ -44,7 +44,7 @@ def _path_parts(path: str) -> list:
 
 
 @router.get("/{path:path}")
-async def serve_file(path: str, authorization: Optional[str] = Header(None), auth: Optional[str] = Query(None)):
+async def serve_file(path: str, authorization: Optional[str] = Header(None), auth: Optional[str] = Query(None), download: int = Query(0)):
     uid = _verify(_bearer(authorization, auth))
     parts = _path_parts(path)
     if parts[2] != uid and not await _same_workspace(uid, parts[2]):
@@ -53,4 +53,5 @@ async def serve_file(path: str, authorization: Optional[str] = Header(None), aut
         data, content_type = await asyncio.to_thread(get_object, path)
     except Exception as exc:
         raise HTTPException(404, "File not found") from exc
-    return Response(content=data, media_type=content_type)
+    headers = {"Content-Disposition": f'attachment; filename="{parts[-1]}"'} if download else {}
+    return Response(content=data, media_type=content_type, headers=headers)

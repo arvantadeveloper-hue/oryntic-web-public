@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from auth import current_user, workspace_id
+from auth import current_user, current_user_q, workspace_id
 from chat import _conv_title
 from db import db, now_iso, new_id, clean
 from llm import record_usage
@@ -71,7 +71,7 @@ EXPORTS = {"docx": ("application/vnd.openxmlformats-officedocument.wordprocessin
 
 
 @router.get("/tasks/{tid}/export/{fmt}")
-async def export_task(tid: str, fmt: str, u: dict = Depends(current_user)):
+async def export_task(tid: str, fmt: str, u: dict = Depends(current_user_q)):
     """Convert the text result on demand (nothing is pre-generated)."""
     if fmt not in EXPORTS:
         raise HTTPException(400, "Format tidak didukung")

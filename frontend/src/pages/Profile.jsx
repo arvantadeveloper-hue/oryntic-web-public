@@ -1,12 +1,48 @@
-import { NotulenFormatCard } from "../components/NotulenFormatCard";
 import React, { useState } from "react";
 import { toast } from "sonner";
-import { User, Globe, Shield, Sparkles } from "lucide-react";
+import { User, Globe, Shield, Sparkles, KeyRound, Lock, Eye, EyeOff } from "lucide-react";
+import { NotulenFormatCard } from "../components/NotulenFormatCard";
+import { SmartRoutingToggle } from "../components/ModelRoutingCard";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 
 const LANGS = [{ v: "id", l: "Bahasa Indonesia" }, { v: "en", l: "English" }, { v: "zh", l: "中文" }, { v: "es", l: "Español" }, { v: "ar", l: "العربية" }];
+
+function ChangePasswordCard() {
+  const [cur, setCur] = useState("");
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const mismatch = confirm.length > 0 && confirm !== pw;
+  const submit = async (e) => {
+    e.preventDefault();
+    if (pw !== confirm) { toast.error("Ulangi password tidak sama"); return; }
+    setBusy(true);
+    try { await api.post("/auth/change-password", { current_password: cur, new_password: pw }); toast.success("Password berhasil diubah"); setCur(""); setPw(""); setConfirm(""); }
+    catch (err) { toast.error(err?.response?.data?.detail || "Gagal mengubah password"); } finally { setBusy(false); }
+  };
+  return (
+    <form onSubmit={submit} className="mt-4 aivora-card p-6" data-testid="change-password-card">
+      <p className="flex items-center gap-2 font-semibold text-slate-900"><KeyRound size={16} className="text-[#2F6BFF]" /> Ubah Password</p>
+      <p className="mt-1 text-xs text-slate-500">Masukkan password lama untuk verifikasi, lalu password baru (minimal 6 karakter).</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="relative"><Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input className="input-dark pl-10" type={show ? "text" : "password"} placeholder="Password lama" value={cur} onChange={(e) => setCur(e.target.value)} required data-testid="pw-current" /></div>
+        <div className="relative"><KeyRound size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input className="input-dark pl-10" type={show ? "text" : "password"} placeholder="Password baru" value={pw} onChange={(e) => setPw(e.target.value)} required minLength={6} data-testid="pw-new" /></div>
+        <div className="relative"><KeyRound size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input className={`input-dark pl-10 ${mismatch ? "border-[#EF4444]" : ""}`} type={show ? "text" : "password"} placeholder="Ulangi password baru" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={6} data-testid="pw-confirm" /></div>
+      </div>
+      {mismatch && <p className="mt-1.5 text-xs font-medium text-[#EF4444]" data-testid="pw-confirm-error">Password tidak sama.</p>}
+      <div className="mt-4 flex items-center gap-3">
+        <button className="btn-grad rounded-xl px-5 py-2.5 text-sm disabled:opacity-50" disabled={busy || mismatch} data-testid="pw-submit">{busy ? "..." : "Simpan Password"}</button>
+        <button type="button" onClick={() => setShow(!show)} className="flex items-center gap-1.5 text-xs font-semibold text-slate-500" data-testid="pw-toggle-show">{show ? <EyeOff size={14} /> : <Eye size={14} />} {show ? "Sembunyikan" : "Tampilkan"}</button>
+      </div>
+    </form>
+  );
+}
 
 export default function Profile() {
   const { user, setUser } = useAuth();
@@ -59,6 +95,8 @@ export default function Profile() {
         </div>
       </div>
 
+      <ChangePasswordCard />
+      {user?.role === "admin" && <SmartRoutingToggle user={user} onSaved={() => api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {})} />}
       {user?.role === "admin" && <NotulenFormatCard user={user} onSaved={() => api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {})} />}
 
       <div className="mt-4 aivora-card p-6 text-sm text-slate-500">
