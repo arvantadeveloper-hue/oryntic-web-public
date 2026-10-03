@@ -229,6 +229,13 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - `settings.daily_digest {enabled, channel: chat|call|both, time HH:MM, persona_id}` (validasi di `PUT /auth/settings`); `assignments.py`: `build_digest` (agenda hari ini via `calendar_items` + tugas selesai 24 jam + yang berjalan → LLM persona), `send_digest` (chat → pesan di percakapan privat; call → reminder `kind:digest` status ringing → IncomingCall), `digest_tick` di loop scheduler (sekali/hari, jendela 3 jam, `users.digest_last_date`), `POST /digest/send-now`. UI: `DailyDigestCard.jsx` di halaman Kalender.
 - Semua teks UI "Meeting" → "Panggilan" (frontend + pesan backend berbahasa Indonesia; judul tersimpan dimigrasi di `migrate_workspace`). Nilai internal `type: "meeting"`, route, dan data-testid tidak berubah.
 
+## Update 2026-06 (aa) — Code review (read-only) + perbaikan
+- Notulen (`meeting_summary`) kini menyimpan `workspace_id` + `version` (terlihat oleh seluruh anggota & kalender).
+- Tawaran tugas di chat grup hanya dari asisten pertama (`_task_offer_turn`) → tidak ada tawaran ganda; `plan_task` menerima konteks `ctx.prompt`.
+- Digest harian: klaim `digest_last_date` dulu lalu kirim di background (`_digest_bg`) agar pengingat/tugas terjadwal tidak tertunda; skip "no persona" juga ditandai.
+- `ack_notifications` hanya `type: assigned`; `accept_task_offer`/`assign_task` memakai `_can_access` (peserta percakapan), bukan sekadar workspace.
+- Regresi: pytest iter21+iter22 18/18 lulus.
+
 ## Backlog batch berikut
 - Google OAuth sendiri (Client ID/Secret dari user) → login Google.
 - Produksi: set secret SMTP_* seperti preview; JANGAN set `EMAIL_DEBUG_LINKS=true` di produksi (tautan verifikasi akan bocor di respons API).

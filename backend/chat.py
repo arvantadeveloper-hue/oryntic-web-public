@@ -598,7 +598,9 @@ DISCUSS_RE = re.compile(r"\b(satu per satu|bahas (dulu|bersama|saja)|diskusi(kan
 
 async def _task_offer_turn(ctx):
     """Long/scheduled delegation → offer 'bahas satu per satu' vs 'terima beres'; a reply to a pending offer is resolved here."""
-    conv = await db.conversations.find_one({"id": ctx.cid}, {"_id": 0, "pending_task": 1}) or {}
+    conv = await db.conversations.find_one({"id": ctx.cid}, {"_id": 0, "pending_task": 1, "persona_ids": 1}) or {}
+    if (conv.get("persona_ids") or [ctx.persona["id"]])[0] != ctx.persona["id"]:
+        return  # in group chats only the first assistant handles task offers (avoids duplicate offers)
     if conv.get("pending_task"):
         mode = "delegate" if DELEGATE_RE.search(ctx.user_text) else "discuss" if DISCUSS_RE.search(ctx.user_text) else None
         if mode:
@@ -609,7 +611,7 @@ async def _task_offer_turn(ctx):
             yield ctx.sse(final=True, content=msg["content"], message_id=msg["id"], credits_used=msg.get("credits", 0), **{k: msg[k] for k in ("tool", "task_id") if k in msg})
             return
         await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_task": None}})  # user moved on
-    plan = await plan_task(ctx.user_text, (ctx.user.get("settings") or {}).get("timezone"), ctx.history_text if hasattr(ctx, "history_text") else "")
+    plan = await plan_task(ctx.user_text, (ctx.user.get("settings") or {}).get("timezone"), ctx.prompt[-600:] if ctx.prompt else "")
     if not plan.get("is_task") or not (plan.get("long") or plan.get("scheduled_at")):
         return
     from assignments import offer_text
@@ -892,8 +894,8 @@ async def meeting_summary(cid: str, u: dict = Depends(current_user)):
            "portrait": None, "credits": used, "created_at": now_iso()}
     await db.messages.insert_one(dict(msg))
     await db.tasks.insert_one({
-        "id": new_id(), "user_id": u["id"], "goal": f"Notulen rapat: {conv['title']}",
-        "type": "meeting_notes", "status": "completed", "steps": [], "summary": "Ringkasan & action items meeting",
+        "id": new_id(), "user_id": u["id"], "workspace_id": workspace_id(u), "version": 1, "goal": f"Notulen rapat: {conv['title']}",
+        "type": "meeting_notes", "status": "completed", "steps": [], "summary": "Ringkasan & action items panggilan",
         "model": None, "final_output": summary, "credits_used": used, "video_url": None,
         "created_at": now_iso(), "updated_at": now_iso(),
     })

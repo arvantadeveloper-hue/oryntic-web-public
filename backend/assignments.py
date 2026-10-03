@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import current_user, workspace_id
-from chat import _persona_system, _save_ai_msg, _get_personas, _owner_settings
+from chat import _persona_system, _save_ai_msg, _get_personas, _owner_settings, _can_access
 from db import db, now_iso, new_id, clean
 from llm import llm_text, record_usage, text_credits
 from tools import OFFER_TEXT, route_model
@@ -132,8 +132,8 @@ class AcceptIn(BaseModel):
 
 @router.post("/conversations/{cid}/tasks/accept")
 async def accept_task_offer(cid: str, x: AcceptIn, u: dict = Depends(current_user)):
-    conv = await db.conversations.find_one({"id": cid, "workspace_id": workspace_id(u)}, {"_id": 0})
-    if not conv:
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not conv or not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
     return await accept_pending(conv, u, x.mode)
 
@@ -148,8 +148,8 @@ class AssignIn(BaseModel):
 @router.post("/conversations/{cid}/tasks")
 async def assign_task(cid: str, x: AssignIn, u: dict = Depends(current_user)):
     """Direct assignment (used by the Realtime `assign_task` voice tool and the meeting chat)."""
-    conv = await db.conversations.find_one({"id": cid, "workspace_id": workspace_id(u)}, {"_id": 0})
-    if not conv:
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not conv or not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
     pid = x.persona_id if x.persona_id in (conv.get("persona_ids") or []) else conv.get("persona_id") or (conv.get("persona_ids") or [None])[0]
     persona = (await _get_personas([pid]) or [None])[0]
@@ -170,7 +170,7 @@ async def task_notifications(u: dict = Depends(current_user)):
 
 @router.post("/task-notifications/ack")
 async def ack_notifications(u: dict = Depends(current_user)):
-    await db.tasks.update_many({"user_id": u["id"], "notified": False}, {"$set": {"notified": True}})
+    await db.tasks.update_many({"user_id": u["id"], "notified": False, "type": "assigned"}, {"$set": {"notified": True}})
     return {"ok": True}
 
 
@@ -278,6 +278,7 @@ async def send_digest(u: dict, force: bool = False) -> dict:
     persona = await db.personas.find_one({"id": cfg.get("persona_id"), "deleted": {"$ne": True}}, {"_id": 0}) if cfg.get("persona_id") else None
     persona = persona or await db.personas.find_one({"user_id": wid, "deleted": {"$ne": True}}, {"_id": 0}, sort=[("created_at", 1)])
     if not persona:
+        await db.users.update_one({"id": u["id"]}, {"$set": {"digest_last_date": _local_now((u.get("settings") or {}).get("timezone")).strftime("%Y-%m-%d")}})
         return {"sent": False, "reason": "no persona"}
     md, spoken, used = await build_digest(u, persona)
     channel = cfg.get("channel") or "chat"
@@ -309,11 +310,16 @@ async def digest_tick():
         except Exception:
             continue
         if due <= now < due + timedelta(hours=DIGEST_WINDOW_H):
-            try:
-                await send_digest(u)
-            except Exception as e:
-                log.error("digest for %s failed: %s", u.get("email"), e)
-                await db.users.update_one({"id": u["id"]}, {"$set": {"digest_last_date": today}})
+            # claim today's slot first, then generate in the background so reminders/tasks are not delayed
+            await db.users.update_one({"id": u["id"]}, {"$set": {"digest_last_date": today}})
+            asyncio.create_task(_digest_bg(u))
+
+
+async def _digest_bg(u: dict):
+    try:
+        await send_digest(u)
+    except Exception as e:
+        log.error("digest for %s failed: %s", u.get("email"), e)
 
 
 @router.post("/digest/send-now")
