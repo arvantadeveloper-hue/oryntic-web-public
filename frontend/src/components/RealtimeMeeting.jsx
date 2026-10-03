@@ -355,7 +355,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const toggleMute = () => { const nv = !muted; setMuted(nv); pipeRef.current?.setMuted(nv); };
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0"), ss = String(elapsed % 60).padStart(2, "0");
   const modName = members.find((m) => m.id === modId)?.name || "Moderator";
-  const label = { connecting: "Menyambungkan semua peserta...", listening: !runAI ? (hasAI ? "Terhubung dengan teman — asisten aktif saat pemilik grup bergabung." : "Panggilan suara dengan teman (WebRTC)."), [`listening`]: !runAI ? (hasAI ? "Terhubung dengan teman — asisten aktif saat pemilik grup bergabung." : "Panggilan suara dengan teman (WebRTC).") : `Mendengarkan Anda — ${modName} memandu; sebut nama asisten lain untuk minta pendapatnya.`, user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
+  const label = { connecting: "Menyambungkan semua peserta...", listening: !runAI ? (hasAI ? "Terhubung dengan teman — asisten aktif saat pemilik grup bergabung." : "Panggilan suara dengan teman (WebRTC).") : `Mendengarkan Anda — ${modName} memandu; sebut nama asisten lain untuk minta pendapatnya.`, user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
   const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" },
     ...humans.map((h) => { const p = peers.find((x) => x.id === h.id); return { id: h.id, name: h.name, isHuman: true, online: !!p, state: p?.state }; }),
     ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait, isMod: m.id === modId }))];

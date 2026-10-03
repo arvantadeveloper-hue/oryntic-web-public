@@ -1,0 +1,39 @@
+{
+  "summary": "Iter 28 — human↔human WebRTC in DM calls, sidebar badges (friend_requests + unread_chats), WS /api/ws/{cid} RTC relay. Backend 9/9 PASS (test_iter28.py). Frontend PASS. One CRITICAL blocking syntax bug found & fixed in RealtimeMeeting.jsx (duplicated 'listening' key with an incomplete ternary — the whole app failed to compile).\n\nBackend (9/9 passed):\n- GET /api/rtc/ice-servers unauth → 401; authenticated → {iceServers:[stun:...], turn:false} (STUN only, no METERED env set).\n- GET /api/notifications/badges → {friend_requests:int, unread_chats:int, at:iso}. friend_requests=0 for demo (already friends with Budi).\n- Mark-read flow: after demo POST /api/conversations/{dm}/send 'ping badge', budi's unread_chats increases by 1 (4→5 observed); demo (sender) unread_chats unchanged (2→2) proving last_sender_id suppression works; budi POST /conversations/{dm}/read → unread decreases.\n- WS /api/ws/{dm}?token=…: budi sends {type:'rtc',kind:'join'} → demo receives with from=<budiId>, from_name='Budi'. demo sends {type:'rtc',kind:'offer',to:<budiId>,sdp:{…}} → budi receives with from=<demoId>, kind:'offer'. Sender does NOT receive own echo (exclude=ws works). Closing budi's socket → demo receives {type:'rtc',kind:'leave',from:<budiId>}. Invalid token → close code 4401 (connection rejected).\n\nFrontend:\n- Two chromium contexts (fake-ui-for-media-stream enabled by playwright context perm), both login demo+budi, open /chat/<dmId>.\n- video-call-btn 'Masuk Panggilan' visible for both in the DM; call-mode-btn is NOT shown for DM (count=0 — correct, only for conv.type==='private'). Click opens RealtimeMeeting.\n- rtm-humans text reached '1/1 teman terhubung' on BOTH clients within 1 second (STUN-only ICE actually succeeded in this sandbox; the mesh signaling flows cleanly over the WS). No console errors during the call.\n- rtm-leave closed the room without errors on both sides.\n- Badges UI: after demo sends a message, budi's sidebar badge-chat shows '5' (data-testid='badge-chat'); badge-friends has count=0 (no pending requests — correctly hidden). Opening the DM decrements unread (5→4). Demo (sender) unread_chats stays at 2 — self-sent messages are not counted.\n- Regression: Rio direct chat (/chat/{privateCid}) shows call-mode-btn 'Panggil · Realtime' and NO video-call-btn (count=0). /friends and /gallery load. Both users log in cleanly.\n\nRCA & fix for the critical syntax bug:\nFile /app/frontend/src/components/RealtimeMeeting.jsx line 358 had a label-map object literal with TWO 'listening' keys. The first was `listening: !runAI ? (hasAI ? 'A' : 'B'),` — a ternary without the `: else` branch, which is a hard SyntaxError. The second `[\\`listening\\`]: !runAI ? (hasAI ? 'A' : 'B') : \\`default\\`` is the correct complete entry. Appears to be a merge/refactor artifact that duplicated the key. I deleted the broken first entry and kept the complete `[\\`listening\\`]` version. Frontend recompiled (1 unrelated eslint warning only).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter28.py",
+    "/app/test_reports/pytest/iter28.xml"
+  ],
+  "action_items": [
+    "Review why the duplicate 'listening' key with incomplete ternary slipped in (likely merge conflict in label-map). Consider splitting that one-line label object into multi-line form or moving to a lookup function so future diffs are safer.",
+    "The computed key `[\\`listening\\`]` is unnecessarily templated — use plain `listening:` for the string key to avoid future confusion."
+  ],
+  "critical_code_review_comments": [
+    "CRITICAL (FIXED by testing agent): RealtimeMeeting.jsx:358 shipped with a hard SyntaxError (duplicate `listening:` key, first one missing the ternary else-branch). The app failed to compile at all; every page rendered the webpack error overlay. Please re-verify after pulling.",
+    "RealtimeMeeting.jsx:358 uses a computed string key `[\\`listening\\`]` for no reason — change to plain `listening:`.",
+    "rtc.py: STUN_ONLY list is module-level mutable; defensively `return {\"iceServers\": list(STUN_ONLY), ...}` to prevent future accidental mutation on this shared array.",
+    "rtc.py badges(): ISO string comparison (`updated_at > read_at`) assumes same timezone format across all docs; same comment as iter27. Works today because now_iso() is uniform, but risky.",
+    "server.py ws_meeting: the broadcast on normal disconnect also fires on `except Exception` — which is good, but swallows the stacktrace. Consider logging the exception; a buggy client could spam leaves otherwise.",
+    "server.py ws_meeting: no server-side rate-limit or payload size cap on the WS; a malicious participant could flood {type:'rtc',...} frames. Not a bug now but worth considering before adding TURN production credentials.",
+    "chat.py _finish_stream sets last_sender_id for the SENDER — correct — but humans_chat conversations where ONLY humans speak never generate an AI message, so the SSE stream still works correctly through _finish_stream. OK.",
+    "No unique index on friendships (user_id, friend_id) was observed in db.ensure_indexes — the friends collection relies on application logic to dedupe. Low priority."
+  ],
+  "updated_files": [
+    "/app/frontend/src/components/RealtimeMeeting.jsx",
+    "/app/backend/tests/test_iter28.py",
+    "/app/test_reports/iteration_28.json"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% of iter28 target flows (after critical fix)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (admin), budi@aivora.ai / budi123456",
+  "seed_data_creation": "test_badge_unread_flow_demo_sends_budi_reads sends a 'ping badge <ts>' SSE message in the demo↔budi DM (conv 5e6c2fc5-1f37-4c25-9932-2ca64929dfa8) and leaves it marked-read for budi; frontend badge test sent 'Halo Budi, tes badge UI' in the same DM. No other seed data. WS test uses the same DM for RTC signaling (no persistence).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "DM between demo & budi: id=5e6c2fc5-1f37-4c25-9932-2ca64929dfa8 (no personas). video-call-btn is shown for any non-'private' conv with >1 humans; call-mode-btn only for conv.type==='private'. STUN-only ICE works in the preview sandbox (both peers connected in ~1s). pytest run: `cd /app && export $(grep REACT_APP_BACKEND_URL /app/frontend/.env | xargs) && pytest backend/tests/test_iter28.py -p asyncio -o asyncio_mode=auto`. websockets 16.1.1 + pytest-asyncio 1.4.0 are installed. The WS URL is wss://<host>/api/ws/{cid}?token=<jwt> (close 4401 for bad token, 4403 for forbidden). CRITICAL: the main agent's commit shipped a hard syntax error in RealtimeMeeting.jsx line 358 — testing agent fixed it to unblock testing; main agent should review the fix.",
+  "rca of the issue": "RealtimeMeeting.jsx:358 — a label map object literal had `listening: !runAI ? (hasAI ? 'A' : 'B'),` immediately followed by `[\\`listening\\`]: !runAI ? (hasAI ? 'A' : 'B') : \\`default\\`,`. The first entry's ternary had no `:` else-branch → SyntaxError 'Unexpected token, expected \":\" (358:206)'. Entire React build failed; every route showed webpack error overlay. Fix: removed the broken first entry, kept the complete `[\\`listening\\`]` entry. After the one-line fix the frontend compiled with only pre-existing unrelated eslint warnings and all iter28 UI tests passed."
+}
