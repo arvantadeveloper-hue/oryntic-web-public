@@ -9,12 +9,13 @@ from starlette.middleware.cors import CORSMiddleware
 from db import db, ensure_indexes
 from auth import router as auth_router, seed_admin, JWT_SECRET, JWT_ISSUER
 from personas import router as personas_router
-from chat import router as chat_router, _can_access
+from chat import router as chat_router, _can_access, migrate_direct_chats
 from agents import router as agents_router
 from reminders import router as reminders_router, scheduler_tick
 from wallet import router as wallet_router
 from admin import router as admin_router
 from gallery import router as gallery_router
+from archives import router as archives_router, archive_tick
 from workspace import router as workspace_router
 from assignments import router as assignments_router, tasks_tick
 from models import router as models_router
@@ -42,6 +43,7 @@ app.include_router(reminders_router)
 app.include_router(wallet_router)
 app.include_router(admin_router)
 app.include_router(gallery_router)
+app.include_router(archives_router)
 app.include_router(workspace_router)
 app.include_router(assignments_router)
 app.include_router(models_router)
@@ -91,6 +93,7 @@ async def _scheduler_loop():
         try:
             await scheduler_tick()
             await tasks_tick()
+            await archive_tick()
         except Exception as e:
             logger.error(f"scheduler error: {e}")
         await asyncio.sleep(20)
@@ -100,6 +103,7 @@ async def _scheduler_loop():
 async def startup():
     await ensure_indexes()
     await seed_admin()
+    await migrate_direct_chats()
     from pricing import refresh as refresh_pricing
     await refresh_pricing(force=True)
     try:

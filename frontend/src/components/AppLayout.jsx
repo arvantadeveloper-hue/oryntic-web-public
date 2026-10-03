@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { NavLink, useNavigate, Outlet } from "react-router-dom";
-import { Home, MessageSquare, Bot, FileText, Bell, Wallet, User, Shield, LogOut, Menu, X, Sparkles, Search, HelpCircle, Plus, Settings, CalendarDays, Images } from "lucide-react";
+import { Home, MessageSquare, Bot, FileText, Bell, Wallet, User, Shield, LogOut, Menu, X, Sparkles, Search, HelpCircle, Plus, Settings, CalendarDays, Images, Archive } from "lucide-react";
 import { Logo } from "./Logo";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
@@ -23,6 +23,7 @@ export function AppLayout() {
     { to: "/reminders", icon: Bell, label: t("nav.reminders"), id: "reminders" },
     { to: "/calendar", icon: CalendarDays, label: "Kalender", id: "calendar" },
     { to: "/gallery", icon: Images, label: "Galeri", id: "gallery" },
+    { to: "/archives", icon: Archive, label: "Arsip", id: "archives" },
     { to: "/wallet", icon: Wallet, label: t("nav.wallet"), id: "wallet", adminOnly: true },
     { to: "/profile", icon: Settings, label: "Settings", id: "profile" },
   ];

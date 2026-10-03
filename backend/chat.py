@@ -19,6 +19,7 @@ from pricing import rate as tool_rate
 from llm import model_label
 
 MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+HIST_MSG_CAP = 1500
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -147,7 +148,7 @@ def _conv_title(ctype: str, personas: list) -> str:
         return "Panggilan: " + names
     if ctype == "group":
         return "Grup: " + names
-    return f"Chat dengan {personas[0]['name']}"
+    return personas[0]["name"]
 
 
 async def _resolve_participants(u: dict, ids: list) -> list:
@@ -182,10 +183,71 @@ async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
 
 @router.get("/conversations")
 async def list_conv(q: Optional[str] = None, limit: int = Query(200, ge=1, le=200), offset: int = Query(0, ge=0), u: dict = Depends(current_user)):
-    query = {"$or": [{"user_id": u["id"]}, {"participants": u["id"]}]}
+    query = {"$or": [{"user_id": u["id"]}, {"participants": u["id"]}], "archived_conv": {"$ne": True}}
     if q:
         query["title"] = {"$regex": q, "$options": "i"}
-    return await db.conversations.find(query, {"_id": 0, "invite_token": 0}).sort("updated_at", -1).skip(offset).to_list(limit)
+    rows = await db.conversations.find(query, {"_id": 0, "invite_token": 0}).sort("updated_at", -1).skip(offset).to_list(limit)
+    for c in rows:
+        c["unread"] = bool(c.get("last_message")) and (c.get("updated_at") or "") > ((c.get("read_at") or {}).get(u["id"]) or "")
+    return rows
+
+
+class DirectIn(BaseModel):
+    persona_id: str
+
+
+@router.post("/conversations/direct")
+async def direct_conv(x: DirectIn, u: dict = Depends(current_user)):
+    """WhatsApp-style: exactly one private chat per assistant (created on first open)."""
+    personas = await _get_personas([x.persona_id], workspace_id(u))
+    if not personas:
+        raise HTTPException(404, "Asisten tidak ditemukan")
+    p = personas[0]
+    conv = await db.conversations.find_one({"user_id": u["id"], "type": "private", "persona_ids": [p["id"]], "archived_conv": {"$ne": True}}, {"_id": 0}, sort=[("updated_at", -1)])
+    if not conv:
+        conv = {"id": new_id(), "user_id": u["id"], "workspace_id": workspace_id(u), "participants": [u["id"]], "type": "private", "persona_ids": [p["id"]], "persona_id": p["id"],
+                "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")}], "title": p["name"],
+                "created_at": now_iso(), "updated_at": now_iso(), "last_message": ""}
+        await db.conversations.insert_one(dict(conv))
+    return clean(conv)
+
+
+@router.post("/conversations/{cid}/read")
+async def mark_read(cid: str, u: dict = Depends(current_user)):
+    await db.conversations.update_one({"id": cid}, {"$set": {f"read_at.{u['id']}": now_iso()}})
+    return {"ok": True}
+
+
+@router.delete("/conversations/{cid}/task")
+async def detach_task(cid: str, u: dict = Depends(current_user)):
+    """Stop using a Workspace task as this chat's shared context."""
+    conv = await db.conversations.find_one({"id": cid})
+    if not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    await db.conversations.update_one({"id": cid}, {"$set": {"task_id": None}})
+    return {"ok": True}
+
+
+async def migrate_direct_chats():
+    """One private chat per (user, assistant): older duplicates are merged into the newest one as archived history."""
+    async for cv in db.conversations.find({"read_at": {"$exists": False}}, {"_id": 0, "id": 1, "user_id": 1, "updated_at": 1}):
+        await db.conversations.update_one({"id": cv["id"]}, {"$set": {f"read_at.{cv['user_id']}": cv.get("updated_at") or now_iso()}})
+    pipeline = [{"$match": {"type": "private", "archived_conv": {"$ne": True}, "persona_ids": {"$size": 1}}},
+                {"$group": {"_id": {"u": "$user_id", "p": {"$arrayElemAt": ["$persona_ids", 0]}}, "n": {"$sum": 1}}}, {"$match": {"n": {"$gt": 1}}}]
+    async for g in db.conversations.aggregate(pipeline):
+        convs = await db.conversations.find({"user_id": g["_id"]["u"], "type": "private", "persona_ids": [g["_id"]["p"]], "archived_conv": {"$ne": True}}, {"_id": 0}).sort("updated_at", -1).to_list(200)
+        primary, old = convs[0], convs[1:]
+        for c in old:
+            msgs = await db.messages.find({"conversation_id": c["id"]}, {"_id": 0, "id": 1, "created_at": 1, "content": 1}).sort("created_at", 1).to_list(5000)
+            if msgs:
+                await db.messages.update_many({"conversation_id": c["id"]}, {"$set": {"conversation_id": primary["id"], "archived": True, "origin_conversation_id": c["id"]}})
+                await db.chat_archives.insert_one({"id": new_id(), "user_id": c["user_id"], "conversation_id": primary["id"], "title": c.get("title") or primary["title"],
+                                                   "persona_names": [m["name"] for m in c.get("members") or []], "period_start": msgs[0]["created_at"], "period_end": msgs[-1]["created_at"],
+                                                   "summary": c.get("memory_summary") or (msgs[-1].get("content") or "")[:400], "message_ids": [m["id"] for m in msgs], "message_count": len(msgs),
+                                                   "reason": "merged", "restored": False, "created_at": now_iso()})
+            await db.conversations.update_one({"id": c["id"]}, {"$set": {"archived_conv": True, "merged_into": primary["id"]}})
+        if primary.get("title", "").startswith("Chat dengan "):
+            await db.conversations.update_one({"id": primary["id"]}, {"$set": {"title": primary["title"][len("Chat dengan "):]}})
 
 
 @router.get("/conversations/{cid}/messages")
@@ -229,20 +291,15 @@ async def _merge_summary(cid: str, u: dict, conv: dict, instruction: str) -> tup
 
 @router.post("/conversations/{cid}/compact")
 async def compact_conversation(cid: str, u: dict = Depends(current_user)):
-    """Summarize the live thread into conversation memory and archive the raw messages (not shown to the assistant anymore)."""
+    """Summarize the live thread into conversation memory and archive the raw messages (kept in Arsip, restorable)."""
+    from archives import archive_conversation
     conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
     if not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
-    if not await db.messages.count_documents({"conversation_id": cid, "archived": {"$ne": True}}):
+    entry = await archive_conversation(conv, u, "manual")
+    if not entry:
         raise HTTPException(400, "Tidak ada pesan untuk dirangkum")
-    summary, used = await _merge_summary(cid, u, conv, "Summarize this conversation so the assistant can continue it later without the raw transcript.")
-    await record_usage(u["id"], "chat_summary", used, {"conversation_id": cid})
-    res = await db.messages.update_many({"conversation_id": cid, "archived": {"$ne": True}}, {"$set": {"archived": True}})
-    note = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": f"📝 **Rangkuman percakapan sebelumnya**\n\n{summary}\n\n_{res.modified_count} pesan lama diarsipkan — lihat lewat tombol Arsip._",
-            "persona_id": "__system__", "persona_name": "Rangkuman", "is_summary": True, "portrait": None, "credits": used, "created_at": now_iso()}
-    await db.messages.insert_one(dict(note))
-    await db.conversations.update_one({"id": cid}, {"$set": {"memory_summary": summary, "summary_snoozed_at_count": 0, "updated_at": now_iso()}})
-    return {"summary": summary, "archived": res.modified_count, "credits_used": used}
+    return {"summary": entry["summary"], "archived": entry["message_count"], "credits_used": 0, "archive_id": entry["id"]}
 
 
 @router.post("/conversations/{cid}/summary-later")
@@ -320,7 +377,18 @@ MEETING_CHAT_STYLE = ("MEETING CHAT PANEL: a live voice meeting is in progress a
                       "do not say you will 'speak' or 'read' anything aloud.")
 
 
-async def _persona_system(persona, user, roster=None, voice_mode=False):
+def _relevant_memories(mems: list, query: str, cap: int = 10) -> list:
+    """Always-on (pinned) memories + those sharing words with the current message; everything if the list is small."""
+    if len(mems) <= cap or not query:
+        return mems
+    words = {w.strip(".,?!:;\"'()").lower() for w in query.split() if len(w) > 3}
+    scored = sorted(mems, key=lambda m: -len(words & {w.lower() for w in m["content"].split()}))
+    pinned = [m for m in mems if m.get("pinned")]
+    out = pinned + [m for m in scored if m not in pinned]
+    return out[:cap]
+
+
+async def _persona_system(persona, user, roster=None, voice_mode=False, query=None):
     prof = persona.get("profile", {})
     lang_name = _lang_name(user)
     parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in. Never switch to another language unless the user themselves writes in a different language."]
@@ -329,7 +397,7 @@ async def _persona_system(persona, user, roster=None, voice_mode=False):
     parts.append(f"Communication style: {pers.get('communication_style','')}. Formality: {pers.get('formality','')}. Attitude: {pers.get('attitude','')}.")
     parts.append("You are an AI and must not claim to have real human feelings or needs. Be warm but honest.")
     parts.append(SANGUINE_TONE)
-    mems = await db.memory_items.find({"user_id": user["id"], "persona_id": persona["id"], "enabled": True}).to_list(50)
+    mems = _relevant_memories(await db.memory_items.find({"user_id": user["id"], "persona_id": persona["id"], "enabled": True}).to_list(50), query)
     if mems:
         parts.append("Saved memory about the user: " + "; ".join(m["content"] for m in mems))
     if roster:
@@ -355,7 +423,10 @@ async def _history_text(cid: str, limit=14, with_summary=True) -> str:
             who = m.get("sender_name") or "User"
         else:
             who = m.get("persona_name") or "Assistant"
-        lines.append(f"{who}: {m['content']}")
+        body = m["content"] or ""
+        if m["role"] != "user" and len(body) > HIST_MSG_CAP:
+            body = body[:HIST_MSG_CAP] + " …(dipangkas; versi lengkap tersimpan di Ruang Kerja/Galeri)"
+        lines.append(f"{who}: {body}")
         if m.get("attachment_text"):
             lines.append(f"[Isi lampiran {who}]: {m['attachment_text'][:1500]}")
         if m.get("media"):
@@ -498,7 +569,7 @@ class ReplyCtx:
 
 
 async def _prepare_ctx(ctx: ReplyCtx) -> ReplyCtx:
-    ctx.system = await _persona_system(ctx.persona, ctx.user, ctx.roster, voice_mode=ctx.voice_mode)
+    ctx.system = await _persona_system(ctx.persona, ctx.user, ctx.roster, voice_mode=ctx.voice_mode, query=ctx.user_text)
     if ctx.via == "meeting_chat":
         ctx.system += "\n\n" + MEETING_CHAT_STYLE
     ctx.model_key, ctx.routed = await route_model(ctx.persona.get("model"), ctx.user_text, ctx.attach_len, await _owner_settings(ctx.user))
@@ -596,6 +667,14 @@ async def _revise_turn(ctx):
 async def _persona_reply(ctx: ReplyCtx):
     """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
     await _prepare_ctx(ctx)
+    if ctx.user_text and not ctx.voice_mode:
+        from archives import archive_turn_text
+        hit = await archive_turn_text(ctx)
+        if hit:
+            yield ctx.sse(start=True)
+            async for ev in _emit_final(ctx, hit["content"], 0, hit["extra"]):
+                yield ev
+            return
     if ctx.user_text and not ctx.voice_mode and SEARCH_RE.search(ctx.user_text) and not TASK_RE_STRONG.search(ctx.user_text):
         async for ev in _search_turn(ctx):
             yield ev
@@ -664,6 +743,25 @@ def _pick_responders(x: MsgIn, personas: list) -> list:
     return personas[:1] if x.channel == "meeting_chat" else personas  # text side-channel: one assistant answers
 
 
+async def _route_group(x: MsgIn, personas: list, cid: str) -> list:
+    """Group chat without @mention: let only the 1-2 most relevant assistants answer (saves N× context tokens)."""
+    text = (x.content or "").strip()
+    last = await db.messages.find_one({"conversation_id": cid, "role": "assistant", "archived": {"$ne": True}}, {"_id": 0, "persona_id": 1}, sort=[("created_at", -1)])
+    if len(text) < 25 and last:  # short follow-up ("ya", "lanjutkan") → whoever spoke last
+        return [p for p in personas if p["id"] == last.get("persona_id")] or personas[:1]
+    if re.search(r"\b(semua|kalian|masing-masing|everyone|all of you|pendapat kalian)\b", text, re.I):
+        return personas
+    roster = "\n".join(f"- {p['name']}: {(p.get('summary') or (p.get('profile') or {}).get('system_instructions') or '')[:160]}" for p in personas)
+    try:
+        r = await llm_json("Pick which assistants (1, at most 2) should answer the user's latest group message, based on relevance to their role. Reply JSON {\"names\": [str]}.",
+                           f"Assistants:\n{roster}\nUser message: {text[:600]}")
+        names = {str(n).lower() for n in (r.get("names") or [])}
+        chosen = [p for p in personas if p["name"].lower() in names][:2]
+        return chosen or personas[:1]
+    except Exception:
+        return personas[:1]
+
+
 def _reply_extra(x: MsgIn, attach_text: str) -> str:
     notes = [f"\n\n[Lampiran dari user]:\n{attach_text}"] if attach_text else []
     if x.interrupted:
@@ -697,6 +795,8 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     attach_text, attach_meta = await _process_attachments(x.attachments, u["id"])
     await _store_user_message(cid, x, u, attach_text, attach_meta)
     responders = _pick_responders(x, personas)
+    if conv.get("type") == "group" and len(personas) > 1 and not _mentioned(x.content, personas) and x.channel != "meeting_chat":
+        responders = await _route_group(x, personas, cid)
     roster = [p["name"] for p in personas] if len(personas) > 1 else None
     extra = _reply_extra(x, attach_text)
 

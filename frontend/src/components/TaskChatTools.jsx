@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ClipboardList, ExternalLink, Bot, Plus, Check } from "lucide-react";
+import { ClipboardList, ExternalLink, Bot, Plus, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 
 // Workspace task pinned at the top of a task-linked chat so the discussion stays on topic.
-export function TaskContextCard({ taskId, refreshKey }) {
+export function TaskContextCard({ taskId, refreshKey, cid, onDetach }) {
   const nav = useNavigate();
   const [task, setTask] = useState(null);
   useEffect(() => { if (taskId) api.get(`/tasks/${taskId}`).then((r) => setTask(r.data)).catch(() => setTask(null)); }, [taskId, refreshKey]);
@@ -21,6 +21,7 @@ export function TaskContextCard({ taskId, refreshKey }) {
           <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{(task.revision_note || task.summary || (task.final_output || "").slice(0, 160)).replace(/\*\*/g, "")}</p>
         </div>
         <span className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: `${status[0]}22`, color: status[0] }}>{status[1]}</span>
+        {cid && onDetach && <button onClick={async () => { try { await api.delete(`/conversations/${cid}/task`); onDetach(); } catch (e) {} }} title="Lepas tugas dari chat ini" className="shrink-0 text-slate-400 hover:text-[#EF4444]" data-testid="task-context-detach"><X size={15} /></button>}
       </div>
       <div className="mt-2 flex items-center justify-between text-xs">
         <span className="text-slate-500">Minta perubahan di chat ini → revisi tersimpan otomatis sebagai versi baru.</span>
@@ -112,6 +113,40 @@ export function WorkspaceResults({ m }) {
           <span className="min-w-0"><span className="block truncate text-xs font-bold text-slate-900">{r.title}</span><span className="block text-[10px] text-slate-500">v{r.version}{r.persona_name ? ` · ${r.persona_name}` : ""} · {new Date(r.updated_at).toLocaleDateString("id-ID")}</span></span>
         </button>
       ))}
+    </div>
+  );
+}
+
+// Archive search results / restore confirmation posted by the assistant (tool: archive_search | archive_confirm).
+export function ArchiveResults({ m, cid, onDone, isLast }) {
+  const [busy, setBusy] = useState("");
+  if (!["archive_search", "archive_confirm"].includes(m.tool) || !(m.results || []).length) return null;
+  const restore = async (a) => {
+    if (!window.confirm(`Pulihkan arsip «${a.title}» ke chat ini?`)) return;
+    setBusy(a.id);
+    try { await api.post(`/archives/${a.id}/restore`); toast.success("Arsip dipulihkan"); onDone && onDone(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Gagal memulihkan"); } finally { setBusy(""); }
+  };
+  const answer = async (text) => {
+    setBusy(text);
+    try { await api.post(`/conversations/${cid}/send`, { content: text }); onDone && onDone(); }
+    catch (e) { toast.error("Gagal mengirim"); } finally { setBusy(""); }
+  };
+  return (
+    <div className="mt-3 space-y-2" data-testid="archive-results">
+      {m.results.slice(0, 5).map((a) => (
+        <div key={a.id} className="flex items-center gap-3 rounded-xl border border-[#E7ECF3] bg-white p-3" data-testid={`archive-result-${a.id}`}>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0B132B] text-white"><ClipboardList size={14} /></span>
+          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-900">{a.title}</span><span className="block truncate text-[11px] text-slate-400">{a.message_count} pesan · {(a.persona_names || []).join(", ")}</span></span>
+          {!a.restored && m.tool === "archive_search" && <button onClick={() => restore(a)} disabled={!!busy} className="rounded-lg bg-[#EEF3FF] px-2.5 py-1.5 text-xs font-bold text-[#2F6BFF]" data-testid="archive-result-restore">{busy === a.id ? "..." : "Pulihkan"}</button>}
+        </div>
+      ))}
+      {m.tool === "archive_confirm" && isLast && (
+        <div className="flex gap-2" data-testid="archive-confirm-buttons">
+          <button onClick={() => answer("ya, pulihkan")} disabled={!!busy} className="rounded-full bg-[#10B981] px-4 py-1.5 text-xs font-bold text-white" data-testid="archive-confirm-yes">Ya, pulihkan</button>
+          <button onClick={() => answer("tidak")} disabled={!!busy} className="rounded-full border border-[#E7ECF3] bg-white px-4 py-1.5 text-xs font-semibold text-slate-700" data-testid="archive-confirm-no">Tidak</button>
+        </div>
+      )}
     </div>
   );
 }

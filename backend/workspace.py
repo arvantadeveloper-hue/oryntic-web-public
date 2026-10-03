@@ -1,3 +1,4 @@
+from typing import Optional
 import io
 import re
 
@@ -112,10 +113,6 @@ async def revise_task(tid: str, x: ReviseIn, u: dict = Depends(current_user)):
     return {"version": ver, "summary": summary, "credits_used": used}
 
 
-class DiscussIn(BaseModel):
-    mode: str = Field(pattern="^(chat|call|meeting)$")
-
-
 async def _task_personas(t: dict, u: dict) -> list:
     wid = workspace_id(u)
     ids = [p for p in [t.get("persona_id"), *(t.get("persona_ids") or [])] if p]
@@ -129,23 +126,64 @@ async def _task_personas(t: dict, u: dict) -> list:
     return personas
 
 
+async def _task_team(t: dict, u: dict) -> list:
+    """Lead assistant + everyone who worked on sub-tasks."""
+    personas = await _task_personas(t, u)
+    sub_ids = [k["persona_id"] async for k in db.tasks.find({"parent_id": t["id"]}, {"_id": 0, "persona_id": 1}) if k.get("persona_id")]
+    extra = [p async for p in db.personas.find({"id": {"$in": [i for i in sub_ids if i not in {x["id"] for x in personas}]}, "deleted": {"$ne": True}}, {"_id": 0})]
+    return personas + extra
+
+
+@router.get("/tasks/{tid}/chat-target")
+async def chat_target(tid: str, u: dict = Depends(current_user)):
+    """Who should the chat/call about this task involve, and does a matching group already exist?"""
+    t = await get_task_for(tid, u)
+    team = await _task_team(t, u)
+    ids = sorted(p["id"] for p in team)
+    out = {"personas": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait")} for p in team], "single": len(team) == 1, "default_title": (t.get("goal") or "Grup tugas")[:60]}
+    if len(team) > 1:
+        q = {"user_id": u["id"], "type": {"$in": ["group", "meeting"]}, "archived_conv": {"$ne": True}}
+        groups = await db.conversations.find(q, {"_id": 0, "id": 1, "title": 1, "persona_ids": 1, "task_id": 1}).sort("updated_at", -1).to_list(200)
+        exact = [g for g in groups if sorted(g.get("persona_ids") or []) == ids]
+        out["group"] = exact[0] if exact else None
+        out["other_groups"] = [g for g in groups if not exact or g["id"] != exact[0]["id"]][:10]
+    return out
+
+
+class DiscussIn(BaseModel):
+    mode: str = Field(pattern="^(chat|call|meeting)$")
+    conversation_id: Optional[str] = None  # reuse this group
+    group_title: Optional[str] = Field(default=None, max_length=80)  # create a new group with these members
+    persona_ids: Optional[list] = None
+
+
 @router.post("/tasks/{tid}/discuss")
 async def discuss_task(tid: str, x: DiscussIn, u: dict = Depends(current_user)):
-    """Open (or reuse) a conversation with the task's assistant(s); the task becomes the shared context."""
+    """Attach the task as shared context to the assistant's chat (single) or to a group (existing or newly created), then open it."""
     t = await get_task_for(tid, u)
-    personas = await _task_personas(t, u)
-    ctype = "meeting" if x.mode == "meeting" else "private"
-    if ctype == "private":
-        personas = personas[:1]
-    q = {"task_id": tid, "type": ctype, "user_id": u["id"], "persona_ids": [p["id"] for p in personas]}
-    conv = await db.conversations.find_one(q, {"_id": 0})
-    if not conv:
-        conv = {"id": new_id(), "user_id": u["id"], "workspace_id": workspace_id(u), "participants": [u["id"]], "type": ctype,
-                "persona_ids": [p["id"] for p in personas], "persona_id": personas[0]["id"], "task_id": tid,
-                "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")} for p in personas],
-                "title": f"{'Panggilan' if ctype == 'meeting' else 'Diskusi'}: {(t.get('goal') or '')[:60]}", "created_at": now_iso(), "updated_at": now_iso(), "last_message": ""}
-        await db.conversations.insert_one(dict(conv))
-        await db.tasks.update_one({"id": tid}, {"$addToSet": {"conversation_ids": conv["id"]}})
+    team = await _task_team(t, u)
+    conv = None
+    if x.conversation_id:
+        conv = await db.conversations.find_one({"id": x.conversation_id, "user_id": u["id"], "archived_conv": {"$ne": True}}, {"_id": 0})
+        if not conv:
+            raise HTTPException(404, "Grup tidak ditemukan")
+    elif len(team) == 1 and not x.persona_ids:
+        from chat import direct_conv, DirectIn
+        conv = await direct_conv(DirectIn(persona_id=team[0]["id"]), u)
+    else:
+        wanted = set(x.persona_ids or [p["id"] for p in team])
+        members = [p for p in team if p["id"] in wanted] or team
+        if len(members) == 1:
+            from chat import direct_conv, DirectIn
+            conv = await direct_conv(DirectIn(persona_id=members[0]["id"]), u)
+        else:
+            conv = {"id": new_id(), "user_id": u["id"], "workspace_id": workspace_id(u), "participants": [u["id"]], "type": "group",
+                    "persona_ids": [p["id"] for p in members], "persona_id": members[0]["id"],
+                    "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")} for p in members],
+                    "title": (x.group_title or "").strip() or (t.get("goal") or "Grup tugas")[:60], "created_at": now_iso(), "updated_at": now_iso(), "last_message": ""}
+            await db.conversations.insert_one(dict(conv))
+    await db.conversations.update_one({"id": conv["id"]}, {"$set": {"task_id": tid, "updated_at": now_iso()}})
+    await db.tasks.update_one({"id": tid}, {"$addToSet": {"conversation_ids": conv["id"]}})
     return {"conversation_id": conv["id"], "open_call": x.mode in ("call", "meeting")}
 
 

@@ -44,6 +44,26 @@ function ChangePasswordCard() {
   );
 }
 
+const ARCHIVE_OPTS = [[0, "Mati"], [24, "24 jam"], [72, "3 hari"], [168, "7 hari"], [336, "14 hari"]];
+function AutoArchiveCard({ user, onSaved }) {
+  const cur = user?.settings?.auto_archive_hours ?? 24;
+  const [busy, setBusy] = useState(false);
+  const set = async (h) => {
+    setBusy(true);
+    try { const r = await api.put("/auth/settings", { auto_archive_hours: h }); onSaved(r.data); toast.success(h === 0 ? "Arsip otomatis dimatikan" : `Chat diarsipkan setelah ${ARCHIVE_OPTS.find((o) => o[0] === h)[1]} tidak aktif`); }
+    catch (e) { toast.error("Gagal menyimpan"); } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-4 aivora-card p-6" data-testid="auto-archive-card">
+      <p className="font-semibold text-slate-900">Arsip Otomatis Percakapan</p>
+      <p className="mt-1 text-xs text-slate-500">Chat yang tidak aktif selama jeda ini dirangkum jadi memori asisten dan pesan lamanya dipindah ke Arsip (bisa dicari & dipulihkan). Menghemat token karena asisten hanya membaca rangkuman.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {ARCHIVE_OPTS.map(([h, l]) => <button key={h} onClick={() => set(h)} disabled={busy} data-testid={`auto-archive-${h}`} className={`rounded-full px-3.5 py-1.5 text-xs font-semibold ${cur === h ? "btn-grad" : "border border-[#E7ECF3] bg-white text-slate-600 hover:bg-slate-50"}`}>{l}</button>)}
+      </div>
+    </div>
+  );
+}
+
 export default function Profile() {
   const { user, setUser } = useAuth();
   const { t, setLang } = useI18n();
@@ -96,6 +116,7 @@ export default function Profile() {
       </div>
 
       <ChangePasswordCard />
+      <AutoArchiveCard user={user} onSaved={(u2) => setUser(u2)} />
       {user?.role === "admin" && <SmartRoutingToggle user={user} onSaved={() => api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {})} />}
       {user?.role === "admin" && <NotulenFormatCard user={user} onSaved={() => api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {})} />}
 

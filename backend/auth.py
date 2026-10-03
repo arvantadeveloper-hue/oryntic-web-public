@@ -359,6 +359,7 @@ class SettingsIn(BaseModel):
     smart_routing: Optional[bool] = None  # workspace owner: auto-route topics to the best model
     notulen_fields: Optional[list] = Field(default=None, max_length=12)  # [{name, required}]
     daily_digest: Optional[dict] = None  # {enabled, channel: chat|call|both, time: "HH:MM", persona_id}
+    auto_archive_hours: Optional[int] = Field(default=None, ge=0, le=720)  # 0 = off; idle chats are summarized & archived after this many hours
 
 
 @router.put("/settings")

@@ -21,6 +21,7 @@ import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
 import VerifyEmail from "./pages/VerifyEmail";
 import Gallery from "./pages/Gallery";
+import Archives from "./pages/Archives";
 import ResetPassword from "./pages/ResetPassword";
 import Calendar from "./pages/Calendar";
 
@@ -72,6 +73,7 @@ function App() {
                 <Route path="/reminders" element={<Reminders />} />
                 <Route path="/calendar" element={<Calendar />} />
                 <Route path="/gallery" element={<Gallery />} />
+                <Route path="/archives" element={<Archives />} />
                 <Route path="/wallet" element={<AdminOnly><WalletPage /></AdminOnly>} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/admin" element={<AdminOnly platform><Admin /></AdminOnly>} />

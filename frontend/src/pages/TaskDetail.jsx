@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Download, Copy, CheckCircle2, Loader2, Clock, XCircle, MessageSquare, Phone, Video, History, FileText, FileSpreadsheet, FileType, Bot, PencilLine } from "lucide-react";
+import { ArrowLeft, Download, Copy, CheckCircle2, Loader2, Clock, XCircle, MessageSquare, Phone, X, History, FileText, FileSpreadsheet, FileType, Bot, PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { Markdown } from "../components/Markdown";
@@ -44,13 +44,56 @@ function ExportBar({ task }) {
   );
 }
 
+function GroupModal({ target, mode, onClose, onCreate }) {
+  const [title, setTitle] = useState(target.default_title || "");
+  const [ids, setIds] = useState(target.personas.map((p) => p.id));
+  const [busy, setBusy] = useState(false);
+  const toggle = (pid) => setIds((x) => (x.includes(pid) ? x.filter((i) => i !== pid) : [...x, pid]));
+  return (
+    <div className="fixed inset-0 z-[92] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
+      <div className="relative w-full max-w-md rounded-3xl border border-[#E7ECF3] bg-white p-6 shadow-2xl fade-up" data-testid="create-group-modal">
+        <button onClick={onClose} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
+        <h3 className="text-lg font-bold text-slate-900">Buat Grup Percakapan</h3>
+        <p className="mt-1 text-sm text-slate-500">Belum ada grup untuk semua asisten yang terlibat di tugas ini. Buat grup agar {mode === "call" ? "panggilan" : "diskusi"} melibatkan mereka sekaligus.</p>
+        <input className="input-dark mt-4 py-2.5" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Nama grup" data-testid="group-modal-title" />
+        <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
+          {target.personas.map((p) => { const on = ids.includes(p.id); return (
+            <button key={p.id} onClick={() => toggle(p.id)} data-testid={`group-member-${p.id}`} className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3]"}`}>
+              {p.portrait ? <img src={p.portrait} alt="" className="h-8 w-8 rounded-full object-cover" /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#7C3AED] text-xs font-bold text-white">{p.name[0]}</span>}
+              <span className="flex-1 text-sm font-semibold text-slate-900">{p.name}</span>
+              <span className={`flex h-5 w-5 items-center justify-center rounded-md border ${on ? "btn-grad border-transparent" : "border-slate-300"}`}>{on && <CheckCircle2 size={13} />}</span>
+            </button>
+          ); })}
+        </div>
+        {(target.other_groups || []).length > 0 && (
+          <div className="mt-3">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Atau pakai grup yang ada</p>
+            <div className="mt-1 max-h-28 space-y-1 overflow-y-auto">{target.other_groups.map((g) => <button key={g.id} onClick={() => onCreate({ conversation_id: g.id })} className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-xs text-slate-600 hover:bg-slate-50" data-testid={`use-group-${g.id}`}>{g.title}</button>)}</div>
+          </div>
+        )}
+        <button disabled={busy || ids.length < 1} onClick={async () => { setBusy(true); await onCreate({ group_title: title, persona_ids: ids }); setBusy(false); }} className="btn-grad mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm disabled:opacity-50" data-testid="group-modal-create">
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <MessageSquare size={15} />} Buat Grup & {mode === "call" ? "Mulai Panggilan" : "Buka Chat"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DiscussBar({ task, nav }) {
   const [busy, setBusy] = useState("");
+  const [modal, setModal] = useState(null); // {target, mode}
+  const open = async (mode, body = {}) => {
+    const r = await api.post(`/tasks/${task.id}/discuss`, { mode, ...body });
+    nav(`/chat/${r.data.conversation_id}`, { state: r.data.open_call ? { openMeeting: true } : {} });
+  };
   const go = async (mode) => {
     setBusy(mode);
     try {
-      const r = await api.post(`/tasks/${task.id}/discuss`, { mode });
-      nav(`/chat/${r.data.conversation_id}`, { state: r.data.open_call ? { openMeeting: true } : {} });
+      const t = (await api.get(`/tasks/${task.id}/chat-target`)).data;
+      if (t.single) return await open(mode);
+      if (t.group) return await open(mode, { conversation_id: t.group.id });
+      setModal({ target: t, mode });
     } catch (e) { toast.error(e?.response?.data?.detail || "Gagal membuka diskusi"); } finally { setBusy(""); }
   };
   const B = ({ mode, Icon, label, cls }) => (
@@ -62,8 +105,8 @@ function DiscussBar({ task, nav }) {
     <div className="flex flex-wrap items-center gap-2" data-testid="discuss-bar">
       <span className="flex items-center gap-1 text-xs text-slate-500"><Bot size={13} /> {task.persona_name ? `Asisten: ${task.persona_name}` : "Hubungi asisten"}</span>
       <B mode="chat" Icon={MessageSquare} label="Chat" cls="bg-[#0B132B]" />
-      <B mode="call" Icon={Phone} label="Telepon" cls="bg-[#10B981]" />
-      <B mode="meeting" Icon={Video} label="Buat Panggilan" cls="bg-[#2F6BFF]" />
+      <B mode="call" Icon={Phone} label="Panggilan" cls="bg-[#10B981]" />
+      {modal && <GroupModal target={modal.target} mode={modal.mode} onClose={() => setModal(null)} onCreate={async (body) => { try { await open(modal.mode, body); } catch (e) { toast.error("Gagal membuat grup"); } }} />}
     </div>
   );
 }

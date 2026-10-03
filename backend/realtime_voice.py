@@ -128,6 +128,12 @@ ASSIGN_TOOL = {"type": "function", "name": "assign_task",
                        "assistant": {"type": "string", "description": "Exact assistant name as the user said it"},
                        "part": {"type": "string", "description": "Which part of the task they should handle"}}, "required": ["assistant", "part"]}}},
                    "required": ["title", "brief"]}}
+ARCHIVE_SEARCH_TOOL = {"type": "function", "name": "search_archive",
+                       "description": "Search the user's archived (old, summarized) conversations by keywords. Use when the user asks about an old chat or wants to find/restore an archive. Results are posted to the chat panel; read the titles back briefly.",
+                       "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}
+ARCHIVE_RESTORE_TOOL = {"type": "function", "name": "restore_archive",
+                        "description": "Restore an archived conversation (from search_archive results) back into this chat. You MUST first ask the user to confirm (name the archive title) and only call this with confirmed=true after the user clearly agrees.",
+                        "parameters": {"type": "object", "properties": {"archive_id": {"type": "string"}, "confirmed": {"type": "boolean", "description": "true only after the user explicitly confirmed"}}, "required": ["archive_id", "confirmed"]}}
 SEARCH_TOOL = {"type": "function", "name": "search_workspace",
                "description": "Search the user's Workspace (saved task results, documents, meeting minutes) by keywords and drop clickable links into the chat panel. Use when the user asks to find or look up existing material.",
                "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Keywords to search for"}}, "required": ["query"]}}
@@ -315,7 +321,7 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
     }
     if role in ("moderator", "solo"):
         conv = await db.conversations.find_one({"id": call["conversation_id"]}, {"_id": 0, "task_id": 1}) or {}
-        tools = [ASSIGN_TOOL, SEARCH_TOOL] + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL] + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Plus, Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, User, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink } from "lucide-react";
+import { Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -11,10 +11,9 @@ import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
 import { MediaList, ToolRequestCard, ModelBadge, downloadUrl } from "../components/MessageExtras";
 import { GalleryPicker } from "../components/GalleryPicker";
-import { Sentinel } from "../components/Gallery";
 import { SummaryPrompt, ArchiveModal } from "../components/ConversationTools";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
-import { TaskContextCard, AddPersonaMenu, TaskOfferButtons, WorkspaceResults } from "../components/TaskChatTools";
+import { TaskContextCard, AddPersonaMenu, TaskOfferButtons, WorkspaceResults, ArchiveResults } from "../components/TaskChatTools";
 
 function Avatar({ name, portrait, size = 32, moderator }) {
   if (moderator) return <span className="flex items-center justify-center rounded-full bg-[#0B132B] text-white" style={{ width: size, height: size }}><Gavel size={size * 0.5} /></span>;
@@ -38,7 +37,6 @@ export default function Chat() {
   const isAdmin = user?.role === "admin";
   const rt = useRealtimeStatus();
   const [convs, setConvs] = useState([]);
-  const [convHasMore, setConvHasMore] = useState(false);
   const [msgHasMore, setMsgHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [archivedCount, setArchivedCount] = useState(0);
@@ -72,12 +70,12 @@ export default function Chat() {
 
   useEffect(() => { streamingRef.current = streaming; }, [streaming]);
 
-  const PAGE = 20;
+  const PAGE = 200;
   useEffect(() => { const h = () => { if (id) refreshMsgs(); }; window.addEventListener("oryntix:task-done", h); return () => window.removeEventListener("oryntix:task-done", h); /* eslint-disable-next-line */ }, [id]);
   const loadConvs = (query = "", more = false) => {
     setConvsLoading(true);
     return api.get(`/conversations?limit=${PAGE}&offset=${more ? convs.length : 0}${query ? `&q=${encodeURIComponent(query)}` : ""}`)
-      .then((r) => { setConvs((prev) => (more ? [...prev, ...r.data] : r.data)); setConvHasMore(r.data.length === PAGE); }).catch(() => {}).finally(() => setConvsLoading(false));
+      .then((r) => { setConvs((prev) => (more ? [...prev, ...r.data] : r.data)); }).catch(() => {}).finally(() => setConvsLoading(false));
   };
   const applyPage = (data) => { setMessages(data.messages); setMsgHasMore(!!data.has_more); setArchivedCount(data.archived_count || 0); setSummaryRequest(!!data.long_chat); };
   const loadOlder = async () => {
@@ -118,18 +116,25 @@ export default function Chat() {
     return () => { try { ws && ws.close(); } catch (e) {} };
   }, [id]);
 
-  const openModal = (m = "chat") => {
+  const openModal = (m = "group") => {
     if (personas === null) return;
     if (personas.length === 0) { toast.message(isAdmin ? "Buat agen AI dulu untuk memulai percakapan" : "Belum ada agen AI di workspace ini"); if (isAdmin) nav("/personas/new"); return; }
     setPicked([]); setMode(m); setShowModal(true);
   };
+  const openDirect = async (pid, mobile) => {
+    try { const r = await api.post("/conversations/direct", { persona_id: pid }); if (mobile) setShowConvList(false); nav(`/chat/${r.data.id}`); loadConvs(); }
+    catch (e) { toast.error("Gagal membuka chat"); }
+  };
+  const directOf = (pid) => convs.find((c) => c.type === "private" && (c.persona_ids || [])[0] === pid);
+  const fmtTime = (iso) => { if (!iso) return ""; const d = new Date(iso); const today = new Date().toDateString() === d.toDateString(); return today ? d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString("id-ID", { day: "numeric", month: "short" }); };
+  useEffect(() => { if (id) { api.post(`/conversations/${id}/read`).catch(() => {}); setConvs((cs) => cs.map((c) => (c.id === id ? { ...c, unread: false } : c))); } }, [id, messages.length]);
   const togglePick = (pid) => setPicked((p) => p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid]);
+  const [groupTitle, setGroupTitle] = useState("");
   const startConv = async () => {
-    if (picked.length === 0) { toast.error("Pilih minimal satu persona"); return; }
-    const type = mode === "meeting" ? "meeting" : picked.length > 1 ? "group" : "private";
-    const r = await api.post("/conversations", { persona_ids: picked, type });
-    setShowModal(false); loadConvs();
-    nav(`/chat/${r.data.id}`, { state: { openMeeting: mode === "meeting" } });
+    if (picked.length < 2) { toast.error("Pilih minimal dua asisten untuk grup"); return; }
+    const r = await api.post("/conversations", { persona_ids: picked, type: "group", title: groupTitle.trim() || undefined });
+    setShowModal(false); setGroupTitle(""); loadConvs();
+    nav(`/chat/${r.data.id}`);
   };
 
   const onFiles = async (e) => {
@@ -226,26 +231,40 @@ export default function Chat() {
 
   const isMulti = conv && conv.type !== "private";
 
+  const ql = q.trim().toLowerCase();
+  const groups = convs.filter((c) => c.type !== "private" && (!ql || (c.title || "").toLowerCase().includes(ql)));
+  const asst = (personas || []).filter((p) => !ql || p.name.toLowerCase().includes(ql));
+  const Row = ({ onClick, active, avatar, title, sub, time, unread, testid, icon }) => (
+    <div onClick={onClick} data-testid={testid} className={`group flex cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2.5 ${active ? "bg-[#EEF3FF]" : "hover:bg-slate-50"}`}>
+      {avatar}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2"><span className={`flex-1 truncate text-sm ${unread ? "font-bold text-slate-900" : "font-semibold text-slate-800"}`}>{title}</span><span className="shrink-0 text-[10px] text-slate-400">{time}</span></div>
+        <div className="flex items-center gap-2"><span className={`flex-1 truncate text-xs ${unread ? "font-semibold text-slate-700" : "text-slate-400"}`}>{sub}</span>{unread && <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#2F6BFF]" data-testid="unread-dot" />}{icon}</div>
+      </div>
+    </div>
+  );
   const convListInner = (mobile) => (
-    <div className="flex h-full flex-col p-4">
-      <button onClick={() => { openModal(); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-chat-btn-mobile" : "new-chat-btn"} className="btn-grad mb-2 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm"><Plus size={16} /> {t("chat.new")}</button>
-      <button onClick={() => { openModal("meeting"); if (mobile) setShowConvList(false); }} data-testid={mobile ? "new-meeting-btn-mobile" : "new-meeting-btn"} className="mb-4 flex items-center justify-center gap-2 rounded-xl border border-[#2F6BFF]/40 py-2.5 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Video size={16} /> Panggilan Baru</button>
-      <div className="relative mb-3">
+    <div className="flex h-full flex-col p-3">
+      <div className="relative mb-2">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input className="input-dark py-2 pl-9" placeholder={t("common.search")} value={q} onChange={(e) => { setQ(e.target.value); loadConvs(e.target.value); }} data-testid={mobile ? "chat-search-mobile" : "chat-search"} />
+        <input className="input-dark py-2 pl-9" placeholder="Cari asisten atau grup" value={q} onChange={(e) => setQ(e.target.value)} data-testid={mobile ? "chat-search-mobile" : "chat-search"} />
       </div>
       <div className="flex-1 space-y-1 overflow-y-auto">
-        {convs.map((c) => (
-          <div key={c.id} onClick={() => { nav(`/chat/${c.id}`); if (mobile) setShowConvList(false); }} data-testid={`${mobile ? "conv-m-" : "conv-"}${c.id}`}
-            className={`group flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${c.id === id ? "bg-[#EEF3FF] text-[#2F6BFF]" : "text-slate-600 hover:bg-slate-50"}`}>
-            {c.type === "meeting" ? <Video size={15} className="shrink-0" /> : c.type === "group" ? <Users size={15} className="shrink-0" /> : <User size={15} className="shrink-0" />}
-            <span className="flex-1 truncate">{c.title}</span>
-            <button onClick={(e) => delConv(c, e)} className="text-slate-400 transition hover:text-[#EF4444] md:opacity-0 md:group-hover:opacity-100"><Trash2 size={13} /></button>
-          </div>
+        {convsLoading && convs.length === 0 && <p className="flex items-center justify-center gap-2 px-2 py-3 text-xs text-slate-400" data-testid="conv-loading"><Loader2 size={13} className="animate-spin" /> Memuat percakapan…</p>}
+        <div className="flex items-center justify-between px-2 pt-1"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Asisten</p>{isAdmin && <button onClick={() => nav("/personas/new")} className="text-[11px] font-semibold text-[#2F6BFF]" data-testid="side-new-persona">+ Baru</button>}</div>
+        {asst.map((p) => { const c = directOf(p.id); return (
+          <Row key={p.id} onClick={() => (c ? (nav(`/chat/${c.id}`), mobile && setShowConvList(false)) : openDirect(p.id, mobile))} active={c && c.id === id} testid={`${mobile ? "asst-m-" : "asst-"}${p.id}`}
+            avatar={<Avatar name={p.name} portrait={p.portrait} size={40} />} title={p.name} sub={c?.last_message || p.summary || "Ketuk untuk mulai chat"} time={c ? fmtTime(c.updated_at) : ""} unread={!!c?.unread} />
+        ); })}
+        {personas && asst.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">Tidak ada asisten.</p>}
+        <div className="flex items-center justify-between px-2 pt-3"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Grup</p><button onClick={() => { openModal("group"); if (mobile) setShowConvList(false); }} className="text-[11px] font-semibold text-[#2F6BFF]" data-testid={mobile ? "new-group-btn-mobile" : "new-group-btn"}>+ Grup Baru</button></div>
+        {groups.map((c) => (
+          <Row key={c.id} onClick={() => { nav(`/chat/${c.id}`); if (mobile) setShowConvList(false); }} active={c.id === id} testid={`${mobile ? "conv-m-" : "conv-"}${c.id}`}
+            avatar={<span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0B132B] text-white">{c.type === "meeting" ? <Video size={17} /> : <Users size={17} />}</span>}
+            title={c.title} sub={c.last_message || `${c.members?.length || 0} asisten`} time={fmtTime(c.updated_at)} unread={!!c.unread}
+            icon={<button onClick={(e) => delConv(c, e)} className="shrink-0 text-slate-300 transition hover:text-[#EF4444] md:opacity-0 md:group-hover:opacity-100" data-testid={`del-${c.id}`}><Trash2 size={13} /></button>} />
         ))}
-        {convsLoading && <p className="flex items-center justify-center gap-2 px-2 py-3 text-xs text-slate-400" data-testid="conv-loading"><Loader2 size={13} className="animate-spin" /> Memuat percakapan…</p>}
-        {!convsLoading && convs.length === 0 && <p className="px-2 py-4 text-center text-xs text-slate-400">Belum ada percakapan.</p>}
-        {!convsLoading && convHasMore && <Sentinel onVisible={() => loadConvs(q, true)} />}
+        {!convsLoading && groups.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">Belum ada grup. Buat grup untuk mengajak beberapa asisten sekaligus.</p>}
       </div>
     </div>
   );
@@ -274,7 +293,7 @@ export default function Chat() {
             <>
               <div className="flex -space-x-2">{(conv.members || []).slice(0, 4).map((m) => <div key={m.id} className="rounded-full ring-2 ring-white"><Avatar name={m.name} portrait={m.portrait} size={32} /></div>)}</div>
               <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{conv.title}</p>
-                <p className="truncate text-xs text-slate-400">{conv.type === "meeting" ? `Panggilan · ${conv.members?.length} asisten${(conv.members?.length || 0) > 1 ? " · 1 moderator" : ""}` : conv.type === "group" ? `Chat grup · ${conv.members?.length} asisten` : "Chat privat"}</p></div>
+                <p className="truncate text-xs text-slate-400">{conv.type === "private" ? (conv.members?.[0]?.summary || "Asisten AI") : `Grup · ${(conv.members || []).map((m) => m.name).join(", ")}`}</p></div>
             </>
           ) : <p className="truncate text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
           {conv && (
@@ -292,15 +311,15 @@ export default function Chat() {
           {msgsLoading && <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-400" data-testid="msgs-loading"><Loader2 size={18} className="animate-spin" /> Memuat percakapan…</div>}
           {conv && !msgsLoading && msgHasMore && <div className="flex items-center justify-center gap-2 text-xs text-slate-400" data-testid="msg-older-hint">{loadingOlder ? <><Loader2 size={13} className="animate-spin" /> Memuat pesan lama…</> : "Gulir ke atas untuk pesan lama"}</div>}
           {conv && archivedCount > 0 && <div className="text-center"><button onClick={() => setShowArchive(true)} data-testid="archive-btn" className="rounded-full border border-[#E7ECF3] bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">Lihat arsip ({archivedCount})</button></div>}
-          {conv?.task_id && <TaskContextCard taskId={conv.task_id} refreshKey={messages.length} />}
+          {conv?.task_id && <TaskContextCard taskId={conv.task_id} refreshKey={messages.length} cid={id} onDetach={() => setConv((c) => ({ ...c, task_id: null }))} />}
           {!conv && !msgsLoading && (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <Bot size={44} className="mb-4 text-[#2F6BFF]" />
-              <h3 className="text-lg font-bold text-slate-900">Mulai percakapan dengan tim Anda</h3>
-              <p className="mt-1 max-w-sm text-sm text-slate-500">Pilih satu atau beberapa asisten untuk chat teks, atau langsung masuk ruang panggilan suara.</p>
+              <h3 className="text-lg font-bold text-slate-900">Pilih asisten atau grup di panel kiri</h3>
+              <p className="mt-1 max-w-sm text-sm text-slate-500">Setiap asisten punya satu ruang chat. Buat grup untuk mengajak beberapa asisten sekaligus; panggilan suara dimulai dari dalam chat.</p>
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-                <button onClick={() => openModal()} data-testid="empty-new-chat-btn" className="btn-grad rounded-xl px-6 py-3 text-sm">+ Mulai Chat</button>
-                <button onClick={() => openModal("meeting")} data-testid="empty-new-meeting-btn" className="flex items-center gap-2 rounded-xl border border-[#2F6BFF]/40 px-6 py-3 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Video size={16} /> Panggilan Baru</button>
+                <button onClick={() => setShowConvList(true)} data-testid="empty-open-list-btn" className="btn-grad rounded-xl px-6 py-3 text-sm md:hidden">Buka daftar chat</button>
+                <button onClick={() => openModal("group")} data-testid="empty-new-group-btn" className="flex items-center gap-2 rounded-xl border border-[#2F6BFF]/40 px-6 py-3 text-sm font-semibold text-[#2F6BFF] transition hover:bg-[#EEF3FF]"><Users size={16} /> Grup Baru</button>
               </div>
             </div>
           )}
@@ -328,6 +347,7 @@ export default function Chat() {
                     <ToolRequestCard m={m} cid={id} onDone={refreshMsgs} />
                     <TaskOfferButtons m={m} cid={id} onDone={refreshMsgs} isLast={i === messages.length - 1} />
                     <WorkspaceResults m={m} />
+                    <ArchiveResults m={m} cid={id} onDone={refreshMsgs} isLast={i === messages.length - 1} />
                   </div>
                   <ModelBadge m={m} />
                   <div className="mt-1.5 flex gap-3 opacity-0 transition group-hover:opacity-100">
@@ -397,8 +417,9 @@ export default function Chat() {
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowModal(false)} />
           <div className="relative w-full max-w-md rounded-3xl border border-[#E7ECF3] bg-white p-6 shadow-2xl fade-up" data-testid="new-chat-modal">
             <button onClick={() => setShowModal(false)} className="absolute right-4 top-4 text-slate-400"><X size={18} /></button>
-            <h3 className="text-lg font-bold text-slate-900">{mode === "meeting" ? "Panggilan Baru" : "Chat Baru"}</h3>
-            <p className="mt-1 text-sm text-slate-500">{mode === "meeting" ? "Pilih satu atau lebih asisten. Ruang panggilan langsung terbuka setelah Anda menekan Mulai." : "Pilih satu atau lebih asisten untuk diajak chat."}</p>
+            <h3 className="text-lg font-bold text-slate-900">Grup Baru</h3>
+            <p className="mt-1 text-sm text-slate-500">Pilih dua asisten atau lebih. Di grup, asisten yang paling relevan yang menjawab — atau sebut @Nama.</p>
+            <input className="input-dark mt-3 py-2.5" placeholder="Nama grup (opsional)" value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} data-testid="group-title-input" />
             <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
               {(personas || []).map((p) => {
                 const on = picked.includes(p.id);
@@ -412,8 +433,8 @@ export default function Chat() {
               })}
             </div>
             <div className="mt-4 flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500">{picked.length === 0 ? "Belum dipilih" : mode === "meeting" ? `Panggilan · ${picked.length} asisten` : picked.length > 1 ? `Chat grup · ${picked.length} asisten` : "Chat privat"}</span>
-              <button onClick={startConv} className="btn-grad flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm" data-testid="start-conv-btn">{mode === "meeting" && <Video size={15} />} {mode === "meeting" ? "Mulai Panggilan" : "Mulai"}</button>
+              <span className="text-xs font-semibold text-slate-500">{picked.length === 0 ? "Belum dipilih" : `${picked.length} asisten dipilih`}</span>
+              <button onClick={startConv} disabled={picked.length < 2} className="btn-grad flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm disabled:opacity-50" data-testid="start-conv-btn"><Users size={15} /> Buat Grup</button>
             </div>
           </div>
         </div>

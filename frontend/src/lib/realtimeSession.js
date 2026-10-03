@@ -123,6 +123,8 @@ export class RealtimeSession {
 export async function runVoiceTool(name, args, cid) {
   try {
     if (name === "assign_task") { const r = await api.post(`/conversations/${cid}/tasks`, { title: args.title, brief: args.brief, scheduled_at: args.scheduled_at || null, persona_id: args.persona_id || null, team: !!args.team, assignments: Array.isArray(args.assignments) ? args.assignments : null }); return { ok: true, ...r.data }; }
+    if (name === "search_archive") { const r = await api.post(`/conversations/${cid}/archive-search`, { query: args.query }); return { ok: true, ...r.data, note: "results were posted to the chat panel; ask before restoring" }; }
+    if (name === "restore_archive") { const r = await api.post(`/conversations/${cid}/archive-restore`, { archive_id: args.archive_id, confirmed: !!args.confirmed }); return r.data; }
     if (name === "search_workspace") { const r = await api.post(`/conversations/${cid}/workspace-search`, { query: args.query }); return { ok: true, ...r.data, note: "links were posted to the chat panel" }; }
     if (name === "update_task") {
       const c = await api.get(`/conversations/${cid}/messages?limit=1`);
