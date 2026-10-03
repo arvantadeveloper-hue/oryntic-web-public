@@ -1,0 +1,46 @@
+{
+  "summary": "Iter 23 full backend+frontend test for workspace keyword search and team delegation. Backend: 7/7 pytest cases passed (test_oryntix_iter23.py, 163s incl. live team flow). Verified GET /api/workspace/search?q=kedai+kopi returns 8 results with id/title/link/version/snippet (link = /workspace/{id}); q='zzzqqq' → []; /send 'Carikan dokumen tentang kedai kopi di ruang kerja' → final SSE has tool='workspace_search' with 8 results and content containing /workspace/ markdown links; follow-up 'Apa isi utama dokumen pertama itu?' → normal reply (no tool), substantive content referencing the document. POST /api/conversations/{cid}/workspace-search returns count>0 and the last assistant message carries tool='workspace_search'. Team flow: long delegation triggers tool='task_offer' with pending_task.team_possible=true; POST /tasks/accept {mode:'team'} returns tool='task_assigned'; parent GET /api/tasks/{id} has team=true, 4 subtasks across 2 distinct personas (Nadia/Nova), each child reachable with parent_id matching parent; polled parent reached status='completed' with final_output >100 chars, credits_used>0; last conversation message is tool='task_done' with text 'Tugas tim …'. Direct POST /api/conversations/{cid}/tasks {team:true} returns task_id of a parent with ≥2 subtasks. Frontend: login demo → /chat → new chat → persona pick → start-conv-btn → chat loaded. Workspace search prompt → workspace-results card rendered with 8 workspace-result-{id} buttons; click first → navigates to /workspace/{id} correctly. Team delegation prompt → task-offer-buttons renders with 3 buttons including task-offer-team; click 'Bagi ke tim' → user-side message 'bagi ke tim' appears + assistant reply posted. Opened parent task via workspace list → 'PEMBAGIAN KE TIM · 4 SUB-TUGAS' section rendered (data-testid=subtasks) with 4 subtask-{id} rows showing assistant badges (Nadia/Nova) and Selesai status; clicked first subtask → navigated to child; task-parent-link visible → click → returns to parent (subtasks section visible). ALL CORE FLOWS PASS.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Markdown.jsx (safeHref)",
+        "issue": "safeHref() in /app/frontend/src/components/Markdown.jsx:4 only permits http(s)://... URLs; any internal path like /workspace/{id} embedded in assistant markdown messages (e.g. 'Lihat di Ruang Kerja', 'Lihat hasil terbaru', 'buka hasilnya') is coerced to href='#' so those links are not clickable. Verified in DOM: href attribute returns '#' and the raw collected hrefs are '/workspace' only (truncated). Users can still open the task via Ruang Kerja list, so flow isn't fully broken, but every task_assigned / task_done / revise message link is dead.",
+        "selector": "a (inside .md-body of assistant chat bubble)",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "Markdown.jsx (safeHref)",
+        "issue": "All anchors are rendered with target='_blank' and rel='noreferrer noopener'. Even if the regex is widened to allow /workspace/..., internal links should navigate in the SPA (react-router) rather than opening a new tab and doing a full page reload. Consider using a <Link>-style component for in-app paths.",
+        "selector": "a[target=_blank] in .md-body",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_oryntix_iter23.py",
+    "/app/test_reports/iteration_23.json"
+  ],
+  "action_items": [
+    "Fix /app/frontend/src/components/Markdown.jsx:4 safeHref to also allow internal paths beginning with '/' (and ideally render those as <Link to=...> for SPA nav instead of target=_blank). Suggested regex: /^(https?:\\/\\/[^\\s\"'<>]+|\\/[\\w\\-\\/#?=&.%:]*)$/i, and when the href starts with '/' render it without target='_blank'. This will restore clickable 'Lihat di Ruang Kerja', 'Lihat hasil terbaru' and team 'buka hasilnya' links across every assistant message that currently renders href='#'."
+  ],
+  "critical_code_review_comments": [
+    "assignments.py:412 plan_subtasks() silently returns [] on any LLM exception; create_team_task() then falls back to create_assigned_task() (no team at all). The user still sees 'saya bagi ke tim' message because the chat replies before create_team_task is awaited — actually it is awaited and the message is crafted from the returned task. If fallback happens, msg.tool is still 'task_assigned' but the task is NOT team; the 'Bagi ke tim' acceptance effectively becomes a single-assistant assignment. Consider surfacing a 'tim tidak tersedia, saya kerjakan sendiri' message so user understands.",
+    "assignments.py:460 _maybe_assemble() uses find_one_and_update to claim the assembling status (race-safe), good. But if llm_text raises, the parent is marked failed and no 'tim gagal' message is posted to conversation_ids. Consider notifying the user.",
+    "chat.py:604 SEARCH_RE matches very broadly ('dokumen (tentang|mengenai|soal)' with no stronger task verb). It is anti-triggered by TASK_RE_STRONG; combination seems reasonable but 'tolong buatkan dokumen tentang X' will be routed to task offer (correct). Minor: SEARCH_RE match on 'cari informasi X' (no 'di ruang kerja') will do a workspace keyword search even when user wants a web search; today Oryntix has no web search, so safe, but worth documenting.",
+    "frontend Markdown.jsx uses dangerouslySetInnerHTML with manual escaping. It does escape &, <, >, \", '. XSS surface is small but the renderer re-inserts <a href=\"...\">; safeHref returns '#' for malformed URLs, so OK. But target=_blank without noopener handling (noopener IS set via rel). Low risk."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_oryntix_iter23.py",
+    "/app/test_reports/iteration_23.json"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% of core iter23 flows; 1 medium UX bug surfaced"},
+  "test_credentials": "demo@aivora.ai / demo123456",
+  "seed_data_creation": "Created several test conversations and 2 team parent tasks ('Rencana Peluncuran Aplikasi Kasir' + 'Ringkasan tren AI 2026') with 4+ child tasks each. Credits consumed ~500 (team flow is LLM-heavy). Not cleaned up — kept for inspection as per main-agent note.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Reusable selectors: new-chat-btn / empty-new-chat-btn → new-chat-modal → pick-{persona_id} (NOT persona-pick-{id}) → start-conv-btn → chat-input + chat-send-btn. Login landing page is '/', not '/login'. Workspace list uses /workspace path (no React Router /workspace route for the index on same key — list items click navigates to /workspace/{id}). task-offer-buttons has 3 buttons: task-offer-discuss, task-offer-delegate, task-offer-team (only when workspace.personas>1). Team parent detail → data-testid=subtasks → subtask-{child_id}; child task page shows data-testid=task-parent-link if parent_id present. Team flow is LLM-slow (~2–3 min end-to-end); backend test polls up to 4 min. The 'Lihat di Ruang Kerja' markdown link in assistant chat messages is currently rendered href='#' due to Markdown.jsx safeHref — do NOT rely on clicking those from chat; navigate via /workspace list instead.",
+  "rca of the issue": "Markdown.jsx:4 — const safeHref = (url) => (/^https?:\\/\\/[^\\s\"'<>]+$/i.test(url) ? url : '#'); The regex only accepts fully-qualified http(s) URLs. Every assistant message that references the newly created workspace item via a relative path ('/workspace/{task_id}') is therefore stripped to '#'. Backend assignments.py:128/133/177/486 and chat.py revise message all generate those relative links intentionally so the SPA can navigate; the Markdown renderer defeats that. Fix is a one-line regex widening + render internal paths without target=_blank."
+}

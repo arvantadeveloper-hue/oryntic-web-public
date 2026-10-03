@@ -236,6 +236,12 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - `ack_notifications` hanya `type: assigned`; `accept_task_offer`/`assign_task` memakai `_can_access` (peserta percakapan), bukan sekadar workspace.
 - Regresi: pytest iter21+iter22 18/18 lulus.
 
+## Update 2026-06 (ab) — Pencarian Ruang Kerja oleh asisten + delegasi sub-tugas antar asisten (iteration_23: BE 7/7, FE lulus)
+- `assignments.py`: `search_workspace` (kata kunci regex pada goal/summary/final_output, skor & cuplikan), `GET /workspace/search?q=`, `POST /conversations/{cid}/workspace-search` (tool suara `search_workspace` → tautan diposting ke chat), `results_markdown`.
+- `chat.py`: `SEARCH_RE` → `_search_turn` (pesan `tool: workspace_search` + `results`); item yang baru ditemukan disuntik ke konteks (`_prepare_ctx`) agar bisa dikutip; `TEAM_RE`, `TEAM_OFFER` (opsi "bagi ke tim" bila >1 persona; `pending_task.team_possible`).
+- Delegasi tim: `plan_subtasks` (LLM 2-5 sub-tugas + specialty), `_assign_personas` (it_model/research_model → persona cocok, lainnya round-robin selain lead), `create_team_task` (parent `team:true, subtasks[]`, anak `parent_id` dieksekusi paralel), `_maybe_assemble` (klaim status "assembling" atomik → lead merangkai hasil → task_done "Tugas tim ..."). `accept {mode: team}`, `POST /conversations/{cid}/tasks {team:true}`, tool suara `assign_task.team`.
+- Frontend: `WorkspaceResults` kartu hasil pencarian; tombol "Bagi ke tim"; `TaskDetail` daftar sub-tugas & tautan ke induk; `Markdown.jsx` kini mengizinkan tautan internal `/workspace/...` dengan navigasi SPA (sebelumnya semua tautan internal menjadi `#`).
+
 ## Backlog batch berikut
 - Google OAuth sendiri (Client ID/Secret dari user) → login Google.
 - Produksi: set secret SMTP_* seperti preview; JANGAN set `EMAIL_DEBUG_LINKS=true` di produksi (tautan verifikasi akan bocor di respons API).

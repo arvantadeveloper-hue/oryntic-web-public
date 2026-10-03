@@ -1,7 +1,8 @@
 import React from "react";
 
 // Lightweight markdown renderer (headings, bold, lists, code blocks, inline code, tables-ish, paragraphs)
-const safeHref = (url) => (/^https?:\/\/[^\s"'<>]+$/i.test(url) ? url : "#");
+const safeHref = (url) => (/^(https?:\/\/[^\s"'<>]+|\/[\w\-\/#?=&.%:]*)$/i.test(url) ? url : "#");
+const isInternal = (url) => url.startsWith("/");
 
 function inline(text) {
   let t = text
@@ -9,11 +10,15 @@ function inline(text) {
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => `<a href="${safeHref(url)}" target="_blank" rel="noreferrer noopener">${label}</a>`);
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => (isInternal(url) ? `<a href="${safeHref(url)}" data-internal="1">${label}</a>` : `<a href="${safeHref(url)}" target="_blank" rel="noreferrer noopener">${label}</a>`));
   return t;
 }
 
 export function Markdown({ content = "" }) {
+  const onClick = (e) => {
+    const a = e.target.closest && e.target.closest("a[data-internal]");
+    if (a) { e.preventDefault(); window.history.pushState({}, "", a.getAttribute("href")); window.dispatchEvent(new PopStateEvent("popstate")); }
+  };
   const lines = content.split("\n");
   const blocks = [];
   let i = 0;
@@ -74,5 +79,5 @@ export function Markdown({ content = "" }) {
     blocks.push(<p key={key++} dangerouslySetInnerHTML={{ __html: inline(line) }} />);
     i++;
   }
-  return <div className="md-body">{blocks}</div>;
+  return <div className="md-body" onClick={onClick}>{blocks}</div>;
 }
