@@ -1,0 +1,40 @@
+{
+  "summary": "Iter 25 — team/invite removal + Gallery page + chat gallery-attach + markdown link rewrite + change-password + loading indicators. Backend 12/12 PASS (test_iter25.py): /api/team/invites 404, /api/auth/workspaces 404, POST /api/admin/users 404; /api/gallery?limit=5 returns items[<=5]+has_more+next_before; pagination with ?before=next_before yields disjoint page 2; type=image filter only kind=image; type=document only kind=document; /api/files/<path>?auth=&download=1 returns Content-Disposition attachment; /api/tasks/<id>/export/docx?auth= returns attachment; POST /api/auth/change-password with wrong current_password → 400; full roundtrip changed demo→Demo!2026x then restored to demo123456 (login verified after each); budi@aivora.ai login still 200. Frontend PASS: login demo OK, sidebar has nav-gallery and NO nav-team; workspace-switcher absent; /team shows blank (console: 'No routes matched') — not broken but could warrant a NotFound redirect. Profile change-password-card present, mismatch shows pw-confirm-error + disables pw-submit, wrong current → toast 'Password lama salah', change→restore roundtrip works and re-login succeeds. SmartRoutingToggle (smart-routing-toggle) visible on Profile for admin. Gallery /gallery: 24 initial items, filters document(23)/image(5)/video present; document cards have gallery-open (absolute origin+/workspace/<id>, target=_blank), gallery-dl-docx (href contains /api/tasks/<id>/export/docx?auth=…), gallery-dl-pdf; image cards have gallery-open and gallery-dl-file with download=1 in href. gallery-sentinel scrolling grew count 24→47 (infinite scroll works). Chat: conv-loading element exists; msgs-loading seen when switching conversation; attach-gallery-btn opens gallery-picker with 23 doc cards; selecting 1 shows gallery-select-mark + 'gallery-picker-count'='1 dipilih'; gallery-picker-attach adds att-0 chip. Sent 'Ringkas lampiran ini dalam 1 kalimat' → assistant responded with doc-summary ('Proposal ini merekomendasikan pembukaan cabang di Bandung…'); user bubble shows att-link-task href=origin+/workspace/<id> target=_blank (no '#' hrefs anywhere in message list). Markdown links in prior task_done messages are absolute+_blank, hash-anchor count=0.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Chat.jsx conversation list", "issue": "React duplicate-key warnings for every conversation id (21+). Root cause: Sentinel's useEffect re-subscribes IntersectionObserver on every render (onVisible arrow is a new ref each render), and loadConvs appends with no dedup (setConvs(prev => [...prev, ...r.data])). Rapid IO callbacks before convsLoading toggles can re-append the same page. Fix: dedup in setConvs (e.g. by id) and/or stabilise onVisible with useCallback + guard with a loadingRef.", "selector": "conv-{id}", "priority": "MEDIUM"},
+      {"component": "Router /team /invite/* /join/*", "issue": "Removed routes render a blank body (React Router warning 'No routes matched location'). Not broken but add a catch-all redirect to /home for cleaner UX.", "selector": "/team, /invite/:t, /join/:t", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter25.py",
+    "/app/test_reports/pytest/iter25.xml"
+  ],
+  "action_items": [
+    "Dedup convs state on append to eliminate React duplicate-key warnings in Chat.jsx (loadConvs: setConvs(prev => Array.from(new Map([...prev, ...r.data].map(c=>[c.id,c])).values())))",
+    "Stabilise Sentinel onVisible with useCallback and guard loadConvs with a loadingRef to avoid double-fires from IntersectionObserver re-subscription.",
+    "(Optional) Add a NotFound/<Navigate to='/home'> route for /team, /invite/*, /join/* so console no longer logs 'No routes matched'."
+  ],
+  "critical_code_review_comments": [
+    "backend/gallery.py: _media_items sorts/limits by created_at per-message but iterates nested media[]; final slice uses limit+1 overshoot — pagination appears correct (next_before = items[-1].created_at only when has_more). OK.",
+    "backend/auth.py change_password uses field name `current_password` (not `old_password`) — frontend matches (ChangePasswordCard sends current_password). Confirmed by 422 when old_password used.",
+    "Chat.jsx loadConvs appends without dedup — see UI bug. Minor data correctness issue (visual duplicates possible when offset race occurs).",
+    "/team, /invite/*, /join/* no longer have routes defined — React Router logs warnings but does not crash. Consider explicit <Route path='*' element={<Navigate to='/home'/>}/>.",
+    "Markdown.jsx linkTag correctly rewrites /workspace/.. to absolute origin+path with target=_blank, and /api/files/.. to download; verified in rendered DOM (0 href='#' anchors).",
+    "Gallery.jsx Sentinel: onVisible identity changes every render; new IntersectionObserver subscribed each time. Can fire multiple times rapidly."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter25.py",
+    "/app/test_reports/iteration_25.json"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% of iter25 flows (minor dup-key warning noted)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (restored after change-password roundtrip, verified via re-login), budi@aivora.ai / budi123456",
+  "seed_data_creation": "No new seed. Used existing CID 4e36eefc-3ae9-4f48-98b5-e1a0fc7828e9 (demo private chat with Rio). Sent 1 chat message with gallery doc attachment → consumed some demo credits.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Change-password endpoint field is `current_password` (NOT old_password) → wrong name returns 422. Gallery cursor pagination: GET /api/gallery?limit=N&before=<ISO created_at>. For media file download header test, use /api/files/<path>?auth=<jwt>&download=1 and inspect Content-Disposition. React Router has NO /team, /invite/*, /join/* routes — they resolve to blank body with console warning only. Chat sidebar renders convs twice (desktop + mobile overlay) with distinct testid prefixes conv-{id} and conv-m-{id}. Known issue: duplicate React keys from loadConvs append race — report but don't block tests.",
+  "rca of the issue": "Duplicate React keys in Chat conversation list: Gallery.jsx Sentinel re-creates its IntersectionObserver every render (onVisible dep changes identity), so the IO can fire onVisible multiple times rapidly before convsLoading state propagates and hides the sentinel. Each fire calls loadConvs(q, true) which uses offset=convs.length (stale closure value identical across fires) and appends the same page. loadConvs line 80 does `setConvs(prev => [...prev, ...r.data])` with no dedup. Mitigation: (a) wrap onVisible in useCallback with stable deps; (b) add `if (loadingRef.current) return;` guard inside loadConvs; (c) dedup by id when merging."
+}

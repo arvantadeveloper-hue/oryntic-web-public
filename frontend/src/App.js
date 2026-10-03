@@ -76,6 +76,7 @@ function App() {
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/admin" element={<AdminOnly platform><Admin /></AdminOnly>} />
               </Route>
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             </ErrorBoundary>
           </BrowserRouter>
