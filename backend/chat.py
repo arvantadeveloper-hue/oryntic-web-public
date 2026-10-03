@@ -484,7 +484,7 @@ async def _emit_final(ctx, text: str, credits: int, extra: dict):
     """Persist the assistant message for a tool turn and yield its final SSE + credits."""
     msg = await _save_ai_msg(ctx.cid, ctx.persona, text, credits, ctx.via, extra)
     payload = {"message_id": msg["id"], "content": text}
-    for k in ("media", "pending_tool", "task_id", "task_version", "tool", "pending_task"):
+    for k in ("media", "pending_tool", "task_id", "task_version", "tool", "pending_task", "results"):
         if k in extra:
             payload[k] = extra[k]
     yield ctx.sse(final=True, **payload)
@@ -584,6 +584,11 @@ async def _prepare_ctx(ctx: ReplyCtx) -> ReplyCtx:
     if ctx.via == "meeting_chat":
         ctx.system += "\n\n" + MEETING_CHAT_STYLE
     ctx.model_key, ctx.routed = await route_model(ctx.persona.get("model"), ctx.user_text, ctx.attach_len, await _owner_settings(ctx.user))
+    last = await db.messages.find_one({"conversation_id": ctx.cid, "role": "assistant", "tool": "workspace_search"}, {"_id": 0, "results": 1}, sort=[("created_at", -1)])
+    if last and last.get("results"):
+        top = await db.tasks.find_one({"id": last["results"][0]["id"]}, {"_id": 0, "goal": 1, "final_output": 1})
+        if top:
+            ctx.system += f"\n\nWORKSPACE ITEM RECENTLY FOUND (you may quote it; link: /workspace/{last['results'][0]['id']}):\nTitle: {top.get('goal')}\n{(top.get('final_output') or '')[:3000]}"
     conv = await db.conversations.find_one({"id": ctx.cid}, {"_id": 0, "task_id": 1}) or {}
     if conv.get("task_id"):
         ctx.task = await db.tasks.find_one({"id": conv["task_id"]}, {"_id": 0})
@@ -594,6 +599,19 @@ async def _prepare_ctx(ctx: ReplyCtx) -> ReplyCtx:
 
 DELEGATE_RE = re.compile(r"\b(terima beres|beres saja|kerjakan saja|langsung (saja|kerjakan)|serahkan|tolong kerjakan)\b", re.I)
 DISCUSS_RE = re.compile(r"\b(satu per satu|bahas (dulu|bersama|saja)|diskusi(kan)? dulu|pelan-pelan|bertahap)\b", re.I)
+TASK_RE_STRONG = re.compile(r"\b(buatkan|susun(kan)?|kerjakan|siapkan|rancang|tulis(kan)?)\b", re.I)
+TEAM_RE = re.compile(r"\b(bagi(kan)? (tugas(nya)? )?ke tim|bagi tugas|delegasikan|kerjakan bersama tim|libatkan (tim|asisten lain)|split to team)\b", re.I)
+SEARCH_RE = re.compile(r"\b(cari(kan)?|carilah|temukan|ada (dokumen|hasil|notulen|laporan|file|berkas|tugas)|dokumen (tentang|mengenai|soal)|di ruang kerja|workspace)\b", re.I)
+TEAM_OFFER = "\n\nAtau, karena tim kita ada beberapa asisten, saya juga bisa **bagi ke tim**: saya pecah jadi sub-tugas untuk asisten yang paling cocok, lalu saya rangkai hasilnya."
+
+
+async def _search_turn(ctx):
+    from assignments import search_workspace, results_markdown
+    yield ctx.sse(start=True)
+    yield ctx.sse(status="Mencari di Ruang Kerja...")
+    results = await search_workspace(ctx.user, ctx.user_text)
+    async for ev in _emit_final(ctx, results_markdown(results, ctx.user_text[:80]), 0, {"tool": "workspace_search", "results": results}):
+        yield ev
 
 
 async def _task_offer_turn(ctx):
@@ -602,7 +620,7 @@ async def _task_offer_turn(ctx):
     if (conv.get("persona_ids") or [ctx.persona["id"]])[0] != ctx.persona["id"]:
         return  # in group chats only the first assistant handles task offers (avoids duplicate offers)
     if conv.get("pending_task"):
-        mode = "delegate" if DELEGATE_RE.search(ctx.user_text) else "discuss" if DISCUSS_RE.search(ctx.user_text) else None
+        mode = "team" if TEAM_RE.search(ctx.user_text) else "delegate" if DELEGATE_RE.search(ctx.user_text) else "discuss" if DISCUSS_RE.search(ctx.user_text) else None
         if mode:
             from assignments import accept_pending
             yield ctx.sse(start=True)
@@ -615,9 +633,11 @@ async def _task_offer_turn(ctx):
     if not plan.get("is_task") or not (plan.get("long") or plan.get("scheduled_at")):
         return
     from assignments import offer_text
-    await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_task": {**plan, "persona_id": ctx.persona["id"], "offered_at": now_iso()}}})
+    team_possible = bool(plan.get("long")) and await db.personas.count_documents({"user_id": workspace_id(ctx.user), "deleted": {"$ne": True}}) > 1
+    await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_task": {**plan, "persona_id": ctx.persona["id"], "team_possible": team_possible, "offered_at": now_iso()}}})
     yield ctx.sse(start=True)
-    async for ev in _emit_final(ctx, offer_text(plan, ctx.user), 0, {"tool": "task_offer", "pending_task": {"title": plan.get("title"), "scheduled_at": plan.get("scheduled_at")}}):
+    async for ev in _emit_final(ctx, offer_text(plan, ctx.user) + (TEAM_OFFER if team_possible else ""), 0,
+                                {"tool": "task_offer", "pending_task": {"title": plan.get("title"), "scheduled_at": plan.get("scheduled_at"), "team_possible": team_possible}}):
         yield ev
 
 
@@ -652,6 +672,10 @@ async def _revise_turn(ctx):
 async def _persona_reply(ctx: ReplyCtx):
     """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
     await _prepare_ctx(ctx)
+    if ctx.user_text and not ctx.voice_mode and SEARCH_RE.search(ctx.user_text) and not TASK_RE_STRONG.search(ctx.user_text):
+        async for ev in _search_turn(ctx):
+            yield ev
+        return
     if ctx.user_text and not ctx.voice_mode and not ctx.task:
         handled = False
         async for ev in _task_offer_turn(ctx):

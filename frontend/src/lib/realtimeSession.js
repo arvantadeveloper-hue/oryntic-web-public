@@ -122,7 +122,8 @@ export class RealtimeSession {
 // Voice tools shared by solo calls and meetings: the model asks, we call our API, the result goes back as function_call_output.
 export async function runVoiceTool(name, args, cid) {
   try {
-    if (name === "assign_task") { const r = await api.post(`/conversations/${cid}/tasks`, { title: args.title, brief: args.brief, scheduled_at: args.scheduled_at || null, persona_id: args.persona_id || null }); return { ok: true, ...r.data }; }
+    if (name === "assign_task") { const r = await api.post(`/conversations/${cid}/tasks`, { title: args.title, brief: args.brief, scheduled_at: args.scheduled_at || null, persona_id: args.persona_id || null, team: !!args.team }); return { ok: true, ...r.data }; }
+    if (name === "search_workspace") { const r = await api.post(`/conversations/${cid}/workspace-search`, { query: args.query }); return { ok: true, ...r.data, note: "links were posted to the chat panel" }; }
     if (name === "update_task") {
       const c = await api.get(`/conversations/${cid}/messages?limit=1`);
       const tid = c.data?.conversation?.task_id;

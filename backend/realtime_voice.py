@@ -122,8 +122,12 @@ ASSIGN_TOOL = {"type": "function", "name": "assign_task",
                "parameters": {"type": "object", "properties": {
                    "title": {"type": "string", "description": "Short title of the task (Indonesian, max 10 words)"},
                    "brief": {"type": "string", "description": "What exactly must be produced, 1-3 sentences"},
-                   "scheduled_at": {"type": "string", "description": "ISO-8601 datetime with timezone offset if the user named a time (e.g. 'besok jam 9'), else omit"}},
+                   "scheduled_at": {"type": "string", "description": "ISO-8601 datetime with timezone offset if the user named a time (e.g. 'besok jam 9'), else omit"},
+                   "team": {"type": "boolean", "description": "true when the user wants the work split among the other assistants (delegate sub-tasks); offer this for big tasks when there are several assistants"}},
                    "required": ["title", "brief"]}}
+SEARCH_TOOL = {"type": "function", "name": "search_workspace",
+               "description": "Search the user's Workspace (saved task results, documents, meeting minutes) by keywords and drop clickable links into the chat panel. Use when the user asks to find or look up existing material.",
+               "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Keywords to search for"}}, "required": ["query"]}}
 UPDATE_TOOL = {"type": "function", "name": "update_task",
                "description": "Apply a revision the user asked for to the Workspace result currently being presented/discussed. Pass the full revision instruction. The result is saved as a new version.",
                "parameters": {"type": "object", "properties": {"instruction": {"type": "string", "description": "What to change, in detail"}}, "required": ["instruction"]}}
@@ -308,7 +312,7 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
     }
     if role in ("moderator", "solo"):
         conv = await db.conversations.find_one({"id": call["conversation_id"]}, {"_id": 0, "task_id": 1}) or {}
-        tools = [ASSIGN_TOOL] + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        tools = [ASSIGN_TOOL, SEARCH_TOOL] + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:

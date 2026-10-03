@@ -78,6 +78,8 @@ async def execute_assigned_task(tid: str):
         await record_usage(t["user_id"], "assigned_task", used, {"task_id": tid})
         await db.tasks.update_one({"id": tid}, {"$set": {"status": "completed", "final_output": out, "credits_used": used, "model": model_key,
                                                          "completed_at": now_iso(), "updated_at": now_iso(), "summary": f"Dikerjakan oleh {persona.get('name')}"}})
+        if t.get("parent_id"):
+            await _maybe_assemble(t["parent_id"])
         for cid in t.get("conversation_ids") or []:
             await _save_ai_msg(cid, persona, f"Tugas **{t.get('goal')}** sudah selesai ✅ dan tersimpan di Ruang Kerja — [buka hasilnya](/workspace/{tid}).\n\n"
                                f"Kalau mau, buat panggilan dari Ruang Kerja dan saya paparkan hasilnya, atau minta revisi langsung di sini.", 0, "text",
@@ -85,6 +87,9 @@ async def execute_assigned_task(tid: str):
     except Exception as e:
         log.error("assigned task %s failed: %s", tid, e)
         await db.tasks.update_one({"id": tid}, {"$set": {"status": "failed", "error": str(e)[:300], "updated_at": now_iso()}})
+        t = await db.tasks.find_one({"id": tid}, {"_id": 0, "parent_id": 1}) or {}
+        if t.get("parent_id"):
+            await _maybe_assemble(t["parent_id"])
     finally:
         _running.discard(tid)
 
@@ -92,12 +97,15 @@ async def execute_assigned_task(tid: str):
 async def tasks_tick():
     """Called by the server scheduler loop: start scheduled tasks whose time has come (and re-queue stale ones)."""
     now = now_iso()
-    async for t in db.tasks.find({"status": "scheduled", "scheduled_at": {"$lte": now}}, {"_id": 0, "id": 1}):
+    async for t in db.tasks.find({"status": "scheduled", "scheduled_at": {"$lte": now}}, {"_id": 0, "id": 1, "team": 1}):
+        if t.get("team"):
+            await db.tasks.update_one({"id": t["id"]}, {"$set": {"status": "running", "updated_at": now}})
+            continue  # children are scheduled individually
         await db.tasks.update_one({"id": t["id"]}, {"$set": {"status": "queued"}})
         asyncio.create_task(execute_assigned_task(t["id"]))
     await digest_tick()
     stale = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-    async for t in db.tasks.find({"type": "assigned", "status": {"$in": ["queued", "running"]}, "updated_at": {"$lte": stale}}, {"_id": 0, "id": 1}):
+    async for t in db.tasks.find({"type": "assigned", "team": {"$ne": True}, "status": {"$in": ["queued", "running"]}, "updated_at": {"$lte": stale}}, {"_id": 0, "id": 1}):
         if t["id"] not in _running:
             await db.tasks.update_one({"id": t["id"]}, {"$set": {"status": "queued", "updated_at": now}})
             asyncio.create_task(execute_assigned_task(t["id"]))
@@ -113,6 +121,12 @@ async def accept_pending(conv: dict, u: dict, mode: str) -> dict:
         raise HTTPException(400, "Asisten tidak ditemukan")
     await db.conversations.update_one({"id": conv["id"]}, {"$set": {"pending_task": None}})
     tz = (u.get("settings") or {}).get("timezone") or "Asia/Jakarta"
+    if mode == "team":
+        task = await create_team_task(u, persona, conv, plan, "chat")
+        who = ", ".join(f"{s['persona_name']} → {s['title']}" for s in task.get("subtasks") or [])
+        text = (f"Siap, tugas **{task['goal']}** saya bagi ke tim dan masuk Ruang Kerja. Pembagian: {who or 'saya kerjakan sendiri'}. "
+                f"Dikerjakan {when_text(task.get('scheduled_at'), tz)}; setelah semua bagian selesai saya rangkai jadi satu dan kabari di sini. [Lihat di Ruang Kerja](/workspace/{task['id']})")
+        return await _save_ai_msg(conv["id"], persona, text, 0, "text", {"tool": "task_assigned", "task_id": task["id"]})
     if mode == "delegate":
         task = await create_assigned_task(u, persona, conv, plan, "chat")
         text = (f"Beres! Tugas **{task['goal']}** sudah masuk ke Ruang Kerja dan akan saya kerjakan {when_text(task.get('scheduled_at'), tz)}. "
@@ -127,7 +141,7 @@ async def accept_pending(conv: dict, u: dict, mode: str) -> dict:
 
 
 class AcceptIn(BaseModel):
-    mode: str = Field(pattern="^(delegate|discuss)$")
+    mode: str = Field(pattern="^(delegate|discuss|team)$")
 
 
 @router.post("/conversations/{cid}/tasks/accept")
@@ -143,6 +157,7 @@ class AssignIn(BaseModel):
     brief: Optional[str] = Field(default=None, max_length=4000)
     scheduled_at: Optional[str] = None
     persona_id: Optional[str] = None
+    team: bool = False
 
 
 @router.post("/conversations/{cid}/tasks")
@@ -155,10 +170,13 @@ async def assign_task(cid: str, x: AssignIn, u: dict = Depends(current_user)):
     persona = (await _get_personas([pid]) or [None])[0]
     if not persona:
         raise HTTPException(400, "Asisten tidak ditemukan")
-    task = await create_assigned_task(u, persona, conv, {"title": x.title, "brief": x.brief, "scheduled_at": x.scheduled_at}, "meeting" if conv.get("type") == "meeting" else "call")
+    plan = {"title": x.title, "brief": x.brief, "scheduled_at": x.scheduled_at}
+    src = "meeting" if conv.get("type") == "meeting" else "call"
+    task = await (create_team_task(u, persona, conv, plan, src) if x.team else create_assigned_task(u, persona, conv, plan, src))
     tz = (u.get("settings") or {}).get("timezone") or "Asia/Jakarta"
     await _save_ai_msg(cid, persona, f"📌 Tugas **{task['goal']}** dicatat ke Ruang Kerja, dikerjakan {when_text(task.get('scheduled_at'), tz)}. [Lihat](/workspace/{task['id']})", 0, "text", {"tool": "task_assigned", "task_id": task["id"]})
-    return {"task_id": task["id"], "status": task["status"], "when": when_text(task.get("scheduled_at"), tz), "assistant": persona["name"]}
+    return {"task_id": task["id"], "status": task["status"], "when": when_text(task.get("scheduled_at"), tz), "assistant": persona["name"],
+            "subtasks": [f"{s['persona_name']}: {s['title']}" for s in task.get("subtasks") or []]}
 
 
 @router.get("/task-notifications")
@@ -326,3 +344,143 @@ async def _digest_bg(u: dict):
 async def digest_now(u: dict = Depends(current_user)):
     """Preview/manual trigger from the Calendar settings card."""
     return await send_digest(u, force=True)
+
+
+# ---------- workspace search (keyword) ----------
+SEARCH_STOP = set("tolong carikan cari carilah temukan ada apakah dokumen hasil file berkas yang tentang mengenai di ruang kerja workspace saya kita punya nggak gak tidak sudah pernah dibuat buatan minggu lalu kemarin bulan ini itu dong ya please find search for the a an of in my our is there any".split())
+
+
+def _keywords(q: str) -> list:
+    words = [w.strip("?.,!:;\"'()").lower() for w in (q or "").split()]
+    return [w for w in words if len(w) > 2 and w not in SEARCH_STOP][:8]
+
+
+async def search_workspace(u: dict, q: str, limit: int = 8) -> list:
+    kws = _keywords(q)
+    if not kws:
+        return []
+    import re as _re
+    cond = [{"$or": [{"goal": {"$regex": _re.escape(k), "$options": "i"}}, {"summary": {"$regex": _re.escape(k), "$options": "i"}}, {"final_output": {"$regex": _re.escape(k), "$options": "i"}}]} for k in kws]
+    rows = await db.tasks.find({"workspace_id": workspace_id(u), "status": "completed", "$or": cond},
+                               {"_id": 0, "id": 1, "goal": 1, "type": 1, "status": 1, "persona_name": 1, "updated_at": 1, "version": 1, "final_output": 1, "summary": 1}).sort("updated_at", -1).to_list(60)
+    out = []
+    for r in rows:
+        body = (r.get("final_output") or "")
+        score = sum(body.lower().count(k) + 5 * (k in (r.get("goal") or "").lower()) for k in kws)
+        pos = next((body.lower().find(k) for k in kws if body.lower().find(k) >= 0), 0)
+        snippet = body[max(0, pos - 80): pos + 160].replace("\n", " ").strip()
+        out.append({"id": r["id"], "title": r.get("goal"), "type": r.get("type"), "persona_name": r.get("persona_name"), "updated_at": r.get("updated_at"),
+                    "version": r.get("version") or 1, "snippet": snippet, "link": f"/workspace/{r['id']}", "_score": score})
+    out.sort(key=lambda x: -x["_score"])
+    return [{k: v for k, v in o.items() if k != "_score"} for o in out[:limit]]
+
+
+@router.get("/workspace/search")
+async def workspace_search(q: str, u: dict = Depends(current_user)):
+    return await search_workspace(u, q)
+
+
+def results_markdown(results: list, q: str) -> str:
+    if not results:
+        return f"Saya sudah mencari di Ruang Kerja untuk «{q}», tapi belum menemukan hasil yang cocok. Coba kata kunci lain, atau mau saya buatkan?"
+    lines = [f"Saya menemukan {len(results)} item di Ruang Kerja untuk «{q}»:"]
+    for r in results:
+        who = f" · {r['persona_name']}" if r.get("persona_name") else ""
+        lines.append(f"- [{r['title']}]({r['link']}) (v{r['version']}{who}) — {r['snippet'][:120]}…" if r.get("snippet") else f"- [{r['title']}]({r['link']}) (v{r['version']}{who})")
+    lines.append("Klik judulnya untuk membuka, atau tanyakan isinya langsung ke saya.")
+    return "\n".join(lines)
+
+
+class SearchIn(BaseModel):
+    query: str = Field(min_length=2, max_length=300)
+
+
+@router.post("/conversations/{cid}/workspace-search")
+async def conv_workspace_search(cid: str, x: SearchIn, u: dict = Depends(current_user)):
+    """Voice tool / meeting chat: search and drop the links as an assistant message into the conversation."""
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not conv or not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    results = await search_workspace(u, x.query)
+    persona = (await _get_personas([conv.get("persona_id") or (conv.get("persona_ids") or [None])[0]]) or [None])[0]
+    if persona:
+        await _save_ai_msg(cid, persona, results_markdown(results, x.query), 0, "text", {"tool": "workspace_search", "results": results})
+    return {"count": len(results), "results": [{"title": r["title"], "id": r["id"], "assistant": r.get("persona_name")} for r in results]}
+
+
+# ---------- team delegation (lead splits a task into sub-tasks for other assistants) ----------
+async def plan_subtasks(title: str, brief: str, personas: list) -> list:
+    from llm import llm_json
+    roster = "\n".join(f"- {p['name']} (model {p.get('model')})" for p in personas)
+    try:
+        r = await llm_json("Split the task into 2-5 independent sub-tasks for a team of AI assistants. Reply JSON {\"subtasks\":[{\"title\":str,\"brief\":str,\"specialty\":\"it\"|\"research\"|\"writing\"|\"general\"}]}. Indonesian titles.",
+                           f"Task: {title}\nDetails: {brief}\nTeam:\n{roster}")
+        subs = r.get("subtasks") if isinstance(r, dict) else None
+        return [s for s in (subs or []) if s.get("title")][:5]
+    except Exception:
+        return []
+
+
+async def _assign_personas(subtasks: list, personas: list, lead: dict) -> list:
+    from tools import get_routing
+    routing = await get_routing()
+    by_spec = {"it": [p for p in personas if p.get("model") == routing.get("it_model")], "research": [p for p in personas if p.get("model") == routing.get("research_model")]}
+    others = [p for p in personas if p["id"] != lead["id"]] or [lead]
+    out, i = [], 0
+    for s in subtasks:
+        pool = by_spec.get(s.get("specialty")) or others
+        out.append((s, pool[i % len(pool)])); i += 1
+    return out
+
+
+async def create_team_task(u: dict, lead: dict, conv: dict, plan: dict, source: str) -> dict:
+    wid = workspace_id(u)
+    personas = await db.personas.find({"user_id": wid, "deleted": {"$ne": True}}, {"_id": 0}).to_list(50)
+    subs = plan.get("subtasks") or await plan_subtasks(plan.get("title") or "", plan.get("brief") or "", personas)
+    if len(subs) < 2:
+        return await create_assigned_task(u, lead, conv, plan, source)
+    sched = _utc(plan.get("scheduled_at"))
+    future = bool(sched) and sched > now_iso()
+    parent = {"id": new_id(), "user_id": u["id"], "workspace_id": wid, "goal": plan.get("title") or "", "brief": plan.get("brief") or "", "type": "assigned", "team": True,
+              "status": "scheduled" if future else "running", "scheduled_at": sched, "steps": [], "summary": f"Dibagi ke tim oleh {lead['name']}", "final_output": "", "credits_used": 0,
+              "persona_id": lead["id"], "persona_name": lead["name"], "source": source, "conversation_ids": [conv["id"]] if conv else [], "version": 1, "notified": False,
+              "subtasks": [], "created_at": now_iso(), "updated_at": now_iso()}
+    for s, p in await _assign_personas(subs, personas, lead):
+        child = {"id": new_id(), "user_id": u["id"], "workspace_id": wid, "goal": s["title"], "brief": s.get("brief") or "", "type": "assigned", "parent_id": parent["id"],
+                 "status": "scheduled" if future else "queued", "scheduled_at": sched, "steps": [], "summary": f"Sub-tugas dari «{parent['goal']}»", "final_output": "", "credits_used": 0,
+                 "persona_id": p["id"], "persona_name": p["name"], "source": source, "conversation_ids": [], "version": 1, "notified": True, "created_at": now_iso(), "updated_at": now_iso()}
+        await db.tasks.insert_one(dict(child))
+        parent["subtasks"].append({"id": child["id"], "title": child["goal"], "persona_id": p["id"], "persona_name": p["name"], "status": child["status"]})
+        if not future:
+            asyncio.create_task(execute_assigned_task(child["id"]))
+    await db.tasks.insert_one(dict(parent))
+    return parent
+
+
+async def _maybe_assemble(parent_id: str):
+    parent = await db.tasks.find_one({"id": parent_id}, {"_id": 0})
+    if not parent or parent.get("status") == "completed":
+        return
+    kids = await db.tasks.find({"parent_id": parent_id}, {"_id": 0}).to_list(20)
+    await db.tasks.update_one({"id": parent_id}, {"$set": {"subtasks": [{"id": k["id"], "title": k["goal"], "persona_id": k.get("persona_id"), "persona_name": k.get("persona_name"), "status": k["status"]} for k in kids], "updated_at": now_iso()}})
+    if any(k["status"] not in ("completed", "failed") for k in kids):
+        return
+    claimed = await db.tasks.find_one_and_update({"id": parent_id, "status": {"$nin": ["assembling", "completed"]}}, {"$set": {"status": "assembling"}})
+    if not claimed:
+        return  # another child's completion is already assembling
+    u = await db.users.find_one({"id": parent["user_id"]}, {"_id": 0}) or {}
+    lead = await db.personas.find_one({"id": parent.get("persona_id")}, {"_id": 0}) or {"name": "Asisten"}
+    parts = "\n\n".join(f"## {k['goal']} (oleh {k.get('persona_name')})\n{k.get('final_output') or '(gagal)'}" for k in kids)
+    system = (await _persona_system(lead, u, None) if lead.get("id") else "") + "\n\nYou are the TEAM LEAD assembling your team's sub-task results into ONE coherent, complete deliverable in markdown. Keep all substantive content, remove duplication, add a short executive summary at the top and credit each assistant's section."
+    prompt = f"Task: {parent.get('goal')}\nDetails: {parent.get('brief')}\n\nSUB-TASK RESULTS:\n{parts[:40000]}"
+    try:
+        out = await llm_text(system, prompt, parent.get("model"))
+    except Exception as e:
+        await db.tasks.update_one({"id": parent_id}, {"$set": {"status": "failed", "error": str(e)[:300]}})
+        return
+    used = text_credits(prompt, out)
+    await record_usage(parent["user_id"], "assigned_task", used, {"task_id": parent_id})
+    await db.tasks.update_one({"id": parent_id}, {"$set": {"status": "completed", "final_output": out, "credits_used": used + sum(k.get("credits_used") or 0 for k in kids), "completed_at": now_iso(), "updated_at": now_iso()}})
+    who = ", ".join(f"{k.get('persona_name')} ({k['goal']})" for k in kids)
+    for cid in parent.get("conversation_ids") or []:
+        await _save_ai_msg(cid, lead, f"Tugas tim **{parent.get('goal')}** selesai ✅ — bagian dikerjakan oleh {who}; saya rangkai jadi satu dokumen di Ruang Kerja: [buka hasilnya](/workspace/{parent_id}).", 0, "text", {"tool": "task_done", "task_id": parent_id})

@@ -74,6 +74,7 @@ export function TaskOfferButtons({ m, cid, onDone, isLast }) {
     <div className="mt-2 flex flex-wrap gap-2" data-testid="task-offer-buttons">
       <button onClick={() => pick("discuss")} disabled={!!busy} className="rounded-full border border-[#2F6BFF]/40 bg-white px-4 py-1.5 text-xs font-bold text-[#2F6BFF] hover:bg-[#EEF3FF] disabled:opacity-60" data-testid="task-offer-discuss">{busy === "discuss" ? "..." : "Bahas satu per satu"}</button>
       <button onClick={() => pick("delegate")} disabled={!!busy} className="rounded-full bg-[#2F6BFF] px-4 py-1.5 text-xs font-bold text-white hover:brightness-105 disabled:opacity-60" data-testid="task-offer-delegate">{busy === "delegate" ? "..." : "Terima beres"}</button>
+      {m.pending_task?.team_possible && <button onClick={() => pick("team")} disabled={!!busy} className="rounded-full bg-[#7C3AED] px-4 py-1.5 text-xs font-bold text-white hover:brightness-105 disabled:opacity-60" data-testid="task-offer-team">{busy === "team" ? "..." : "Bagi ke tim"}</button>}
     </div>
   );
 }
@@ -96,4 +97,21 @@ export function TaskNotifier() {
     return () => { stop = true; clearInterval(iv); };
   }, [nav]);
   return null;
+}
+
+
+// Clickable Workspace search results under the assistant's reply.
+export function WorkspaceResults({ m }) {
+  const nav = useNavigate();
+  if (m.tool !== "workspace_search" || !(m.results || []).length) return null;
+  return (
+    <div className="mt-2 grid gap-1.5 sm:grid-cols-2" data-testid="workspace-results">
+      {m.results.map((r) => (
+        <button key={r.id} onClick={() => nav(`/workspace/${r.id}`)} data-testid={`workspace-result-${r.id}`} className="flex items-start gap-2 rounded-xl border border-[#E7ECF3] bg-white p-2.5 text-left hover:border-[#2F6BFF]/50 hover:bg-[#EEF3FF]/40">
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#2F6BFF] text-white"><ClipboardList size={14} /></span>
+          <span className="min-w-0"><span className="block truncate text-xs font-bold text-slate-900">{r.title}</span><span className="block text-[10px] text-slate-500">v{r.version}{r.persona_name ? ` · ${r.persona_name}` : ""} · {new Date(r.updated_at).toLocaleDateString("id-ID")}</span></span>
+        </button>
+      ))}
+    </div>
+  );
 }

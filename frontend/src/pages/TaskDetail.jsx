@@ -131,7 +131,22 @@ export default function TaskDetail() {
         <div className="mt-4 border-t border-[#E7ECF3] pt-4"><DiscussBar task={task} nav={nav} /></div>
       </div>
 
-      {(task.steps || []).length > 0 || ["queued", "running"].includes(task.status) ? (<>
+      {task.parent_id && <button onClick={() => nav(`/workspace/${task.parent_id}`)} className="mt-4 text-xs font-semibold text-[#2F6BFF]" data-testid="task-parent-link">← Bagian dari tugas tim</button>}
+      {(task.subtasks || []).length > 0 && (
+        <div className="mt-8" data-testid="subtasks">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Pembagian ke tim · {task.subtasks.length} sub-tugas</h2>
+          <div className="space-y-2">
+            {task.subtasks.map((s) => (
+              <button key={s.id} onClick={() => nav(`/workspace/${s.id}`)} className="aivora-card flex w-full items-center gap-3 p-4 text-left hover:border-[#2F6BFF]/40" data-testid={`subtask-${s.id}`}>
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#7C3AED] text-xs font-bold text-white">{(s.persona_name || "A")[0]}</span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-900">{s.title}</span><span className="block text-xs text-slate-500">{s.persona_name}</span></span>
+                <StatusBadge status={s.status} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {(task.steps || []).length > 0 || (["queued", "running"].includes(task.status) && !(task.subtasks || []).length) ? (<>
         <h2 className="mt-8 mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Agent & Subtugas</h2>
         <div className="space-y-3">
           {(task.steps || []).length === 0 && <div className="aivora-card flex items-center gap-3 p-5 text-sm text-slate-500"><Loader2 size={16} className="animate-spin text-[#8B5CF6]" /> Oryntix sedang menyusun rencana...</div>}
