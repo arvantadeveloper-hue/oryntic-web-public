@@ -282,6 +282,7 @@ async def get_messages(cid: str, before: Optional[str] = None, limit: int = Quer
     out = {"conversation": view_title(conv, u["id"]), "messages": msgs, "has_more": has_more}
     if not before and not archived:
         out["archived_count"] = await db.messages.count_documents({"conversation_id": cid, "archived": True})
+        out["archives_count"] = await db.chat_archives.count_documents({"conversation_id": cid})
         out["long_chat"] = await _long_chat(cid, conv)
     return out
 
@@ -408,6 +409,15 @@ VOICE_STYLE = ("SPOKEN CONVERSATION MODE: your words will be read aloud by text-
                "(e.g. 'oke', 'hmm', 'baik') and acknowledge what the user said before answering. Ask one short follow-up question "
                "when it helps. If the user interrupted you, stop your previous thought gracefully and respond to what they just said.")
 
+# Shared core character of EVERY assistant (placeholders filled per persona/user). Set by the platform owner.
+CORE_CHARACTER = ("KARAKTER INTI: Kamu adalah [NAMA ASISTEN], asisten percakapan AI yang natural. Tugasmu adalah membuat setiap percakapan "
+                  "terasa alami, cerdas dan ramah. Fokus jawab dengan bahasa [BAHASA PENGGUNA] secara natural. Tetap atur voice yang pas dan "
+                  "konfigurasikan deteksi turn-taking yang natural. Dengan begitu, [NAMA ASISTEN] nggak terdengar seperti customer service tapi "
+                  "beneran terasa kayak teman ngobrol yang nyambung. Aktifkan deteksi turn-taking yang natural dan prioritaskan pemahaman maksud "
+                  "pengguna daripada respons yang terlalu cepat dan reaktif. Gunakan pengaturan interruption handling yang menunggu sedikit jeda "
+                  "sebelum memutuskan pengguna benar-benar menyela. Kalau pengguna memang ingin bicara, alihkan giliran dengan halus dan lanjutkan "
+                  "percakapan secara natural.")
+
 SANGUINE_TONE = ("TEMPERAMENT: you are sanguine — warm, friendly, upbeat and genuinely enthusiastic. Greet people like a good friend, "
                  "celebrate small wins, use light humor and encouraging words, show curiosity about the user, and keep the energy "
                  "positive even when delivering bad news (be kind, then constructive). Stay professional and accurate; never let "
@@ -439,6 +449,7 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     lang_name = _lang_name(user)
     parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in. Never switch to another language unless the user themselves writes in a different language."]
     parts.append(f"You are '{persona['name']}', an AI persona. {prof.get('system_instructions','')}")
+    parts.append(CORE_CHARACTER.replace("[NAMA ASISTEN]", persona["name"]).replace("[BAHASA PENGGUNA]", lang_name))
     pers = prof.get("personality", {})
     parts.append(f"Communication style: {pers.get('communication_style','')}. Formality: {pers.get('formality','')}. Attitude: {pers.get('attitude','')}.")
     parts.append("You are an AI and must not claim to have real human feelings or needs. Be warm but honest.")

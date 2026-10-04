@@ -31,7 +31,7 @@ export function RemindModal({ archive, onClose }) {
   );
 }
 
-export function ArchiveCard({ a, onRestored, compact = false }) {
+export function ArchiveCard({ a, onRestored, compact = false, inChat = false }) {
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState(null);
@@ -80,7 +80,7 @@ export function ArchiveCard({ a, onRestored, compact = false }) {
           </span>
         ) : <button onClick={() => setConfirm(true)} className="flex items-center gap-1 rounded-lg bg-[#EEF3FF] px-2.5 py-1.5 text-xs font-bold text-[#2F6BFF]" data-testid="archive-restore"><RotateCcw size={13} /> Pulihkan</button>)}
         <button onClick={() => setRemind(true)} className="flex items-center gap-1 rounded-lg border border-[#E7ECF3] px-2.5 py-1.5 text-xs font-semibold text-slate-700" data-testid="archive-remind"><Bell size={13} /> Jadikan pengingat</button>
-        <button onClick={() => nav(`/chat/${a.conversation_id}`)} className="rounded-lg border border-[#E7ECF3] px-2.5 py-1.5 text-xs font-semibold text-slate-700" data-testid="archive-open-chat">Buka chat</button>
+        {!inChat && <button onClick={() => nav(`/chat/${a.conversation_id}`)} className="rounded-lg border border-[#E7ECF3] px-2.5 py-1.5 text-xs font-semibold text-slate-700" data-testid="archive-open-chat">Buka chat</button>}
       </div>
       {open && (
         <div ref={scrollRef} className="max-h-80 space-y-2 overflow-y-auto border-t border-[#E7ECF3] bg-[#F8FAFC] p-4" data-testid="archive-messages">

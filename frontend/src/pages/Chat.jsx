@@ -11,7 +11,8 @@ import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
 import { MediaList, ToolRequestCard, ModelBadge, downloadUrl } from "../components/MessageExtras";
 import { GalleryPicker } from "../components/GalleryPicker";
-import { SummaryPrompt, ArchiveModal } from "../components/ConversationTools";
+import { SummaryPrompt } from "../components/ConversationTools";
+import { ChatArchivesModal } from "../components/ChatArchives";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
 import { TaskContextCard, AddPersonaMenu, TaskOfferButtons, WorkspaceResults, ArchiveResults } from "../components/TaskChatTools";
 
@@ -79,7 +80,7 @@ export default function Chat() {
     return api.get(`/conversations?limit=${PAGE}&offset=${more ? convs.length : 0}${query ? `&q=${encodeURIComponent(query)}` : ""}`)
       .then((r) => { setConvs((prev) => (more ? [...prev, ...r.data] : r.data)); }).catch(() => {}).finally(() => setConvsLoading(false));
   };
-  const applyPage = (data) => { setMessages(data.messages); setMsgHasMore(!!data.has_more); setArchivedCount(data.archived_count || 0); setSummaryRequest(!!data.long_chat); };
+  const applyPage = (data) => { setMessages(data.messages); setMsgHasMore(!!data.has_more); setArchivedCount(data.archives_count || 0); setSummaryRequest(!!data.long_chat); };
   const loadOlder = async () => {
     if (!msgHasMore || loadingOlder || !messages.length) return;
     setLoadingOlder(true);
@@ -327,7 +328,7 @@ export default function Chat() {
         <div ref={listRef} onScroll={(e) => { if (e.currentTarget.scrollTop < 60) loadOlder(); }} className="flex-1 space-y-5 overflow-y-auto p-5" data-testid="message-list">
           {msgsLoading && <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-400" data-testid="msgs-loading"><Loader2 size={18} className="animate-spin" /> Memuat percakapan…</div>}
           {conv && !msgsLoading && msgHasMore && <div className="flex items-center justify-center gap-2 text-xs text-slate-400" data-testid="msg-older-hint">{loadingOlder ? <><Loader2 size={13} className="animate-spin" /> Memuat pesan lama…</> : "Gulir ke atas untuk pesan lama"}</div>}
-          {conv && archivedCount > 0 && <div className="text-center"><button onClick={() => setShowArchive(true)} data-testid="archive-btn" className="rounded-full border border-[#E7ECF3] bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">Lihat arsip ({archivedCount})</button></div>}
+          {conv && archivedCount > 0 && <div className="text-center"><button onClick={() => setShowArchive(true)} data-testid="archive-btn" className="rounded-full border border-[#E7ECF3] bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">Arsip percakapan ({archivedCount})</button></div>}
           {conv?.task_id && <TaskContextCard taskId={conv.task_id} refreshKey={messages.length} cid={id} onDetach={() => setConv((c) => ({ ...c, task_id: null }))} />}
           {!conv && !msgsLoading && (
             <div className="flex h-full flex-col items-center justify-center text-center">
@@ -420,7 +421,7 @@ export default function Chat() {
         )}
       </div>
 
-      {showArchive && conv && <ArchiveModal cid={id} onClose={() => setShowArchive(false)} />}
+      {showArchive && conv && <ChatArchivesModal cid={id} onClose={() => setShowArchive(false)} onRestored={() => refreshMsgs()} />}
       {videoOpen && conv && (conv.type === "private" && rt.enabled
         ? <RealtimeCall conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />
         : conv.type !== "private" && (rt.enabled || (conv.humans || []).length > 1)

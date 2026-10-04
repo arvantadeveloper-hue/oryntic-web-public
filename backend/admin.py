@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from db import db
-from auth import require_admin, require_platform_admin, workspace_id, public_user, member_ids
+from auth import require_admin, require_platform_admin, require_platform_staff, workspace_id, public_user, member_ids
 from wallet import get_packages
 from llm import GPT_MODEL, IMAGE_MODEL, user_today_usage
 from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES, DEFAULT_PRICING, FEATURES, feature_table, build_packages
@@ -158,7 +158,7 @@ class TrialIn(BaseModel):
 
 
 @router.get("/pricing")
-async def pricing(_: dict = Depends(require_platform_admin)):
+async def pricing(_: dict = Depends(require_platform_staff)):
     p = await get_pricing()
     return {
         "packages": await get_packages(),

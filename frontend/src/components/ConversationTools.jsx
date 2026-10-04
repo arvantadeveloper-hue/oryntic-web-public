@@ -1,8 +1,7 @@
 import React, { useState } from "react";
-import { AlertTriangle, Loader2, Archive, X } from "lucide-react";
+import { AlertTriangle, Loader2, Archive } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { Markdown } from "./Markdown";
 
 // Checks required notulen fields before a meeting is closed; resolves true = proceed to end, false = keep discussing.
 export function useNotulenGate(cid) {
@@ -53,23 +52,6 @@ export function SummaryPrompt({ cid, onDone, onLater, dark = false }) {
 }
 
 // Read-only archive viewer (raw messages that were summarized away).
-export function ArchiveModal({ cid, onClose }) {
-  const [items, setItems] = useState(null);
-  React.useEffect(() => { api.get(`/conversations/${cid}/messages?archived=1&limit=200`).then((r) => setItems(r.data.messages)).catch(() => setItems([])); }, [cid]);
-  return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4" data-testid="archive-modal">
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center gap-2 border-b border-[#E7ECF3] px-5 py-3"><Archive size={16} className="text-slate-500" /><p className="font-bold text-slate-900">Arsip percakapan</p><span className="text-xs text-slate-400">{items?.length ?? "…"} pesan</span><button onClick={onClose} data-testid="archive-close" className="ml-auto rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><X size={16} /></button></div>
-        <div className="flex-1 space-y-3 overflow-y-auto p-5 text-sm">
-          {items === null ? <Loader2 className="mx-auto animate-spin text-slate-400" /> : items.length === 0 ? <p className="text-center text-slate-500">Arsip kosong.</p> : items.map((m) => (
-            <div key={m.id} className={`rounded-xl px-3 py-2 ${m.role === "user" ? "bg-[#EEF3FF]" : "bg-slate-50"}`}><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{m.role === "user" ? (m.sender_name || "Anda") : (m.persona_name || "Asisten")}</p><Markdown content={m.content} /></div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function LoadMore({ onClick, loading, testid = "load-more" }) {
   return (
     <div className="flex justify-center py-3">

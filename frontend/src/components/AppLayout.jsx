@@ -44,6 +44,7 @@ export function AppLayout() {
     { to: "/profile", icon: Settings, label: "Settings", id: "profile" },
   ];
   const items = allItems.filter((it) => !it.adminOnly || isAdmin);
+  if (user?.platform_role) items.push({ to: "/platform", icon: Shield, label: "Oryntix Platform", id: "platform" });
   if (user?.is_platform_admin) items.push({ to: "/admin", icon: Shield, label: t("nav.admin"), id: "admin" });
 
   const handleLogout = () => { logout(); nav("/"); };

@@ -26,6 +26,7 @@ import SharePage from "./pages/SharePage";
 import Friends from "./pages/Friends";
 import ResetPassword from "./pages/ResetPassword";
 import Calendar from "./pages/Calendar";
+import PlatformApp from "./pages/platform/PlatformApp";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -64,6 +65,7 @@ function App() {
               <Route path="/verify-email" element={<VerifyEmail />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/s/:code" element={<SharePage />} />
+              <Route path="/platform/*" element={<PlatformApp />} />
               <Route element={<Protected><AppLayout /></Protected>}>
                 <Route path="/home" element={<Home />} />
                 <Route path="/personas" element={<AdminOnly><Personas /></AdminOnly>} />

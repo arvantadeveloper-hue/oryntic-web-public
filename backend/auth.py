@@ -61,6 +61,7 @@ def public_user(u: dict) -> dict:
         "role": u.get("role", "user"),
         "owner_id": u.get("owner_id") or u["id"],
         "is_admin": u.get("role") == "admin",
+        "platform_role": platform_role(u),
         "is_home_workspace": (u.get("owner_id") or u["id"]) == u["id"],
         "verified": u.get("verified", True),
         "onboarded": u.get("onboarded", False),
@@ -73,8 +74,19 @@ def public_user(u: dict) -> dict:
     }
 
 
+PLATFORM_ROLES = ("super_admin", "finance")
+
+
+def platform_role(u: dict) -> Optional[str]:
+    """Platform staff role from the DB record; ADMIN_EMAIL is always super_admin (bootstrap owner)."""
+    if (u.get("email") or "").lower() == os.environ["ADMIN_EMAIL"].lower():
+        return "super_admin"
+    r = u.get("platform_role")
+    return r if r in PLATFORM_ROLES else None
+
+
 def is_platform_admin(u: dict) -> bool:
-    return (u.get("email") or "").lower() == os.environ["ADMIN_EMAIL"].lower()
+    return platform_role(u) == "super_admin"
 
 
 def workspace_id(user: dict) -> str:
@@ -175,7 +187,7 @@ async def user_from_token(token: str) -> Optional[dict]:
     except jwt.InvalidTokenError:
         return None
     u = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
-    if not u or not token_is_fresh(p, u):
+    if not u or u.get("disabled") or not token_is_fresh(p, u):
         return None
     u["role"] = role_for(u)
     return u
@@ -215,10 +227,32 @@ async def require_admin(u: dict = Depends(current_user)) -> dict:
 
 
 async def require_platform_admin(u: dict = Depends(current_user)) -> dict:
-    """Platform operator (ADMIN_EMAIL): global tariffs, rate limits, trial config, cross-workspace views."""
+    """Platform super admin: global tariffs, rate limits, trial config, staff & user management."""
     if not is_platform_admin(u):
         raise HTTPException(403, "Platform admin access required")
     return u
+
+
+def require_platform_roles(*roles: str):
+    """Dependency factory: any of the given platform roles (role is always read from the DB record, never from the JWT)."""
+    async def dep(u: dict = Depends(current_user)) -> dict:
+        if platform_role(u) not in roles:
+            raise HTTPException(403, "Akses staf platform diperlukan")
+        u["platform_role"] = platform_role(u)
+        return u
+    return dep
+
+
+require_platform_staff = require_platform_roles(*PLATFORM_ROLES)
+
+
+async def issue_reset_link(email: str, base_url: str) -> str:
+    """Create a 1-hour password-reset token for `email` and return the link (caller sends/returns it)."""
+    raw = secrets.token_urlsafe(32)
+    await db.email_tokens.delete_many({"purpose": "reset", "email": email})
+    await db.email_tokens.insert_one({"purpose": "reset", "email": email, "token_hash": token_hash(raw), "created_at": now_iso(),
+                                      "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=RESET_TTL_MIN)).isoformat()})
+    return f"{base_url}/reset-password?token={raw}"
 
 
 # ---------- routes ----------
@@ -303,9 +337,12 @@ async def login(x: LoginIn, request: Request):
     u = await db.users.find_one({"email": email})
     if not u or not pw_ok(x.password, u["password_hash"]):
         raise HTTPException(401, "Incorrect email or password")
+    if u.get("disabled"):
+        raise HTTPException(403, "Akun ini dinonaktifkan. Hubungi dukungan Oryntix.")
     if not u.get("verified", True):
         raise HTTPException(403, {"code": "unverified", "message": "Email belum diverifikasi. Cek kotak masuk Anda atau kirim ulang tautan verifikasi."})
     u["role"] = role_for(u)
+    await db.users.update_one({"id": u["id"]}, {"$set": {"last_login_at": now_iso()}})
     return {"access_token": make_token(u["id"], u["role"]), "user": public_user(u)}
 
 
@@ -326,12 +363,8 @@ async def forgot_password(x: EmailIn, request: Request):
         raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi dalam 5 menit.")
     u = await db.users.find_one({"email": email}, {"_id": 0})
     out = {"ok": True, "mail_sent": True}
-    if u:
-        raw = secrets.token_urlsafe(32)
-        await db.email_tokens.delete_many({"purpose": "reset", "email": email})
-        await db.email_tokens.insert_one({"purpose": "reset", "email": email, "token_hash": token_hash(raw), "created_at": now_iso(),
-                                          "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=RESET_TTL_MIN)).isoformat()})
-        link = f"{app_url(request, x.app_url)}/reset-password?token={raw}"
+    if u and not u.get("disabled"):
+        link = await issue_reset_link(email, app_url(request, x.app_url))
         subject, html, text = reset_email(u.get("name") or "", link)
         out["mail_sent"] = await send_email(email, subject, html, text)
         if debug_links(request):
@@ -424,7 +457,7 @@ async def seed_admin():
         uid = new_id()
         await db.users.insert_one({
             "id": uid, "email": email, "password_hash": pw_hash(os.environ["ADMIN_PASSWORD"]),
-            "name": "Oryntix Admin", "role": "admin", "owner_id": uid, "onboarded": True, "verified": True,
+            "name": "Oryntix Admin", "role": "admin", "owner_id": uid, "onboarded": True, "verified": True, "platform_role": "super_admin",
             "credits": 100000,
             "settings": {"app_language": "en", "conversation_language": "en", "timezone": "Asia/Jakarta", "theme": "dark"},
             "created_at": now_iso(),

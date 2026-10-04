@@ -74,8 +74,10 @@ def _kws(q: str) -> list:
     return [w.strip("?.,!:;\"'()").lower() for w in (q or "").split() if len(w.strip("?.,!:;\"'()")) > 2 and w.lower() not in STOP][:8]
 
 
-async def search_archives(u: dict, q: str, limit: int = 10, before: Optional[str] = None) -> list:
+async def search_archives(u: dict, q: str, limit: int = 10, before: Optional[str] = None, conversation_id: Optional[str] = None) -> list:
     base = {"user_id": u["id"]}
+    if conversation_id:
+        base["conversation_id"] = conversation_id
     if before:
         base["created_at"] = {"$lt": before}
     kws = _kws(q)
@@ -93,8 +95,9 @@ async def search_archives(u: dict, q: str, limit: int = 10, before: Optional[str
 
 
 @router.get("/archives")
-async def list_archives(q: Optional[str] = None, before: Optional[str] = None, limit: int = Query(20, ge=1, le=50), u: dict = Depends(current_user)):
-    items = await search_archives(u, q or "", limit + 1, before)
+async def list_archives(q: Optional[str] = None, before: Optional[str] = None, conversation_id: Optional[str] = None, limit: int = Query(20, ge=1, le=50), u: dict = Depends(current_user)):
+    """Newest archives first; `before` = created_at cursor for older pages; `conversation_id` limits to one chat (in-chat archive list)."""
+    items = await search_archives(u, q or "", limit + 1, before, conversation_id)
     has_more = len(items) > limit
     items = items[:limit]
     return {"items": items, "has_more": has_more, "next_before": items[-1]["created_at"] if items and has_more else None}
