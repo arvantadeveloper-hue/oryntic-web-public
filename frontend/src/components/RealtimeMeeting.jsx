@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap, Gavel, VolumeX, Volume2 } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap, Gavel, VolumeX, Volume2, MonitorUp, MonitorOff, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { RealtimeSession, runVoiceTool } from "../lib/realtimeSession";
-import { PeerMesh, createMixer } from "../lib/peerAudio";
+import { PeerMesh, createMixer, captureFrame } from "../lib/peerAudio";
 import { PresentationPanel } from "./PresentationPanel";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
@@ -59,6 +59,47 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     return total;
   }; // peerId -> true (local-only mute; host also stops feeding them to the assistant)
   const presenceRef = useRef(null);
+  const sessionIdRef = useRef(null); // friend-call session id (presence) → links data + assistant costs in the Credits report
+  // screen share: my display (sent P2P to friends) or a friend's; the assistant only ever gets single snapshots on request
+  const [screen, setScreen] = useState(null); // {kind:"local"|"remote", stream, name, peerId}
+  const screenRef = useRef(null);
+  const videoRef = useRef(null);
+  const [snaps, setSnaps] = useState({ n: 0, credits: 0, busy: false });
+  const [visionRate, setVisionRate] = useState(null);
+  const snapshotItemRef = useRef(null); // image item id awaiting the assistant's answer (deleted afterwards to stop paying for it)
+  useEffect(() => { screenRef.current = screen; if (videoRef.current) videoRef.current.srcObject = screen?.stream || null; }, [screen]);
+  useEffect(() => { api.get("/realtime/vision-rate").then((r) => setVisionRate(r.data.credits)).catch(() => {}); }, []);
+  const stopShare = () => {
+    const s = screenRef.current; if (s?.kind !== "local") return;
+    s.stream.getTracks().forEach((t) => { try { t.stop(); } catch (e) {} });
+    meshRef.current?.stopScreen(); setScreen(null);
+  };
+  const startShare = async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) { toast.error("Peramban ini tidak mendukung bagikan layar"); return; }
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 10, max: 15 }, width: { max: 1920 } }, audio: false });
+      stream.getVideoTracks()[0].onended = stopShare;
+      setScreen({ kind: "local", stream, name: user?.name || "Anda" });
+      meshRef.current?.shareScreen(stream);
+    } catch (e) { if (e?.name !== "NotAllowedError") toast.error("Gagal membagikan layar"); }
+  };
+  const showToAssistant = async () => {
+    const m = mod(); if (!m || !screenRef.current || snaps.busy) return;
+    const img = captureFrame(videoRef.current);
+    if (!img) { toast.error("Layar belum siap ditangkap"); return; }
+    setSnaps((s) => ({ ...s, busy: true }));
+    try {
+      const r = await api.post(`/realtime/calls/${m.callId}/snapshot`);
+      const itemId = `img_${Date.now().toString(36)}`; snapshotItemRef.current = itemId;
+      m.send({ type: "conversation.item.create", item: { id: itemId, type: "message", role: "user", content: [
+        { type: "input_image", image_url: img, detail: "low" },
+        { type: "input_text", text: `[${user?.name || "User"} shows you a snapshot of the shared screen (${screenRef.current.kind === "local" ? "their own" : `${screenRef.current.name}'s`} screen). Look at it and comment briefly in 2-4 spoken sentences on what is relevant; ask if they want details.]` }] } });
+      if (activeRef.current) userInterrupted();
+      enqueue(m, "The user just showed you a screenshot of the shared screen. Describe what matters on it briefly and respond to it.");
+      startNext();
+      setSnaps((s) => ({ n: s.n + 1, credits: s.credits + (r.data.credits || 0), busy: false }));
+    } catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengirim cuplikan"); setSnaps((s) => ({ ...s, busy: false })); }
+  };
   const mutedPeersRef = useRef({});
   useEffect(() => { mutedPeersRef.current = mutedPeers; }, [mutedPeers]);
   const togglePeerMute = (pid) => {
@@ -252,6 +293,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         break;
       }
       case "response.done":
+        if (snapshotItemRef.current && s === mod()) { s.send({ type: "conversation.item.delete", item_id: snapshotItemRef.current }); snapshotItemRef.current = null; }
         if (liveRef.current[s.callId]) { const t = liveRef.current[s.callId]; liveRef.current[s.callId] = ""; saidRef.current[s.callId] = t; saveTranscript(s.callId, "assistant", t); }
         // audio may still be playing; wait for the buffer to drain (fallback timer)
         if (activeRef.current === s.callId) { if (doneTimerRef.current) clearTimeout(doneTimerRef.current); doneTimerRef.current = setTimeout(() => finishedSpeaking(s.callId), 15000); }
@@ -272,12 +314,12 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     let created = [];
     try {
       if (humans.length > 0) {
-        try { const pres = await api.post(`/conversations/${cid}/call/presence`, { bytes_delta: 0 }); setCallHost(pres.data); runAIRef.current = !!pres.data.is_host && hasAI; setRunAI(runAIRef.current); } catch (e) {}
+        try { const pres = await api.post(`/conversations/${cid}/call/presence`, { bytes_delta: 0 }); setCallHost(pres.data); sessionIdRef.current = pres.data.call_session_id || null; runAIRef.current = !!pres.data.is_host && hasAI; setRunAI(runAIRef.current); } catch (e) {}
       }
       let runAI = runAIRef.current;
       if (runAI) {
         try {
-          const c = await api.post("/realtime/calls", { conversation_id: cid });
+          const c = await api.post("/realtime/calls", { conversation_id: cid, call_session_id: sessionIdRef.current });
           created = c.data.sessions;
           if (stale()) { created.forEach((x) => api.post(`/realtime/calls/${x.call_id}/end`, { elapsed_seconds: 0 }).catch(() => {})); return; }
           setCpmTotal(c.data.credits_per_min_total); setModId(c.data.moderator_persona_id);
@@ -300,6 +342,11 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         const mesh = new PeerMesh({
           cid, myId: user?.id, localStream: runAI ? outMix.stream : stream, // friends hear me (+ the assistant when I host it)
           onPeers: setPeers,
+          onRemoteVideo: (pid, vs, name) => {
+            const cur = screenRef.current;
+            if (vs) { if (cur?.kind === "local") stopShare(); setScreen({ kind: "remote", stream: vs, name: name || "Teman", peerId: pid }); }
+            else if (cur?.kind === "remote" && cur.peerId === pid) setScreen(null);
+          },
           onRemoteStream: (pid, rs) => {
             const m = mixRef.current; if (!m) return;
             const old = m.audioEls[pid];
@@ -346,6 +393,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     if (userTimerRef.current) clearTimeout(userTimerRef.current);
     if (bargeTimerRef.current) clearTimeout(bargeTimerRef.current);
     sessionsRef.current.forEach((s) => s.close());
+    stopShare();
     try { meshRef.current?.close(); } catch (e) {}
     if (presenceRef.current) { clearInterval(presenceRef.current); presenceRef.current = null; api.post(`/conversations/${cid}/call/leave`).catch(() => {}); }
     window.__oryntixInCall = false;
@@ -402,12 +450,21 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait, isMod: m.id === modId }))];
 
   const participants = tiles.map((tl) => ({ ...tl, status: statusMap[tl.id] || "", level: tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0) }));
+  const rail = !!conv.task_id || !!screen;
   const stage = (
     <>
       <p className="px-6 text-center text-xs text-white/60" data-testid="rtm-phase">{phase === "connecting" && <Loader2 size={12} className="mr-1 inline animate-spin" />}{label}</p>
-      <div className={`flex flex-1 overflow-hidden px-4 pb-2 sm:px-6 ${conv.task_id ? "gap-4" : "items-center overflow-y-auto"}`}>
-        {conv.task_id && <PresentationPanel taskId={conv.task_id} refreshKey={taskTick} />}
-        <div className={conv.task_id ? "flex w-56 shrink-0 flex-col gap-3 overflow-y-auto" : "mx-auto grid w-full max-w-6xl gap-4"} style={conv.task_id ? {} : { gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
+      <div className={`flex flex-1 overflow-hidden px-4 pb-2 sm:px-6 ${rail ? "gap-4" : "items-center overflow-y-auto"}`}>
+        {screen && (
+          <div className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black" data-testid="rtm-screen">
+            <video ref={videoRef} autoPlay muted playsInline className="max-h-full max-w-full object-contain" />
+            <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur" data-testid="rtm-screen-label"><MonitorUp size={12} className="text-emerald-300" /> Layar {screen.kind === "local" ? "Anda" : screen.name}</span>
+            {runAI && <button onClick={showToAssistant} disabled={snaps.busy || phase === "connecting"} data-testid="rtm-show-assistant" title="Kirim satu cuplikan layar ke asisten (ditagih per cuplikan)" className="absolute bottom-3 right-3 flex items-center gap-2 rounded-full bg-[#2F6BFF] px-4 py-2 text-xs font-bold text-white shadow-lg transition hover:brightness-110 disabled:opacity-60">
+              {snaps.busy ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />} Tunjukkan ke asisten{visionRate ? ` · ${visionRate} kredit` : ""}</button>}
+          </div>
+        )}
+        {conv.task_id && !screen && <PresentationPanel taskId={conv.task_id} refreshKey={taskTick} />}
+        <div className={rail ? "flex w-56 shrink-0 flex-col gap-3 overflow-y-auto" : "mx-auto grid w-full max-w-6xl gap-4"} style={rail ? {} : { gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
           {tiles.map((tl) => (
             <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={tl.isHuman ? (tl.online ? (tl.state === "connected" ? "terhubung" : "menyambung…") : "belum bergabung") : (statusMap[tl.id] || "")} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} dim={tl.isHuman && !!mutedPeers[tl.id]}
               extra={tl.isHuman ? <button onClick={() => togglePeerMute(tl.id)} data-testid={`peer-mute-${tl.id}`} title={mutedPeers[tl.id] ? "Bunyikan kembali" : "Bisukan hanya untuk saya"} className={`pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full ${mutedPeers[tl.id] ? "bg-[#EF4444] text-white" : "bg-white/15 text-white/80 hover:bg-white/30"}`}>{mutedPeers[tl.id] ? <VolumeX size={13} /> : <Volume2 size={13} />}</button> : null} />
@@ -429,6 +486,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
       <button onClick={toggleMute} data-testid="rtm-mute" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
       <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
       <LayoutMenu layout={layout} onChange={setLayout} />
+      <button onClick={screen?.kind === "local" ? stopShare : startShare} disabled={phase === "connecting" || phase === "ending" || screen?.kind === "remote"} data-testid="rtm-share-screen" title={screen?.kind === "local" ? "Berhenti membagikan layar" : screen?.kind === "remote" ? `${screen.name} sedang membagikan layar` : "Bagikan layar ke teman (P2P, tanpa biaya asisten)"} className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition disabled:opacity-50 ${screen?.kind === "local" ? "bg-emerald-500" : "bg-white/15 hover:bg-white/25"}`}>{screen?.kind === "local" ? <MonitorOff size={22} /> : <MonitorUp size={22} />}</button>
       <button onClick={() => setShowCaption((s) => !s)} data-testid="rtm-captions" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}><Captions size={22} /></button>
       {layout !== "chat" && <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />}
       <button onClick={() => hangupAll(true)} disabled={phase === "ending"} data-testid="rtm-end-save" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-5 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-60">
@@ -442,7 +500,8 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     <div className="fixed inset-0 z-[96] flex flex-col" style={{ background: "radial-gradient(1200px 500px at 50% -10%, #16213e 0%, #0a0f1f 60%)" }} data-testid="realtime-meeting">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 text-white sm:px-6">
         <span className="flex h-9 items-center gap-2 rounded-full bg-white/10 px-3 text-sm font-semibold backdrop-blur"><span className={`h-2 w-2 rounded-full ${phase === "connecting" ? "bg-amber-400 animate-pulse" : "bg-emerald-400"}`} /> {conv.title}</span>
-        {humans.length > 0 && callHost && <span className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3 text-xs font-semibold text-white/80 backdrop-blur" data-testid="rtm-bandwidth" title="Biaya data panggilan $0,75/GB ditanggung host (pemulai panggilan)">{callHost.is_host ? `Host · ${bw.mb.toFixed(1)} MB · ${bw.credits} kredit` : "Gratis · host membayar data"}</span>}
+        {humans.length > 0 && callHost && <span className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3 text-xs font-semibold text-white/80 backdrop-blur" data-testid="rtm-bandwidth" title="Biaya data panggilan (tarif per GB dari platform) ditanggung host (pemulai panggilan)">{callHost.is_host ? `Host · ${bw.mb.toFixed(1)} MB · ${bw.credits} kredit` : "Gratis · host membayar data"}</span>}
+        {snaps.n > 0 && <span className="flex h-9 items-center gap-1.5 rounded-full bg-[#2F6BFF]/25 px-3 text-xs font-semibold text-[#BFD3FF] backdrop-blur" data-testid="rtm-snapshots" title="Cuplikan layar yang ditunjukkan ke asisten"><Camera size={12} /> {snaps.n} cuplikan · {snaps.credits} kredit</span>}
         {humans.length > 0 && <span className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3 text-xs font-semibold text-white/80 backdrop-blur" data-testid="rtm-humans" title={turn === false ? "Tanpa server TURN (hanya STUN) — di jaringan ketat suara teman bisa gagal tersambung" : "WebRTC + TURN aktif"}>{peers.filter((p) => p.state === "connected").length}/{humans.length} teman terhubung{runAI ? " · asisten via host" : hasAI ? " · asisten dijalankan host" : ""}</span>}
         <span className="flex items-center gap-1 rounded-full bg-[#2F6BFF]/20 px-2.5 py-1 text-[11px] font-bold text-[#8FB0FF]" data-testid="rtm-badge"><Zap size={11} /> Realtime · {members.length} agen</span>
         <label className="flex h-9 items-center gap-1.5 rounded-full bg-amber-400/15 px-3 text-xs font-semibold text-amber-200" data-testid="rtm-moderator-picker">

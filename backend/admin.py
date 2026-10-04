@@ -1,10 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from db import db
 from auth import require_admin, require_platform_admin, workspace_id, public_user, member_ids
 from wallet import get_packages
 from llm import GPT_MODEL, IMAGE_MODEL, user_today_usage
-from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES
+from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES, DEFAULT_PRICING, FEATURES, feature_table, build_packages
+
+
+class PackageTierIn(BaseModel):
+    id: str = Field(min_length=1, max_length=32, pattern=r"^[a-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=40)
+    usd: float = Field(gt=0, le=100000)
+    discount_pct: float = Field(default=0, ge=0, le=100)
+    best_value: bool = False
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -118,6 +126,29 @@ class PlatformPricingIn(BaseModel):
     rt_text_out_usd_1m: float = Field(default=16.0, ge=0)
     rt_cached_in_usd_1m: float = Field(default=0.4, ge=0)
     video_usd_per_sec: float = Field(default=0.062, ge=0)
+    vision_usd: float = Field(default=0.006, ge=0)
+    bandwidth_usd_per_gb: float = Field(default=0.5, ge=0)
+    margin_overrides: dict[str, float] = Field(default_factory=lambda: {"call_bandwidth": 50.0})
+    package_margin_pct: float = Field(default=15.0, ge=0, le=500)
+    package_round_idr: int = Field(default=1000, ge=1, le=1_000_000)
+    packages: list[PackageTierIn] = Field(default_factory=lambda: [PackageTierIn(**t) for t in DEFAULT_PRICING["packages"]], min_length=1, max_length=12)
+
+    @field_validator("margin_overrides")
+    @classmethod
+    def _known_features(cls, v: dict) -> dict:
+        bad = [k for k in v if k not in FEATURES]
+        if bad:
+            raise ValueError(f"Fitur tidak dikenal: {', '.join(bad)}")
+        if any(not (0 <= float(x) <= 500) for x in v.values()):
+            raise ValueError("Margin harus 0–500%")
+        return {k: float(x) for k, x in v.items()}
+
+    @field_validator("packages")
+    @classmethod
+    def _unique_ids(cls, v: list) -> list:
+        if len({t.id for t in v}) != len(v):
+            raise ValueError("ID paket harus unik")
+        return v
 
 
 class TrialIn(BaseModel):
@@ -133,6 +164,7 @@ async def pricing(_: dict = Depends(require_platform_admin)):
         "packages": await get_packages(),
         "pricing": p,
         "rates": compute_rates(p),
+        "features": feature_table(p),
         "trial": await get_trial(),
         "providers": [
             {"provider": "OpenAI", "model": GPT_MODEL, "capability": "text", "unit": "1k chars", "rate_credits_per_1k_chars": RATES["text_per_1k"], "status": "active"},
@@ -142,7 +174,7 @@ async def pricing(_: dict = Depends(require_platform_admin)):
         "tariff": {
             "profile_generation_credits": RATES["profile"], "image_generation_credits": RATES["image"],
             "text_credits_per_1k_chars": RATES["text_per_1k"],
-            "method": "biaya provider × (1 + margin) × (1 + PPN) × kurs ÷ nilai kredit",
+            "method": "biaya provider × (1 + margin[fitur] atau margin global) × (1 + PPN) ÷ nilai kredit (USD); paket: USD × (1 + margin paket − diskon) × (1 + PPN) × kurs",
         },
     }
 
@@ -150,7 +182,14 @@ async def pricing(_: dict = Depends(require_platform_admin)):
 @router.put("/pricing")
 async def put_pricing(x: PlatformPricingIn, _: dict = Depends(require_platform_admin)):
     p = await set_pricing(x.model_dump())
-    return {"pricing": p, "rates": compute_rates(p)}
+    return {"pricing": p, "rates": compute_rates(p), "features": feature_table(p), "packages": build_packages(p)}
+
+
+@router.post("/pricing/preview")
+async def preview_pricing(x: PlatformPricingIn, _: dict = Depends(require_platform_admin)):
+    """What-if calculation for the admin platform: nothing is saved."""
+    p = {**DEFAULT_PRICING, **x.model_dump()}
+    return {"rates": compute_rates(p), "features": feature_table(p), "packages": build_packages(p)}
 
 
 @router.put("/trial")

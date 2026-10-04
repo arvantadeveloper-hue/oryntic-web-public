@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import current_user
-from db import db, now_iso
+from db import db, now_iso, new_id
 
 router = APIRouter(prefix="/api", tags=["rtc"])
 STUN_ONLY = [{"urls": "stun:stun.l.google.com:19302"}, {"urls": "stun:stun1.l.google.com:19302"}]
@@ -48,9 +48,6 @@ async def badges(u: dict = Depends(current_user)):
 CALL_TTL_SEC = 120
 
 
-USD_PER_GB = 0.75  # friend-call bandwidth tariff (margin included)
-
-
 class PresenceIn(BaseModel):
     bytes_delta: int = Field(default=0, ge=0, le=50_000_000_000)
 
@@ -58,32 +55,35 @@ class PresenceIn(BaseModel):
 @router.post("/conversations/{cid}/call/presence")
 async def call_presence(cid: str, x: PresenceIn = PresenceIn(), u: dict = Depends(current_user)):
     """Heartbeat (every ~30s) while in the call room. The first person in becomes the call host and pays the
-    WebRTC bandwidth ($0.75/GB → credits) reported by their browser; others ring and may join for free."""
+    WebRTC bandwidth (provider $/GB + margin from the platform tariff → credits) reported by their browser; others join for free."""
     from chat import _can_access
     from datetime import datetime, timezone, timedelta
     from llm import record_usage
-    from pricing import get_pricing
+    from pricing import get_pricing, compute_rates
     conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
     if not conv or not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=CALL_TTL_SEC)).isoformat()
     live = {k: v for k, v in (conv.get("active_call") or {}).items() if (v.get("at") or "") > cutoff}
     host = conv.get("call_host") if conv.get("call_host") in live else None
+    session_id = conv.get("call_session_id") if live else None
     if not host:
         host = u["id"]
-    upd = {f"active_call.{u['id']}": {"name": u.get("name") or "Peserta", "at": now_iso()}, "call_host": host}
+    if not session_id:
+        session_id = new_id()
+    upd = {f"active_call.{u['id']}": {"name": u.get("name") or "Peserta", "at": now_iso()}, "call_host": host, "call_session_id": session_id}
     charged = 0
     if host == u["id"] and x.bytes_delta:
         p = await get_pricing()
         pending = float(conv.get("call_pending_mb") or 0) + x.bytes_delta / 1e6
-        per_mb = USD_PER_GB / 1024 / max(float(p.get("usd_per_credit") or 0.001), 1e-6)
+        per_mb = compute_rates(p)["bandwidth_per_mb"]
         charged = int(pending * per_mb)
         if charged:
-            await record_usage(u["id"], "call_bandwidth", charged, {"conversation_id": cid, "mb": round(pending, 2)})
+            await record_usage(u["id"], "call_bandwidth", charged, {"conversation_id": cid, "call_session_id": session_id, "mb": round(charged / per_mb, 2)})
             pending -= charged / per_mb
         upd["call_pending_mb"] = pending
     await db.conversations.update_one({"id": cid}, {"$set": upd})
-    return {"ok": True, "host": host, "is_host": host == u["id"], "charged": charged}
+    return {"ok": True, "host": host, "is_host": host == u["id"], "charged": charged, "call_session_id": session_id}
 
 
 @router.post("/conversations/{cid}/call/leave")

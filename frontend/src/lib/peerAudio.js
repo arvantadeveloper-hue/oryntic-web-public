@@ -1,13 +1,14 @@
 import { api, WS_BASE, getToken } from "./api";
 
-// Human ↔ human audio: WebRTC mesh signaled over the conversation WebSocket (server relays {type:"rtc"} frames).
-// ICE servers come from GET /api/rtc/ice-servers (Metered TURN when configured, STUN otherwise).
+// Human ↔ human audio (+ optional screen-share video): WebRTC mesh signaled over the conversation WebSocket
+// (server relays {type:"rtc"} frames). ICE servers come from GET /api/rtc/ice-servers (Metered TURN when configured).
 export class PeerMesh {
-  constructor({ cid, myId, localStream, onPeers, onRemoteStream, onStatus }) {
+  constructor({ cid, myId, localStream, onPeers, onRemoteStream, onRemoteVideo, onStatus }) {
     this.cid = cid; this.myId = myId; this.localStream = localStream;
-    this.onPeers = onPeers || (() => {}); this.onRemoteStream = onRemoteStream || (() => {}); this.onStatus = onStatus || (() => {});
-    this.peers = {}; // id -> { pc, name, stream, state }
+    this.onPeers = onPeers || (() => {}); this.onRemoteStream = onRemoteStream || (() => {}); this.onRemoteVideo = onRemoteVideo || (() => {}); this.onStatus = onStatus || (() => {});
+    this.peers = {}; // id -> { pc, name, stream, state, screenSender }
     this.ws = null; this.ice = [{ urls: "stun:stun.l.google.com:19302" }]; this.closed = false; this.turn = false;
+    this.screenStream = null;
   }
 
   async start() {
@@ -26,37 +27,76 @@ export class PeerMesh {
   _peer(id, name) {
     if (this.peers[id]) { if (name) this.peers[id].name = name; return this.peers[id]; }
     const pc = new RTCPeerConnection({ iceServers: this.ice });
-    const p = { pc, name: name || "Peserta", stream: null, state: "connecting" }; this.peers[id] = p;
+    const p = { pc, name: name || "Peserta", stream: null, state: "connecting", screenSender: null }; this.peers[id] = p;
     this.localStream?.getAudioTracks().forEach((t) => pc.addTrack(t, this.localStream));
+    if (this.screenStream) this.screenStream.getVideoTracks().forEach((t) => { p.screenSender = pc.addTrack(t, this.screenStream); });
     pc.onicecandidate = (e) => { if (e.candidate) this._send({ kind: "ice", to: id, candidate: e.candidate }); };
-    pc.ontrack = (e) => { p.stream = e.streams[0]; this.onRemoteStream(id, e.streams[0], p.name); };
+    pc.ontrack = (e) => {
+      if (e.track.kind === "video") {
+        const vs = e.streams[0] || new MediaStream([e.track]);
+        this.onRemoteVideo(id, vs, p.name);
+        e.track.onended = () => this.onRemoteVideo(id, null, p.name);
+        return;
+      }
+      p.stream = e.streams[0]; this.onRemoteStream(id, e.streams[0], p.name);
+    };
     pc.onconnectionstatechange = () => { p.state = pc.connectionState; this._emit(); if (["failed", "closed"].includes(pc.connectionState)) this._drop(id); };
     this._emit();
     return p;
   }
 
+  async _offer(id) {
+    const p = this.peers[id]; if (!p) return;
+    const offer = await p.pc.createOffer(); await p.pc.setLocalDescription(offer);
+    this._send({ kind: "offer", to: id, sdp: p.pc.localDescription });
+  }
+
   async _handle(m) {
     if (m.to && m.to !== this.myId) return;
     if (m.kind === "join") { // newcomer: existing participants send the offer
-      const p = this._peer(m.from, m.from_name);
-      const offer = await p.pc.createOffer(); await p.pc.setLocalDescription(offer);
-      this._send({ kind: "offer", to: m.from, sdp: p.pc.localDescription });
+      this._peer(m.from, m.from_name); await this._offer(m.from);
+      if (this.screenStream) this._send({ kind: "screen", to: m.from, on: true });
     } else if (m.kind === "offer") {
       const p = this._peer(m.from, m.from_name);
-      await p.pc.setRemoteDescription(m.sdp);
+      if (p.pc.signalingState !== "stable") { // glare: the "polite" side (bigger id) rolls back, the other ignores the incoming offer
+        if (!(this.myId > m.from)) return;
+        await Promise.all([p.pc.setLocalDescription({ type: "rollback" }), p.pc.setRemoteDescription(m.sdp)]);
+      } else await p.pc.setRemoteDescription(m.sdp);
       const ans = await p.pc.createAnswer(); await p.pc.setLocalDescription(ans);
       this._send({ kind: "answer", to: m.from, sdp: p.pc.localDescription });
     } else if (m.kind === "answer") {
-      const p = this.peers[m.from]; if (p) await p.pc.setRemoteDescription(m.sdp);
+      const p = this.peers[m.from]; if (p && p.pc.signalingState === "have-local-offer") await p.pc.setRemoteDescription(m.sdp);
     } else if (m.kind === "ice") {
       const p = this.peers[m.from]; if (p && m.candidate) { try { await p.pc.addIceCandidate(m.candidate); } catch (e) {} }
+    } else if (m.kind === "screen") {
+      if (!m.on) this.onRemoteVideo(m.from, null, this.peers[m.from]?.name || m.from_name);
     } else if (m.kind === "leave") { this._drop(m.from); }
   }
 
-  _drop(id) { const p = this.peers[id]; if (!p) return; try { p.pc.close(); } catch (e) {} delete this.peers[id]; this.onRemoteStream(id, null, p.name); this._emit(); }
+  _drop(id) { const p = this.peers[id]; if (!p) return; try { p.pc.close(); } catch (e) {} delete this.peers[id]; this.onRemoteStream(id, null, p.name); this.onRemoteVideo(id, null, p.name); this._emit(); }
 
   replaceLocalTrack(track) {
     Object.values(this.peers).forEach((p) => p.pc.getSenders().filter((s) => s.track?.kind === "audio").forEach((s) => s.replaceTrack(track)));
+  }
+
+  // Screen share: add the video track to every peer connection and renegotiate (P2P, no server cost beyond TURN relay).
+  async shareScreen(stream) {
+    this.screenStream = stream;
+    const track = stream.getVideoTracks()[0]; if (!track) return;
+    this._send({ kind: "screen", on: true });
+    for (const [id, p] of Object.entries(this.peers)) {
+      try { p.screenSender = p.pc.addTrack(track, stream); await this._offer(id); } catch (e) {}
+    }
+  }
+
+  async stopScreen() {
+    if (!this.screenStream) return;
+    this.screenStream = null;
+    this._send({ kind: "screen", on: false });
+    for (const [id, p] of Object.entries(this.peers)) {
+      if (!p.screenSender) continue;
+      try { p.pc.removeTrack(p.screenSender); p.screenSender = null; await this._offer(id); } catch (e) {}
+    }
   }
 
   close() {
@@ -75,4 +115,14 @@ export function createMixer(ac) {
     remove(stream) { const n = nodes.get(stream); if (n) { try { n.disconnect(); } catch (e) {} nodes.delete(stream); } },
     close() { nodes.forEach((n) => { try { n.disconnect(); } catch (e) {} }); nodes.clear(); },
   };
+}
+
+// Grabs one JPEG frame (≤ maxW wide) from a playing <video> — the only thing the assistant ever "sees" of a shared screen.
+export function captureFrame(videoEl, maxW = 1280, quality = 0.7) {
+  const vw = videoEl?.videoWidth || 0, vh = videoEl?.videoHeight || 0;
+  if (!vw || !vh) return null;
+  const scale = Math.min(1, maxW / vw);
+  const c = document.createElement("canvas"); c.width = Math.round(vw * scale); c.height = Math.round(vh * scale);
+  c.getContext("2d").drawImage(videoEl, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", quality);
 }

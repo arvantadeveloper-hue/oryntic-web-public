@@ -63,11 +63,43 @@ def _chunks(text: str) -> list:
 
 
 class KnowledgeIn(BaseModel):
-    title: str = Field(min_length=1, max_length=160)
+    title: str = Field(default="", max_length=160)
     html: Optional[str] = Field(default=None, max_length=400_000)
     text: Optional[str] = Field(default=None, max_length=MAX_CHARS)
     file_name: Optional[str] = None
     file_data: Optional[str] = None  # base64
+    url: Optional[str] = Field(default=None, max_length=2000)
+
+
+async def _fetch_url(url: str) -> tuple:
+    """Download a public web page and keep only its main text (trafilatura) → (title, text)."""
+    import httpx
+    import trafilatura
+    if not re.match(r"^https?://", url or "", flags=re.I):
+        raise HTTPException(400, "Tautan harus diawali http:// atau https://")
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", "Accept-Language": "id,en;q=0.8"}) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(400, f"Situs menolak permintaan (HTTP {exc.response.status_code})") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(400, "Tautan tidak dapat diakses") from exc
+    ctype = (r.headers.get("content-type") or "").lower()
+    if len(r.content) > MAX_BYTES:
+        raise HTTPException(400, "Halaman lebih dari 8 MB")
+    if "html" in ctype or not ctype:
+        html = r.text
+        text = trafilatura.extract(html, include_comments=False, include_tables=True, favor_recall=True) or _html_to_text(html)
+        m = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.I | re.S)
+        title = _html_to_text(m.group(1)).strip()[:160] if m else ""
+        return title, text
+    if ctype.startswith("text/") or "json" in ctype or "markdown" in ctype:
+        return "", r.text
+    if "pdf" in ctype:
+        from pypdf import PdfReader
+        return "", "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(r.content)).pages)
+    raise HTTPException(400, "Tautan bukan halaman web/teks/PDF")
 
 
 async def _persona_of(pid: str, u: dict) -> dict:
@@ -91,18 +123,40 @@ async def list_knowledge(pid: str, u: dict = Depends(current_user)):
 async def add_knowledge(pid: str, x: KnowledgeIn, u: dict = Depends(current_user)):
     """Reference knowledge for an assistant (upload or editor). Never 'priority': only the few chunks relevant to a message are injected."""
     p = await _persona_of(pid, u)
-    if x.file_data:
+    url, page_title = None, ""
+    if x.url:
+        url = x.url.strip()
+        page_title, text = await _fetch_url(url)
+        source, html = "url", None
+    elif x.file_data:
         text, source, html = _extract(x.file_name or "", x.file_data), "upload", None
     elif x.html:
         text, source, html = _html_to_text(x.html), "editor", x.html
     else:
         text, source, html = x.text or "", "editor", None
+    title = x.title.strip() or page_title or (x.file_name or "").strip() or (url or "")[:160]
+    if not title:
+        raise HTTPException(400, "Isi judul dokumen")
     if len(text.strip()) < 20:
         raise HTTPException(400, "Isi dokumen terlalu pendek atau tidak terbaca")
-    doc = {"id": new_id(), "user_id": p["user_id"], "persona_id": pid, "title": x.title.strip(), "source": source, "file_name": x.file_name, "html": html,
+    doc = {"id": new_id(), "user_id": p["user_id"], "persona_id": pid, "title": title, "source": source, "file_name": x.file_name, "url": url, "html": html,
            "chars": len(text), "chunks": _chunks(text), "enabled": True, "created_at": now_iso(), "updated_at": now_iso()}
     await db.knowledge_docs.insert_one(dict(doc))
     return _pub(doc)
+
+
+@router.post("/personas/{pid}/knowledge/{kid}/refresh")
+async def refresh_knowledge(pid: str, kid: str, u: dict = Depends(current_user)):
+    """Re-download a URL-sourced document so the assistant sees the latest page content."""
+    await _persona_of(pid, u)
+    d = await db.knowledge_docs.find_one({"id": kid, "persona_id": pid}, {"_id": 0, "url": 1})
+    if not d or not d.get("url"):
+        raise HTTPException(404, "Dokumen dari tautan tidak ditemukan")
+    _, text = await _fetch_url(d["url"])
+    if len(text.strip()) < 20:
+        raise HTTPException(400, "Isi halaman terlalu pendek atau tidak terbaca")
+    r = await db.knowledge_docs.find_one_and_update({"id": kid}, {"$set": {"chars": len(text), "chunks": _chunks(text), "updated_at": now_iso()}}, projection={"_id": 0}, return_document=True)
+    return _pub(r)
 
 
 class KnowledgeUpdate(BaseModel):

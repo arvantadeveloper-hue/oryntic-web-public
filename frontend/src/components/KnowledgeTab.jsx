@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { BookOpen, Upload, Bold, Italic, List, Heading2, Trash2, Loader2, FileText, PenLine, Eye } from "lucide-react";
+import { BookOpen, Upload, Bold, Italic, List, Heading2, Trash2, Loader2, FileText, PenLine, Eye, Link2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 
@@ -34,6 +34,19 @@ export function KnowledgeTab({ personaId }) {
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal menyimpan"); } finally { setBusy(false); }
   };
   const cmd = (c, v) => { edRef.current?.focus(); document.execCommand(c, false, v); };
+  const [url, setUrl] = useState("");
+  const [refreshing, setRefreshing] = useState(null);
+  const saveUrl = async () => {
+    if (!/^https?:\/\//i.test(url.trim())) { toast.error("Tempel tautan lengkap (https://…)"); return; }
+    setBusy(true);
+    try { const r = await api.post(`/personas/${personaId}/knowledge`, { title: title.trim(), url: url.trim() }); toast.success(`"${r.data.title}" diambil (${r.data.chunk_count} bagian)`); setTitle(""); setUrl(""); load(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengambil tautan"); } finally { setBusy(false); }
+  };
+  const refreshUrl = async (d) => {
+    setRefreshing(d.id);
+    try { const r = await api.post(`/personas/${personaId}/knowledge/${d.id}/refresh`); toast.success(`"${r.data.title}" diperbarui (${r.data.chunk_count} bagian)`); load(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Gagal menyegarkan"); } finally { setRefreshing(null); }
+  };
   const toggle = async (d) => { await api.put(`/personas/${personaId}/knowledge/${d.id}`, { enabled: !d.enabled }); load(); };
   const remove = async (d) => { if (!window.confirm(`Hapus "${d.title}"?`)) return; await api.delete(`/personas/${personaId}/knowledge/${d.id}`); load(); };
   const openPreview = async (d) => { try { setPreview((await api.get(`/personas/${personaId}/knowledge/${d.id}`)).data); } catch (e) {} };
@@ -45,9 +58,15 @@ export function KnowledgeTab({ personaId }) {
       <div className="mt-4 flex gap-2">
         <button onClick={() => setMode("upload")} data-testid="kn-mode-upload" className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold ${mode === "upload" ? "btn-grad" : "border border-[#E7ECF3] text-slate-600"}`}><Upload size={13} /> Unggah dokumen</button>
         <button onClick={() => setMode("editor")} data-testid="kn-mode-editor" className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold ${mode === "editor" ? "btn-grad" : "border border-[#E7ECF3] text-slate-600"}`}><PenLine size={13} /> Tulis sendiri</button>
+        <button onClick={() => setMode("url")} data-testid="kn-mode-url" className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold ${mode === "url" ? "btn-grad" : "border border-[#E7ECF3] text-slate-600"}`}><Link2 size={13} /> Dari tautan</button>
       </div>
-      <input className="input-dark mt-3 py-2.5" placeholder={mode === "upload" ? "Judul (opsional, default nama berkas)" : "Judul dokumen"} value={title} onChange={(e) => setTitle(e.target.value)} data-testid="kn-title" />
-      {mode === "upload" ? (
+      <input className="input-dark mt-3 py-2.5" placeholder={mode === "editor" ? "Judul dokumen" : mode === "url" ? "Judul (opsional, default judul halaman)" : "Judul (opsional, default nama berkas)"} value={title} onChange={(e) => setTitle(e.target.value)} data-testid="kn-title" />
+      {mode === "url" ? (
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <input className="input-dark flex-1 py-2.5" placeholder="https://contoh.com/artikel" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveUrl()} data-testid="kn-url-input" />
+          <button onClick={saveUrl} disabled={busy} className="btn-grad rounded-xl px-5 py-2.5 text-sm disabled:opacity-50" data-testid="kn-save-url">{busy ? <Loader2 size={14} className="inline animate-spin" /> : "Ambil & simpan"}</button>
+        </div>
+      ) : mode === "upload" ? (
         <label className="mt-3 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#E7ECF3] p-6 text-center hover:bg-slate-50" data-testid="kn-dropzone">
           {busy ? <Loader2 size={22} className="animate-spin text-[#2F6BFF]" /> : <Upload size={22} className="text-[#2F6BFF]" />}
           <span className="mt-2 text-sm font-semibold text-slate-700">Pilih berkas PDF, Word, TXT, atau Markdown</span>
@@ -73,8 +92,9 @@ export function KnowledgeTab({ personaId }) {
         {docs?.length === 0 && <p className="text-sm text-slate-400" data-testid="kn-empty">Belum ada dokumen pengetahuan.</p>}
         {(docs || []).map((d) => (
           <div key={d.id} className={`flex items-center gap-3 rounded-2xl border border-[#E7ECF3] bg-white p-3 ${d.enabled ? "" : "opacity-60"}`} data-testid={`kn-doc-${d.id}`}>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#EEF3FF] text-[#2F6BFF]">{d.source === "upload" ? <FileText size={16} /> : <BookOpen size={16} />}</span>
-            <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-900">{d.title}</span><span className="block text-[11px] text-slate-400">{d.source === "upload" ? d.file_name : "editor"} · {d.chars.toLocaleString("id-ID")} karakter · {d.chunk_count} bagian</span></span>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#EEF3FF] text-[#2F6BFF]">{d.source === "upload" ? <FileText size={16} /> : d.source === "url" ? <Link2 size={16} /> : <BookOpen size={16} />}</span>
+            <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-900">{d.title}</span><span className="block truncate text-[11px] text-slate-400">{d.source === "upload" ? d.file_name : d.source === "url" ? d.url : "editor"} · {d.chars.toLocaleString("id-ID")} karakter · {d.chunk_count} bagian</span></span>
+            {d.source === "url" && <button onClick={() => refreshUrl(d)} disabled={refreshing === d.id} className="text-slate-400 hover:text-[#2F6BFF] disabled:opacity-50" title="Ambil ulang dari tautan" data-testid="kn-refresh"><RefreshCw size={15} className={refreshing === d.id ? "animate-spin" : ""} /></button>}
             <button onClick={() => openPreview(d)} className="text-slate-400 hover:text-[#2F6BFF]" title="Lihat" data-testid="kn-view"><Eye size={15} /></button>
             <button onClick={() => toggle(d)} className="text-xs font-semibold text-[#2F6BFF]" data-testid="kn-toggle">{d.enabled ? "Nonaktif" : "Aktif"}</button>
             <button onClick={() => remove(d)} className="text-slate-300 hover:text-[#EF4444]" data-testid="kn-delete"><Trash2 size={15} /></button>

@@ -176,6 +176,7 @@ async def _voice_context(cid: str) -> str:
 class CallIn(BaseModel):
     conversation_id: str
     opening: Optional[str] = Field(default=None, max_length=1500)  # e.g. reminder the assistant must deliver first
+    call_session_id: Optional[str] = Field(default=None, max_length=64)  # friend-call session (from /call/presence) for the cost report
 
 
 async def _call_personas(conv: dict, u: dict) -> list:
@@ -253,6 +254,7 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
     for i, persona in enumerate(personas):
         role = "solo" if not multi else ("moderator" if i == 0 else "panelist")
         call = {"id": new_id(), "group_id": group_id, "conversation_id": conv["id"], "user_id": u["id"], "persona_id": persona["id"],
+                "persona_name": persona["name"], "call_session_id": x.call_session_id or group_id,
                 "voice": VOICE_MAP.get(persona.get("voice", "alloy"), "marin"), "role": role, "roster": roster,
                 "instructions": await _session_instructions(persona, u, roster, history, x.opening, role, conv.get("title", ""), panel),
                 "multi": multi, "primary": i == 0, "status": "created", "billed_minutes": 0, "credits": 0, "credits_per_min": cpm,
@@ -372,7 +374,7 @@ async def report_usage(call_id: str, x: UsageIn, u: dict = Depends(current_user)
     call = await _own_call(call_id, u)
     p = await get_pricing()
     usd = realtime_usage_usd(p, x.usage or {})
-    exact = usd_to_credits(p, usd)
+    exact = usd_to_credits(p, usd, "realtime_call")
     acc = float(call.get("usage_credits_exact") or 0) + exact
     charged = int(acc) - int(call.get("usage_credits_billed") or 0)
     if charged > 0:
@@ -380,6 +382,26 @@ async def report_usage(call_id: str, x: UsageIn, u: dict = Depends(current_user)
     await db.realtime_calls.update_one({"id": call["id"]}, {"$set": {"usage_credits_exact": acc, "usage_credits_billed": int(acc)},
                                                             "$inc": {"credits": charged, "usage_usd": usd}})
     return {"charged_now": charged, "credits_total": int(call.get("credits") or 0) + charged, "usd": round(usd, 6)}
+
+
+@router.get("/realtime/vision-rate")
+async def vision_rate(u: dict = Depends(current_user)):
+    return {"credits": compute_rates(await get_pricing())["vision"]}
+
+
+@router.post("/realtime/calls/{call_id}/snapshot")
+async def snapshot(call_id: str, u: dict = Depends(current_user)):
+    """Bill ONE screen snapshot shown to the assistant (the image itself goes browser → OpenAI directly; nothing is uploaded here)."""
+    call = await _own_call(call_id, u)
+    if call["status"] == "ended":
+        raise HTTPException(400, "Call already ended")
+    over = await quota_exceeded(u)
+    if over:
+        raise HTTPException(402, quota_message(over))
+    credits = compute_rates(await get_pricing())["vision"]
+    await record_usage(u["id"], "screen_snapshot", credits, {"call_id": call["id"], "conversation_id": call["conversation_id"], "call_session_id": call.get("call_session_id") or call.get("group_id")})
+    await db.realtime_calls.update_one({"id": call["id"]}, {"$inc": {"snapshots": 1, "snapshot_credits": credits}})
+    return {"credits": credits, "snapshots": int(call.get("snapshots") or 0) + 1}
 
 
 async def _bill(call: dict, elapsed: int, u: dict) -> dict:
