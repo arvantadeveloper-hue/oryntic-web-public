@@ -49,7 +49,7 @@ CALL_TTL_SEC = 120
 
 
 class PresenceIn(BaseModel):
-    bytes_delta: int = Field(default=0, ge=0, le=50_000_000_000)
+    bytes_delta: int = Field(default=0, ge=0, le=250_000_000)  # ≤250 MB per 30s heartbeat (~66 Mbps) — anything above is clamped by validation
 
 
 @router.post("/conversations/{cid}/call/presence")

@@ -13,8 +13,14 @@ def configured() -> bool:
     return bool(os.environ.get("SMTP_HOST") and os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASSWORD"))
 
 
-def debug_links() -> bool:
-    return os.environ.get("EMAIL_DEBUG_LINKS", "").lower() == "true"
+def debug_links(request=None) -> bool:
+    """Debug links (raw tokens in API responses) are ONLY ever shown on preview/local hosts, even if the flag leaks into production."""
+    if os.environ.get("EMAIL_DEBUG_LINKS", "").lower() != "true":
+        return False
+    if request is None:
+        return False
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip().split(":")[0].lower()
+    return host.endswith(".preview.emergentagent.com") or host in ("localhost", "127.0.0.1")
 
 
 async def send_email(to: str, subject: str, html: str, text: str) -> bool:

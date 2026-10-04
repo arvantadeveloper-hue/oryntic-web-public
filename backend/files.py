@@ -1,11 +1,10 @@
 import asyncio
 from typing import Optional
 
-import jwt
 from fastapi import APIRouter, HTTPException, Header, Query
 from fastapi.responses import Response
 
-from auth import JWT_SECRET, JWT_ISSUER
+from auth import user_from_token
 from storage import get_object
 from db import db
 
@@ -18,13 +17,11 @@ async def _same_workspace(uid: str, owner_uid: str) -> bool:
     return len(ws) == 2 and ws[uid] == ws[owner_uid]
 
 
-def _verify(token: str) -> str:
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], issuer=JWT_ISSUER,
-                             options={"require": ["sub", "exp", "iat", "iss"]})
-        return payload["sub"]
-    except jwt.InvalidTokenError as exc:
-        raise HTTPException(401, "Invalid or expired token") from exc
+async def _verify(token: str) -> str:
+    u = await user_from_token(token)
+    if not u:
+        raise HTTPException(401, "Invalid or expired token")
+    return u["id"]
 
 
 def _bearer(authorization: Optional[str], auth: Optional[str]) -> str:
@@ -45,7 +42,7 @@ def _path_parts(path: str) -> list:
 
 @router.get("/{path:path}")
 async def serve_file(path: str, authorization: Optional[str] = Header(None), auth: Optional[str] = Query(None), download: int = Query(0)):
-    uid = _verify(_bearer(authorization, auth))
+    uid = await _verify(_bearer(authorization, auth))
     parts = _path_parts(path)
     if parts[2] != uid and not await _same_workspace(uid, parts[2]):
         raise HTTPException(403, "Forbidden")

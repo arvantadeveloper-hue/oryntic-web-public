@@ -71,34 +71,76 @@ class KnowledgeIn(BaseModel):
     url: Optional[str] = Field(default=None, max_length=2000)
 
 
+def _host_is_public(host: str) -> bool:
+    """Resolve the host and refuse loopback/private/link-local/metadata/reserved addresses (SSRF guard)."""
+    import ipaddress
+    import socket
+    host = (host or "").strip("[]").lower()
+    if not host or host == "localhost" or host.endswith((".local", ".internal", ".localhost")):
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified or (ip.version == 6 and ip.ipv4_mapped and not _host_is_public(str(ip.ipv4_mapped))):
+            return False
+    return True
+
+
+def _check_url(url: str) -> None:
+    from urllib.parse import urlsplit
+    s = urlsplit(url)
+    if s.scheme not in ("http", "https") or not s.hostname:
+        raise HTTPException(400, "Tautan harus diawali http:// atau https://")
+    if s.port not in (None, 80, 443) or s.username or s.password:
+        raise HTTPException(400, "Tautan dengan port khusus atau kredensial tidak diizinkan")
+    if not _host_is_public(s.hostname):
+        raise HTTPException(400, "Tautan ke jaringan internal/privat tidak diizinkan")
+
+
 async def _fetch_url(url: str) -> tuple:
-    """Download a public web page and keep only its main text (trafilatura) → (title, text)."""
+    """Download a public web page and keep only its main text (trafilatura) → (title, text). Every hop is SSRF-checked, body capped at 8 MB."""
     import httpx
     import trafilatura
-    if not re.match(r"^https?://", url or "", flags=re.I):
-        raise HTTPException(400, "Tautan harus diawali http:// atau https://")
+    import asyncio
+    await asyncio.to_thread(_check_url, url)
     try:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", "Accept-Language": "id,en;q=0.8"}) as client:
-            r = await client.get(url)
-            r.raise_for_status()
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", "Accept-Language": "id,en;q=0.8"}) as client:
+            for _ in range(5):
+                async with client.stream("GET", url) as r:
+                    if r.is_redirect and r.headers.get("location"):
+                        url = str(r.url.join(r.headers["location"]))
+                        await asyncio.to_thread(_check_url, url)
+                        continue
+                    r.raise_for_status()
+                    ctype = (r.headers.get("content-type") or "").lower()
+                    body = bytearray()
+                    async for chunk in r.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > MAX_BYTES:
+                            raise HTTPException(400, "Halaman lebih dari 8 MB")
+                    content = bytes(body)
+                    break
+            else:
+                raise HTTPException(400, "Terlalu banyak pengalihan")
     except httpx.HTTPStatusError as exc:
         raise HTTPException(400, f"Situs menolak permintaan (HTTP {exc.response.status_code})") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(400, "Tautan tidak dapat diakses") from exc
-    ctype = (r.headers.get("content-type") or "").lower()
-    if len(r.content) > MAX_BYTES:
-        raise HTTPException(400, "Halaman lebih dari 8 MB")
+    text_body = content.decode(r.encoding or "utf-8", "ignore")
     if "html" in ctype or not ctype:
-        html = r.text
+        html = text_body
         text = trafilatura.extract(html, include_comments=False, include_tables=True, favor_recall=True) or _html_to_text(html)
         m = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.I | re.S)
         title = _html_to_text(m.group(1)).strip()[:160] if m else ""
         return title, text
     if ctype.startswith("text/") or "json" in ctype or "markdown" in ctype:
-        return "", r.text
+        return "", text_body
     if "pdf" in ctype:
         from pypdf import PdfReader
-        return "", "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(r.content)).pages)
+        return "", "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(content)).pages)
     raise HTTPException(400, "Tautan bukan halaman web/teks/PDF")
 
 

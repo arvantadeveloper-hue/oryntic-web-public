@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from db import db, now_iso, new_id
 from auth import current_user, require_platform_admin, workspace_id
@@ -367,6 +367,27 @@ class TickIn(BaseModel):
 class UsageIn(BaseModel):
     usage: dict  # OpenAI `response.done` → response.usage
 
+    @field_validator("usage")
+    @classmethod
+    def _sane(cls, v: dict) -> dict:
+        def walk(d):
+            for k, x in (d or {}).items():
+                if isinstance(x, dict):
+                    walk(x)
+                elif isinstance(x, (int, float)) and not (0 <= x <= 5_000_000):
+                    raise ValueError(f"usage.{k} di luar batas")
+        walk(v)
+        return v
+
+
+def _server_elapsed(call: dict, client_elapsed: int) -> int:
+    """Billable seconds come from the server clock (started_at), never from the client-reported value alone."""
+    st = call.get("started_at")
+    if not st:
+        return client_elapsed
+    srv = int((datetime.now(timezone.utc) - datetime.fromisoformat(st)).total_seconds())
+    return max(0, max(srv, client_elapsed))
+
 
 @router.post("/realtime/calls/{call_id}/usage")
 async def report_usage(call_id: str, x: UsageIn, u: dict = Depends(current_user)):
@@ -421,9 +442,10 @@ async def tick(call_id: str, x: TickIn, u: dict = Depends(current_user)):
     call = await _own_call(call_id, u)
     if call["status"] == "ended":
         raise HTTPException(400, "Call already ended")
-    out = await _bill(call, x.elapsed_seconds, u)
+    elapsed = _server_elapsed(call, x.elapsed_seconds)
+    out = await _bill(call, elapsed, u)
     lim = await get_limits()
-    if x.elapsed_seconds >= lim["max_call_minutes"] * 60:
+    if elapsed >= lim["max_call_minutes"] * 60:
         await db.realtime_calls.update_one({"id": call_id}, {"$set": {"status": "ended", "ended_at": now_iso(), "reason": "max_duration"}})
         raise HTTPException(402, f"Durasi maksimal panggilan ({lim['max_call_minutes']} menit) tercapai")
     over = await quota_exceeded(u)
@@ -438,6 +460,7 @@ async def end_call(call_id: str, x: TickIn, u: dict = Depends(current_user)):
     call = await _own_call(call_id, u)
     if call["status"] == "ended":
         return {"ok": True, "credits_total": call.get("credits", 0), "seconds": call.get("seconds", 0)}
-    out = await _bill(call, x.elapsed_seconds, u)
+    elapsed = _server_elapsed(call, x.elapsed_seconds)
+    out = await _bill(call, elapsed, u)
     await db.realtime_calls.update_one({"id": call_id}, {"$set": {"status": "ended", "ended_at": now_iso()}})
-    return {"ok": True, **out, "seconds": x.elapsed_seconds}
+    return {"ok": True, **out, "seconds": elapsed}

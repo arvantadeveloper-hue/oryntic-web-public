@@ -109,14 +109,14 @@ def token_hash(raw: str) -> str:
     return sha256(raw.encode()).hexdigest()
 
 
-async def issue_verification(user: dict, base_url: str) -> dict:
+async def issue_verification(user: dict, base_url: str, request: Optional[Request] = None) -> dict:
     raw = secrets.token_urlsafe(32)
     await db.email_tokens.delete_many({"purpose": "verify", "email": user["email"]})
     await db.email_tokens.insert_one({"purpose": "verify", "email": user["email"], "token_hash": token_hash(raw), "created_at": now_iso()})
     link = f"{base_url}/verify-email?token={raw}"
     subject, html, text = verification_email(user.get("name") or "", link)
     sent = await send_email(user["email"], subject, html, text)
-    return {"mail_sent": sent, **({"debug_link": link} if debug_links() else {})}
+    return {"mail_sent": sent, **({"debug_link": link} if debug_links(request) else {})}
 
 
 LANG_NAMES = {"id": "Bahasa Indonesia", "en": "English", "es": "Spanish", "fr": "French",
@@ -152,25 +152,42 @@ class OnboardIn(BaseModel):
 
 
 # ---------- dependency ----------
+def decode_token(token: str) -> dict:
+    return jwt.decode(token, JWT_SECRET, algorithms=["HS256"], issuer=JWT_ISSUER, options={"require": ["sub", "exp", "iat", "iss"]})
+
+
+def token_is_fresh(payload: dict, u: dict) -> bool:
+    """Tokens issued before the last password change/reset are rejected (hijacked sessions die with the old password)."""
+    changed = u.get("password_changed_at")
+    if not changed:
+        return True
+    try:
+        return float(payload.get("iat") or 0) >= datetime.fromisoformat(changed).timestamp() - 1
+    except (TypeError, ValueError):
+        return True
+
+
+async def user_from_token(token: str) -> Optional[dict]:
+    """Decode + load the user; None when the token is invalid, expired, unknown, or predates a password change."""
+    try:
+        p = decode_token(token)
+    except jwt.InvalidTokenError:
+        return None
+    u = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
+    if not u or not token_is_fresh(p, u):
+        return None
+    u["role"] = role_for(u)
+    return u
+
+
 async def current_user(
     creds: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer)]
 ) -> dict:
     if not creds:
         raise HTTPException(401, "Not authenticated")
-    try:
-        p = jwt.decode(
-            creds.credentials,
-            JWT_SECRET,
-            algorithms=["HS256"],
-            issuer=JWT_ISSUER,
-            options={"require": ["sub", "exp", "iat", "iss"]},
-        )
-    except jwt.InvalidTokenError:
-        raise HTTPException(401, "Invalid or expired token")
-    u = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
+    u = await user_from_token(creds.credentials)
     if not u:
-        raise HTTPException(401, "User not found")
-    u["role"] = role_for(u)
+        raise HTTPException(401, "Invalid or expired token")
     return u
 
 
@@ -212,7 +229,7 @@ async def register(x: RegisterIn, request: Request):
         raise HTTPException(409, "Email already registered")
     if existing:  # unverified leftover: refresh credentials and resend the link
         await db.users.update_one({"id": existing["id"]}, {"$set": {"password_hash": pw_hash(x.password), "name": x.name or existing.get("name")}})
-        out = await issue_verification({**existing, "name": x.name or existing.get("name")}, app_url(request, x.app_url))
+        out = await issue_verification({**existing, "name": x.name or existing.get("name")}, app_url(request, x.app_url), request)
         return {"pending_verification": True, "email": email, **out}
     trial = await get_trial()
     uid = new_id()
@@ -244,7 +261,7 @@ async def register(x: RegisterIn, request: Request):
         "id": new_id(), "user_id": uid, "type": "grant", "amount": int(trial["trial_credits"]),
         "balance_after": int(trial["trial_credits"]), "description": f"Paket percobaan {trial['trial_days']} hari", "created_at": now_iso(),
     })
-    out = await issue_verification(doc, app_url(request, x.app_url))
+    out = await issue_verification(doc, app_url(request, x.app_url), request)
     return {"pending_verification": True, "email": email, **out}
 
 
@@ -260,7 +277,7 @@ async def resend_verification(x: EmailIn, request: Request):
     if not login_allowed(ip, email):
         raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi dalam 5 menit.")
     u = await db.users.find_one({"email": email}, {"_id": 0})
-    out = await issue_verification(u, app_url(request, x.app_url)) if u and not u.get("verified", True) else {}
+    out = await issue_verification(u, app_url(request, x.app_url), request) if u and not u.get("verified", True) else {}
     return {"ok": True, **out}
 
 
@@ -317,7 +334,7 @@ async def forgot_password(x: EmailIn, request: Request):
         link = f"{app_url(request, x.app_url)}/reset-password?token={raw}"
         subject, html, text = reset_email(u.get("name") or "", link)
         out["mail_sent"] = await send_email(email, subject, html, text)
-        if debug_links():
+        if debug_links(request):
             out["debug_link"] = link
     return out
 
@@ -352,7 +369,7 @@ async def change_password(x: ChangePasswordIn, u: dict = Depends(current_user)):
     if x.current_password == x.new_password:
         raise HTTPException(400, "Password baru harus berbeda dari password lama")
     await db.users.update_one({"id": u["id"]}, {"$set": {"password_hash": pw_hash(x.new_password), "password_changed_at": now_iso()}})
-    return {"ok": True}
+    return {"ok": True, "access_token": make_token(u["id"], u["role"])}
 
 
 class SettingsIn(BaseModel):

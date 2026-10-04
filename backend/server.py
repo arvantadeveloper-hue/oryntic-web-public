@@ -2,13 +2,12 @@ import os
 import asyncio
 import logging
 
-import jwt
 import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from starlette.middleware.cors import CORSMiddleware
 
 from db import db, ensure_indexes
-from auth import router as auth_router, seed_admin, JWT_SECRET, JWT_ISSUER
+from auth import router as auth_router, seed_admin, user_from_token
 from personas import router as personas_router
 from chat import router as chat_router, _can_access, migrate_direct_chats
 from agents import router as agents_router
@@ -66,15 +65,12 @@ app.include_router(tools_router)
 
 @app.websocket("/api/ws/{cid}")
 async def ws_meeting(ws: WebSocket, cid: str, token: str = ""):
-    try:
-        p = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], issuer=JWT_ISSUER,
-                       options={"require": ["sub", "exp", "iat", "iss"]})
-    except Exception:
+    u = await user_from_token(token)
+    if not u:
         await ws.close(code=4401)
         return
-    u = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
     conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
-    if not u or not _can_access(conv, u):
+    if not _can_access(conv, u):
         await ws.close(code=4403)
         return
     await manager.connect(cid, ws)

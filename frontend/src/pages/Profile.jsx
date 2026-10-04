@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { User, Globe, Shield, Sparkles, KeyRound, Lock, Eye, EyeOff } from "lucide-react";
 import { NotulenFormatCard } from "../components/NotulenFormatCard";
 import { SmartRoutingToggle } from "../components/ModelRoutingCard";
-import { api } from "../lib/api";
+import { api, setAuthToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 
@@ -20,7 +20,7 @@ function ChangePasswordCard() {
     e.preventDefault();
     if (pw !== confirm) { toast.error("Ulangi password tidak sama"); return; }
     setBusy(true);
-    try { await api.post("/auth/change-password", { current_password: cur, new_password: pw }); toast.success("Password berhasil diubah"); setCur(""); setPw(""); setConfirm(""); }
+    try { const r = await api.post("/auth/change-password", { current_password: cur, new_password: pw }); if (r.data?.access_token) setAuthToken(r.data.access_token); toast.success("Password berhasil diubah"); setCur(""); setPw(""); setConfirm(""); }
     catch (err) { toast.error(err?.response?.data?.detail || "Gagal mengubah password"); } finally { setBusy(false); }
   };
   return (

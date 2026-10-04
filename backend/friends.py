@@ -64,7 +64,7 @@ async def invite(x: InviteIn, request: Request, u: dict = Depends(current_user))
         await db.friend_email_invites.update_one({"inviter_id": u["id"], "email": email}, {"$set": {"status": "pending", "updated_at": now_iso()}, "$setOnInsert": {"id": new_id(), "created_at": now_iso()}}, upsert=True)
         subject, html, text = friend_invite_email(u.get("name") or u["email"], f"{base}/?friend_from={u['id']}")
         sent = await send_email(email, subject, html, text)
-        return {"status": "emailed", "mail_sent": sent, **({"debug_link": f"{base}/"} if debug_links() else {})}
+        return {"status": "emailed", "mail_sent": sent, **({"debug_link": f"{base}/"} if debug_links(request) else {})}
     if target["id"] == u["id"]:
         raise HTTPException(400, "Itu akun Anda sendiri")
     existing = await db.friends.find_one({"$or": [{"requester_id": u["id"], "addressee_id": target["id"]}, {"requester_id": target["id"], "addressee_id": u["id"]}]}, {"_id": 0})
