@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap, Gavel } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap, Gavel, VolumeX, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { RealtimeSession, runVoiceTool } from "../lib/realtimeSession";
@@ -45,6 +45,18 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const mixRef = useRef(null); // { ac, inMix, outMix, audioEls: {} }
   const [peers, setPeers] = useState([]);
   const [turn, setTurn] = useState(null);
+  const [mutedPeers, setMutedPeers] = useState({}); // peerId -> true (local-only mute; host also stops feeding them to the assistant)
+  const presenceRef = useRef(null);
+  const mutedPeersRef = useRef({});
+  useEffect(() => { mutedPeersRef.current = mutedPeers; }, [mutedPeers]);
+  const togglePeerMute = (pid) => {
+    setMutedPeers((m) => {
+      const next = { ...m, [pid]: !m[pid] };
+      const mx = mixRef.current; const el = mx?.audioEls[pid];
+      if (el) { el.muted = !!next[pid]; if (runAI && el.srcObject) { if (next[pid]) mx.inMix.remove(el.srcObject); else mx.inMix.add(el.srcObject); } }
+      return next;
+    });
+  };
   const pipeRef = useRef(null);
   const bargeTimerRef = useRef(null);
   const startedAtRef = useRef(null);
@@ -271,12 +283,15 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
             const m = mixRef.current; if (!m) return;
             const old = m.audioEls[pid];
             if (old) { try { if (old.srcObject) m.inMix.remove(old.srcObject); old.srcObject = null; old.remove(); } catch (e) {} delete m.audioEls[pid]; }
-            if (rs) { const el = document.createElement("audio"); el.autoplay = true; el.srcObject = rs; document.body.appendChild(el); m.audioEls[pid] = el; if (runAI) m.inMix.add(rs); }
+            if (rs) { const el = document.createElement("audio"); el.autoplay = true; el.srcObject = rs; el.muted = !!mutedPeersRef.current[pid]; document.body.appendChild(el); m.audioEls[pid] = el; if (runAI && !mutedPeersRef.current[pid]) m.inMix.add(rs); }
           },
         });
         meshRef.current = mesh;
         await mesh.start(); setTurn(mesh.turn);
         if (stale()) { mesh.close(); return; }
+        window.__oryntixInCall = true;
+        const beat = () => api.post(`/conversations/${cid}/call/presence`).catch(() => {});
+        beat(); presenceRef.current = setInterval(beat, 30000);
       }
       if (!runAI) { startedAtRef.current = Date.now(); listening(); return; }
       const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, role: x.role, stream: aiInput, sendAudio: x.role !== "panelist", sensitivity: micPrefs.sensitivity, createResponse: false, onEvent: handleEvent, onError: () => { if (!endedRef.current) toast.message("Koneksi salah satu peserta terputus"); },
@@ -308,6 +323,8 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     if (bargeTimerRef.current) clearTimeout(bargeTimerRef.current);
     sessionsRef.current.forEach((s) => s.close());
     try { meshRef.current?.close(); } catch (e) {}
+    if (presenceRef.current) { clearInterval(presenceRef.current); presenceRef.current = null; api.post(`/conversations/${cid}/call/leave`).catch(() => {}); }
+    window.__oryntixInCall = false;
     try { const m = mixRef.current; if (m) { Object.values(m.audioEls).forEach((el) => { el.srcObject = null; el.remove(); }); m.inMix.close(); m.outMix.close(); m.ac.close(); mixRef.current = null; } } catch (e) {}
     try { pipeRef.current?.stop(); } catch (e) {}
   };
@@ -368,7 +385,8 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         {conv.task_id && <PresentationPanel taskId={conv.task_id} refreshKey={taskTick} />}
         <div className={conv.task_id ? "flex w-56 shrink-0 flex-col gap-3 overflow-y-auto" : "mx-auto grid w-full max-w-6xl gap-4"} style={conv.task_id ? {} : { gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${tiles.length <= 2 ? 360 : tiles.length <= 4 ? 280 : 220}px), 1fr))` }}>
           {tiles.map((tl) => (
-            <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={tl.isHuman ? (tl.online ? (tl.state === "connected" ? "terhubung" : "menyambung…") : "belum bergabung") : (statusMap[tl.id] || "")} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} />
+            <Tile key={tl.id} name={tl.name} portrait={tl.portrait} status={tl.isHuman ? (tl.online ? (tl.state === "connected" ? "terhubung" : "menyambung…") : "belum bergabung") : (statusMap[tl.id] || "")} isMe={tl.isMe} isMod={tl.isMod} micLevel={tl.isMe ? (statusMap[ME] === "speaking" ? 0.5 : 0) : (levels[tl.id] || 0)} dim={tl.isHuman && !!mutedPeers[tl.id]}
+              extra={tl.isHuman ? <button onClick={() => togglePeerMute(tl.id)} data-testid={`peer-mute-${tl.id}`} title={mutedPeers[tl.id] ? "Bunyikan kembali" : "Bisukan hanya untuk saya"} className={`pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full ${mutedPeers[tl.id] ? "bg-[#EF4444] text-white" : "bg-white/15 text-white/80 hover:bg-white/30"}`}>{mutedPeers[tl.id] ? <VolumeX size={13} /> : <Volume2 size={13} />}</button> : null} />
           ))}
         </div>
       </div>

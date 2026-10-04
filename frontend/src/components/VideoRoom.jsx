@@ -35,7 +35,7 @@ function Waveform({ active, color = "#10B981" }) {
   );
 }
 
-export function Tile({ name, portrait, status, isMe, isMod, micLevel = 0, reaction }) {
+export function Tile({ name, portrait, status, isMe, isMod, micLevel = 0, reaction, extra, dim = false }) {
   const speaking = status === "speaking";
   const thinking = status === "thinking";
   return (
@@ -57,7 +57,9 @@ export function Tile({ name, portrait, status, isMe, isMod, micLevel = 0, reacti
         </span>
         {speaking && <Waveform active color={isMod ? "#FBBF24" : "#10B981"} />}
         {thinking && <Loader2 size={14} className="animate-spin text-amber-300" />}
+        {extra}
       </div>
+      {dim && <div className="pointer-events-none absolute inset-0 bg-black/50" />}
       {speaking && <span className="absolute left-3 top-3 flex items-center gap-1 rounded-full bg-emerald-500/90 px-2 py-0.5 text-[10px] font-bold text-white"><Radio size={10} /> BICARA</span>}
       {reaction && <span key={reaction.k} className="vr-reaction pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 text-4xl drop-shadow-lg" data-testid="vr-reaction">{reaction.e}</span>}
     </div>

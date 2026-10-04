@@ -42,3 +42,39 @@ async def badges(u: dict = Depends(current_user)):
         if (c.get("updated_at") or "") > ((c.get("read_at") or {}).get(u["id"]) or ""):
             unread += 1
     return {"friend_requests": friend_requests, "unread_chats": unread, "at": now_iso()}
+
+
+CALL_TTL_SEC = 120
+
+
+@router.post("/conversations/{cid}/call/presence")
+async def call_presence(cid: str, u: dict = Depends(current_user)):
+    """Heartbeat (every ~30s) while the user is inside the call room → other participants get an incoming-call ring."""
+    from chat import _can_access
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not conv or not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    await db.conversations.update_one({"id": cid}, {"$set": {f"active_call.{u['id']}": {"name": u.get("name") or "Peserta", "at": now_iso()}}})
+    return {"ok": True}
+
+
+@router.post("/conversations/{cid}/call/leave")
+async def call_leave(cid: str, u: dict = Depends(current_user)):
+    await db.conversations.update_one({"id": cid}, {"$unset": {f"active_call.{u['id']}": ""}})
+    return {"ok": True}
+
+
+@router.get("/calls/incoming")
+async def incoming_calls(u: dict = Depends(current_user)):
+    """Group/DM calls that other humans are currently in (fresh heartbeat) and I have not joined."""
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=CALL_TTL_SEC)).isoformat()
+    out = []
+    async for c in db.conversations.find({"participants": u["id"], "active_call": {"$exists": True, "$ne": {}}, "archived_conv": {"$ne": True}},
+                                         {"_id": 0, "id": 1, "title": 1, "titles": 1, "type": 1, "members": 1, "active_call": 1, "persona_ids": 1}):
+        live = {uid: p for uid, p in (c.get("active_call") or {}).items() if (p.get("at") or "") > cutoff}
+        if not live or u["id"] in live:
+            continue
+        out.append({"conversation_id": c["id"], "title": (c.get("titles") or {}).get(u["id"]) or c.get("title"), "type": c.get("type"),
+                    "callers": [p["name"] for p in live.values()], "assistants": [m["name"] for m in c.get("members") or []], "started_at": min(p["at"] for p in live.values())})
+    return out

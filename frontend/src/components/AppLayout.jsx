@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { useI18n } from "../i18n";
 import { IncomingCall } from "./IncomingCall";
+import { FriendCallRing } from "./FriendCallRing";
 import { TaskNotifier } from "./TaskChatTools";
 
 export function AppLayout() {
@@ -135,6 +136,7 @@ export function AppLayout() {
       </div>
 
       <IncomingCall />
+      <FriendCallRing />
       <TaskNotifier />
     </div>
   );
