@@ -1,0 +1,30 @@
+{
+  "summary": "Iter 29 — Metered TURN + friend-call ring + per-peer mute. Backend 6/6 PASS (test_iter29.py). Frontend end-to-end 2-browser-context flow PASS: Metered TURN credentials returned (turn:true, valid turn: URL w/ username+credential), demo's call presence shows up as 'Demo memulai panggilan' incoming for budi, demo's own /api/calls/incoming excludes self, FriendCallRing banner appears on budi's /home within <20s, friend-call-accept navigates budi to /chat/<dmId> and auto-opens RealtimeMeeting, both clients show rtm-humans '1/1 teman terhubung' within ~1s, peer-mute-<budiId> button toggles bg-[#EF4444] on/off and tile dims, rtm-leave on budi drops demo's count to 0/1, demo on his own call page shows NO self friend-call-ring, decline path dismisses the ring and it does NOT reappear during the next ≥12s while the caller stays in the room, final /api/calls/incoming is [] for both after leaving. /chat, /friends and badge-chat regression all OK.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter29.py",
+    "/app/test_reports/pytest/iter29.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "rtc.py ice_servers(): no server-side caching of the Metered TURN credentials — each ICE fetch calls the upstream https://<app>.metered.live/.../credentials endpoint. On a flaky or rate-limited TURN provider this will fail an entire call startup; consider caching for ~5–10 minutes (TURN creds TTL is typically hours). Also catch httpx.ReadTimeout explicitly if needed.",
+    "rtc.py call_presence(): doesn't require the user to actually be the caller — any participant can call /presence, which is correct by design, but there's no payload-size or rate limit, so a client bug could spam presence writes and keep the ring alive. Low risk.",
+    "rtc.py incoming_calls(): the ISO-string cutoff comparison assumes every active_call entry stores UTC isoformat the same way call_presence writes it. OK today since both use now_iso(); fragile if a future call site stores a different format.",
+    "FriendCallRing.jsx polls every 5s with no exponential backoff/jitter — fine for small deployments but every signed-in user hitting /calls/incoming every 5s will become notable at scale. Consider page-visibility pause and 15s when hidden.",
+    "FriendCallRing.jsx `startRing` creates an AudioContext but on strict browser autoplay policies the context may be in 'suspended' state until user gesture — the first ring will be silent. Consider calling ac.resume() in a user-gesture handler (e.g. first click anywhere) and attaching a visual cue regardless.",
+    "FriendCallRing.jsx: `dismissed` is in a useRef `Set` so it doesn't survive page reload. If a user hard-refreshes while a friend's call is still live, the previously-declined call will ring again. Minor UX.",
+    "RealtimeMeeting.jsx: presence heartbeat only fires when humans.length > 0 (correct), but the beat() call runs even if the mesh fails to start (no catch). If `mesh.start()` throws before `window.__oryntixInCall = true`, cleanup won't unset the presence. Would need an explicit /call/leave on connect() error path.",
+    "RealtimeMeeting.jsx togglePeerMute: setState closure also mutates DOM audio elements inside the updater — this is a side-effect in a setter which may run twice under React strict mode and could double-add/remove tracks. Low-risk because add()/remove() of the same MediaStream is idempotent for most mixer impls, but worth refactoring to a useEffect."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter29.py",
+    "/app/test_reports/iteration_29.json"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% of iter29 target flows"},
+  "test_credentials": "demo@aivora.ai / demo123456, budi@aivora.ai / budi123456 (DM id 5e6c2fc5-1f37-4c25-9932-2ca64929dfa8)",
+  "seed_data_creation": "No new seed data. Tests clean up by calling /call/leave for both users on the DM before and after. budi userId = 0a0e91ef-25fc-4900-b74e-dfe988a5b031; demo userId = fb1a64ce-ff1c-4376-b090-e90b286a5024.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Login throttle is 10/5min — if testing hits a 429, wait 3min or use API-login + localStorage.setItem('aivora_token', access_token) injection (that's what this iter did to avoid being blocked on parallel browser-context setup). ICE now returns Metered TURN (turn:true) when METERED_APP_NAME + METERED_CREDENTIAL_API_KEY are set in backend/.env. The DM 5e6c2fc5-… is between demo (owner) and budi; type='dm'. incoming title is 'Demo' from budi's perspective. FriendCallRing is mounted inside AppLayout and runs on every authenticated route (not /login or /register). RealtimeMeeting's presence heartbeat runs only when humans.length > 0 (i.e. a group/DM with another human); audio-only DMs do start it. peer-mute button data-testid is `peer-mute-<otherUserId>`; it toggles bg-[#EF4444]/white and dims the tile via the `dim` prop on <Tile>. Backend pytest: pytest backend/tests/test_iter29.py -n0 -v (uses REACT_APP_BACKEND_URL env). No code changes shipped this iteration — all tests pass against main agent's commit as-is."
+}

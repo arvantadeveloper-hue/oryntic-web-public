@@ -279,8 +279,13 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **Lencana sidebar** (`GET /api/notifications/badges` → `friend_requests`, `unread_chats`; `AppLayout` polling 20 dtk + event `oryntix:badges` + saat tab aktif). `_finish_stream` menyimpan `last_sender_id` & `read_at` pengirim → pesan sendiri tidak dihitung belum dibaca.
 - Fitur "teman mengundang asistennya sendiri" DIBATALKAN oleh user.
 
+## Update 2026-06 (ah) — TURN Metered aktif, dering panggilan teman, mute per peserta (iteration_29: BE 6/6, FE lulus)
+- **Metered TURN**: `backend/.env` kini punya `METERED_APP_NAME=oryntix` + `METERED_CREDENTIAL_API_KEY` → `GET /api/rtc/ice-servers` mengembalikan `turn:true` (5 server stun/turn metered.ca). **Produksi**: tambahkan kedua secret ini di Secrets saat deploy.
+- **Dering panggilan masuk** (`rtc.py`): `POST /conversations/{cid}/call/presence` (heartbeat 30 dtk dari ruang panggilan → `conversation.active_call.{uid}={name,at}`), `POST .../call/leave`, `GET /calls/incoming` (panggilan yang sedang diikuti manusia lain <120 dtk & belum saya ikuti). `FriendCallRing.jsx` (di AppLayout, poll 5 dtk): banner atas + nada dering WebAudio + getar, **Angkat** → `/chat/{cid}` state `openMeeting`, **Tolak** → diabaikan sampai panggilan itu berakhir. Tidak berdering untuk orang yang sudah di ruang (`window.__oryntixInCall`).
+- **Mute per peserta**: tombol `peer-mute-<uid>` di tile manusia (`Tile` prop `extra`, `dim`) → `audioEl.muted` lokal; bila host, stream teman itu juga dilepas dari mixer input asisten. Tidak memengaruhi peserta lain.
+
 ## Backlog batch berikut
-- Minta user: `METERED_APP_NAME` (nama app `.metered.live`) + `METERED_CREDENTIAL_API_KEY` → tambah ke `backend/.env` (dan secrets produksi) agar TURN aktif.
+- (kosong — menunggu permintaan user)
 - Produksi: set secret SMTP_* seperti preview; JANGAN set `EMAIL_DEBUG_LINKS=true` di produksi (tautan verifikasi/reset akan bocor di respons API).
 
 - Tugas terjadwal dari meeting/chat → Ruang Kerja (tawaran "bahas satu per satu / terima beres"), buat meeting dari Ruang Kerja, revisi hasil di meeting, unduh Word di Ruang Kerja, menu Kalender.
