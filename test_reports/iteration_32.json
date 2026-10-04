@@ -1,0 +1,40 @@
+{
+  "summary": "Iter32 - Oryntix Platform back-office + in-chat archives list. Backend: 28/28 pytest tests PASS covering /api/platform/me (admin 200 super_admin, demo 403, unauth 401), /api/platform/stats (full shape + days=7 => daily length 7), staff CRUD (create finance via POST + debug_link + reset-password + login; finance can GET pricing+me+stats but is 403 on PUT pricing, GET /platform/staff, POST adjust_credits; role up/down roundtrip; cannot_edit_self 400 for PUT/DELETE own id; revoke => target's /me returns 403; audit log contains staff.grant/role/revoke), users (list+fields, q=budi filter, pagination with next_before + no overlap, adjust +50/-50 roundtrip, disable=>budi login 403 + existing token 401 + enable restores login, disable_self 400), pricing (GET + PUT roundtrip, preview margin_overrides={text:10} => credits 9 vs default 10, nothing saved), archives (conversation_id scoped pagination 15 + has_more + older-than-cursor second page, no overlap, GET /conversations/{cid}/messages?limit=50 includes archives_count=39). Frontend: Super-admin UI (/platform) - login shell, sidebar (pnav-dashboard/pricing/packages/users/staff/trial all visible after fix), dashboard pstat-users/revenue/consumed/calls + pdash-daily chart, pdash-days-7 toggle works. Tarif & Margin: 9 pp-row-*, pp-override-text=10 => pp-credits-text changes 10->9, pricing-save becomes enabled, pricing-reset reverts to 10. Paket Kredit: 5 pkg-tier-*, pkg-usd-0=4 => pkg-price-0 = 'Rp 92.000', pkg-add adds tier (5->6), pkg-reset reverts (6->5). Pengguna: pu-search 'budi' filters to 2 rows, pu-credit-<id> opens pu-credit-dialog (cancelled). Staf & Peran: staff-table + staff-add-form + staff-audit render; add + role-change + revoke flow exercised via API. Trial & Batas: trial-card + rate-limits-card render. Finance role UI: sidebar shows only Dasbor/Tarif/Pengguna; pricing-readonly banner + pp-override-text disabled; no pu-credit-* button. demo@aivora.ai at /platform => platform-denied screen with Keluar button. Chat archives: /chat/<cid> shows archive-btn 'Arsip percakapan (39)', chat-archives-modal opens with 15 archive-card-* initially (scrollTop=969/1839, anchored to bottom), scrolling list to 0 loads older => 30 cards and scrollTop=1797 (anchored, >0), every card has archive-restore button and NO archive-open-chat present; archive-toggle 'Lihat isi' expands to render archived messages. No archives were actually restored.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/platform/users/{uid}/credits + GET /api/wallet", "issue": "Platform credit adjustments write credit_transactions with user_id=target.id, but /api/wallet queries by workspace_id(user)=owner_id. For sub-users (e.g., budi belongs to demo's workspace), the 'adjustment' transaction is invisible in the user's own /wallet. Admin's adjust also changes users.credits (per-user) which is not the balance consumed by record_usage (which uses the workspace owner's credits). Suggest either (a) always posting adjustments against workspace owner id, or (b) also crediting workspace owner balance, or (c) documenting the two-tier model explicitly."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "PlatformApp sidebar NavLink", "issue": "For '/platform' the testid was 'pnav-platform' instead of expected 'pnav-dashboard' (split('/').pop() returned 'platform'). Patched to use 'pnav-dashboard' when n.end is true.", "selector": "[data-testid=pnav-dashboard]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "PlatformDashboard", "issues": ["Console warning: Recharts complains 'width(-1) height(-1) ... please check the style of container' on first paint (chart renders fine after reflow). Harmless but noisy."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter32.py", "/app/test_reports/pytest/iter32.xml"],
+  "action_items": [
+    "Decide the intended behavior for platform credit adjustments on sub-users: /api/wallet does not show them because transactions are keyed by user_id, not workspace_id. Also decide whether users.credits (per-user) or workspace owner credits should move.",
+    "Optional: silence Recharts width/height warning on PlatformDashboard by giving the ResponsiveContainer parent a fixed min-height or deferring render until layout settles."
+  ],
+  "critical_code_review_comments": [
+    "platform_admin.disable_user: once disabled, existing JWT returns 401 on /api/auth/me (good) but the token itself is still valid cryptographically; without a token blacklist a disabled user could keep calling cached endpoints that don't go through user_from_token. All critical endpoints DO use current_user => require re-fetch, so it's fine, but worth noting.",
+    "platform_admin.add_staff: generates a random password_hash (new_id()+new_id()) for new staff. If reset email isn't delivered (SMTP) and EMAIL_DEBUG_LINKS is false in prod, the admin has no way to resend the reset link from the UI. Consider adding a 'Resend set-password link' action on the staff row.",
+    "PlatformApp testid used '/platform' path's last segment, which collapsed to 'platform' not 'dashboard'. Patched. Look for similar fragile derive-from-path patterns in other back-office nav lists.",
+    "chat.CORE_CHARACTER is injected server-side via replace() of placeholders in the system prompt - cannot be verified by API shape alone. Confirmed presence of the constant and injection site in chat.py; not asserted in integration tests."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter32.py",
+    "/app/frontend/src/pages/platform/PlatformApp.jsx"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@aivora.ai/Aivora!Admin2026, demo@aivora.ai/demo123456, budi@aivora.ai/budi123456",
+  "seed_data_creation": "Created 2 finance staff users during test runs (finance-test-<rand>, finance-fe-<rand>). All revoked (platform_role removed) at the end; the user rows remain but have no platform access. budi credits/disabled state restored (credits=50, disabled=false).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend coverage in /app/backend/tests/test_iter32.py: 28 cases across TestPlatformMe/Stats/Staff/Users/Pricing/Archives. Known behavior: GET /api/admin/pricing returns {pricing, packages, rates, features, trial, providers, tariff} - PUT expects pricing fields flattened + packages at top level (see test_pricing_get_put_roundtrip). Preview endpoint also expects full pricing body - partial {margin_overrides:{text:10}} returns 422. Frontend testids verified: platform-login/platform-login-email/password/submit, platform-shell, platform-denied/platform-denied-logout, pnav-dashboard (fixed)/pricing/packages/users/staff/trial, pstat-users/revenue/consumed/calls, pdash-daily, pdash-days-7, pp-row-*/pp-override-text/pp-credits-text, pricing-save/pricing-reset/pricing-readonly, pkg-tier-*/pkg-usd-0/pkg-price-0/pkg-add/pkg-reset, pu-search/pu-credit-*/pu-credit-dialog, staff-table/staff-add-form/staff-role/staff-revoke/staff-audit, trial-card, archive-btn/chat-archives-modal/chat-archives-list/archive-card-*/archive-restore/archive-toggle. Login throttle is aggressive (10 attempts/5 min per IP+email) - avoid long parallel UI test loops.",
+  "rca of the issue": "Platform wallet-visibility bug (minor): credit_transactions row inserted on adjust has user_id=target user's own id, but /api/wallet uses workspace_id (owner_id). For sub-users this hides the adjustment from the user's wallet UI. Reproduce: login admin -> POST /api/platform/users/{budi_id}/credits {delta:50} -> login budi -> GET /api/wallet.transactions => no 'adjustment' row. Mitigation options: write with user_id=workspace_id(target), or also credit workspace owner, or document the two-tier credit model."
+}

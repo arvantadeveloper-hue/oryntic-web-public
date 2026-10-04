@@ -61,7 +61,7 @@ function Shell() {
       <aside className="flex w-60 shrink-0 flex-col bg-[#070B18] text-white">
         <div className="flex items-center gap-2 px-5 py-5"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#2F6BFF] text-sm font-black">O</span><div><p className="text-sm font-black tracking-tight">Oryntix Platform</p><p className="text-[10px] uppercase tracking-widest text-white/40">Back-office</p></div></div>
         <nav className="mt-2 flex-1 space-y-1 px-3">
-          {items.map((n) => <NavLink key={n.to} to={n.to} end={n.end} data-testid={`pnav-${n.to.split("/").pop() || "dashboard"}`} className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${isActive ? "bg-[#2F6BFF] text-white" : "text-white/65 hover:bg-white/5 hover:text-white"}`}><n.icon size={17} /> {n.label}</NavLink>)}
+          {items.map((n) => <NavLink key={n.to} to={n.to} end={n.end} data-testid={`pnav-${n.end ? "dashboard" : n.to.split("/").pop()}`} className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${isActive ? "bg-[#2F6BFF] text-white" : "text-white/65 hover:bg-white/5 hover:text-white"}`}><n.icon size={17} /> {n.label}</NavLink>)}
         </nav>
         <div className="border-t border-white/10 p-4">
           <p className="truncate text-xs font-semibold">{user.name || user.email}</p>
