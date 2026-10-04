@@ -6,13 +6,21 @@ from auth import current_user, require_admin, workspace_id
 
 router = APIRouter(prefix="/api/wallet", tags=["wallet"])
 
-DEFAULT_PACKAGES = [
-    {"id": "starter", "name": "Starter", "credits": 500, "price_idr": 49000, "margin": 0.50, "best_value": False},
-    {"id": "basic", "name": "Basic", "credits": 1200, "price_idr": 99000, "margin": 0.45, "best_value": False},
-    {"id": "plus", "name": "Plus", "credits": 2800, "price_idr": 199000, "margin": 0.40, "best_value": True},
-    {"id": "pro", "name": "Pro", "credits": 6000, "price_idr": 399000, "margin": 0.35, "best_value": False},
-    {"id": "ultimate", "name": "Ultimate", "credits": 16000, "price_idr": 899000, "margin": 0.30, "best_value": False},
-]
+# Price = USD × (1 + margin 15%) × (1 + tax) × FX; tiers 3-5 give back part of the margin as a discount. Shown as one total.
+PACKAGE_TIERS = [("starter", "Starter", 3, 0.0), ("basic", "Basic", 5, 0.0), ("plus", "Plus", 10, 0.05), ("pro", "Pro", 25, 0.10), ("ultimate", "Ultimate", 50, 0.15)]
+PACKAGE_MARGIN = 0.15
+
+
+def build_packages(p: dict) -> list:
+    fx = float(p.get("usd_to_idr") or 16500)
+    tax = float(p.get("tax_pct") or 11) / 100
+    usd_per_credit = max(float(p.get("usd_per_credit") or 0.001), 1e-6)
+    out = []
+    for pid, name, usd, disc in PACKAGE_TIERS:
+        price = usd * (1 + PACKAGE_MARGIN - disc) * (1 + tax) * fx
+        out.append({"id": pid, "name": name, "usd": usd, "credits": int(round(usd / usd_per_credit)), "price_idr": int(round(price / 1000.0) * 1000),
+                    "discount_pct": int(disc * 100), "best_value": pid == "plus"})
+    return out
 
 
 class TopupIn(BaseModel):
@@ -20,10 +28,8 @@ class TopupIn(BaseModel):
 
 
 async def get_packages():
-    cfg = await db.config.find_one({"id": "credit_packages"})
-    if not cfg:
-        return DEFAULT_PACKAGES
-    return cfg.get("packages", DEFAULT_PACKAGES)
+    from pricing import get_pricing
+    return build_packages(await get_pricing())
 
 
 @router.get("")

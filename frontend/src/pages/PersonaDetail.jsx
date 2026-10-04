@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, MessageSquare, RefreshCw, Wand2, Copy, Trash2, Brain, Plus, Volume2, Loader2, Star } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
+import { KnowledgeTab } from "../components/KnowledgeTab";
 import { useAuth } from "../context/AuthContext";
 
 const VOICE_LABELS = {
@@ -145,7 +146,7 @@ export default function PersonaDetail() {
 
         <div>
           <div className="mb-4 flex gap-2 border-b border-slate-200">
-            {[["profile", "Profil"], ["appearance", "Penampilan"], ["memory", "Memori"]].map(([k, l]) => (
+            {[["profile", "Profil"], ["appearance", "Penampilan"], ["memory", "Memori"], ["knowledge", "Pengetahuan"]].map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} data-testid={`persona-tab-${k}`}
                 className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${tab === k ? "border-[#00D1FF] text-slate-900" : "border-transparent text-slate-500"}`}>{l}</button>
             ))}
@@ -173,6 +174,7 @@ export default function PersonaDetail() {
               <Row label="Gaya visual" value={prof.appearance?.visual_style} />
             </div>
           )}
+          {tab === "knowledge" && <div className="aivora-card p-6"><KnowledgeTab personaId={id} /></div>}
           {tab === "memory" && (
             <div>
               <div className="mb-4 flex gap-2">

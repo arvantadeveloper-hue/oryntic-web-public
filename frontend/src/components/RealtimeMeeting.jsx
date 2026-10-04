@@ -40,12 +40,24 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const humans = (conv.humans || []).filter((h) => h.id !== user?.id);
   const isHost = !conv.user_id || conv.user_id === user?.id;
   const hasAI = (conv.persona_ids || members.map((m) => m.id)).length > 0;
-  const runAI = isHost && hasAI;
+  // assistants join only on the call host's client (the person who started the call); decided at connect time
+  const runAIRef = useRef(isHost && hasAI);
+  const [runAI, setRunAI] = useState(isHost && hasAI);
   const meshRef = useRef(null);
   const mixRef = useRef(null); // { ac, inMix, outMix, audioEls: {} }
   const [peers, setPeers] = useState([]);
   const [turn, setTurn] = useState(null);
-  const [mutedPeers, setMutedPeers] = useState({}); // peerId -> true (local-only mute; host also stops feeding them to the assistant)
+  const [mutedPeers, setMutedPeers] = useState({});
+  const [callHost, setCallHost] = useState(null); // {is_host, host}
+  const [bw, setBw] = useState({ mb: 0, credits: 0 });
+  const bytesRef = useRef(0);
+  const readBytes = async () => { // total WebRTC bytes (sent+received) across peers
+    let total = 0;
+    for (const p of Object.values(meshRef.current?.peers || {})) {
+      try { const st = await p.pc.getStats(); st.forEach((r) => { if (r.type === "transport") total += (r.bytesSent || 0) + (r.bytesReceived || 0); }); } catch (e) {}
+    }
+    return total;
+  }; // peerId -> true (local-only mute; host also stops feeding them to the assistant)
   const presenceRef = useRef(null);
   const mutedPeersRef = useRef({});
   useEffect(() => { mutedPeersRef.current = mutedPeers; }, [mutedPeers]);
@@ -53,7 +65,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     setMutedPeers((m) => {
       const next = { ...m, [pid]: !m[pid] };
       const mx = mixRef.current; const el = mx?.audioEls[pid];
-      if (el) { el.muted = !!next[pid]; if (runAI && el.srcObject) { if (next[pid]) mx.inMix.remove(el.srcObject); else mx.inMix.add(el.srcObject); } }
+      if (el) { el.muted = !!next[pid]; if (runAIRef.current && el.srcObject) { if (next[pid]) mx.inMix.remove(el.srcObject); else mx.inMix.add(el.srcObject); } }
       return next;
     });
   };
@@ -259,11 +271,20 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     const stale = () => run !== runIdRef.current;
     let created = [];
     try {
+      if (humans.length > 0) {
+        try { const pres = await api.post(`/conversations/${cid}/call/presence`, { bytes_delta: 0 }); setCallHost(pres.data); runAIRef.current = !!pres.data.is_host && hasAI; setRunAI(runAIRef.current); } catch (e) {}
+      }
+      let runAI = runAIRef.current;
       if (runAI) {
-        const c = await api.post("/realtime/calls", { conversation_id: cid });
-        created = c.data.sessions;
-        if (stale()) { created.forEach((x) => api.post(`/realtime/calls/${x.call_id}/end`, { elapsed_seconds: 0 }).catch(() => {})); return; }
-        setCpmTotal(c.data.credits_per_min_total); setModId(c.data.moderator_persona_id);
+        try {
+          const c = await api.post("/realtime/calls", { conversation_id: cid });
+          created = c.data.sessions;
+          if (stale()) { created.forEach((x) => api.post(`/realtime/calls/${x.call_id}/end`, { elapsed_seconds: 0 }).catch(() => {})); return; }
+          setCpmTotal(c.data.credits_per_min_total); setModId(c.data.moderator_persona_id);
+        } catch (e) {
+          if (humans.length === 0) throw e; // solo call with assistants must surface the error
+          runAI = false; runAIRef.current = false; setRunAI(false); toast.message("Asisten di grup ini bukan milik Anda — panggilan berjalan tanpa asisten.");
+        }
       }
       const mic = new MicPipeline(micPrefs);
       const stream = await mic.start();
@@ -283,15 +304,18 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
             const m = mixRef.current; if (!m) return;
             const old = m.audioEls[pid];
             if (old) { try { if (old.srcObject) m.inMix.remove(old.srcObject); old.srcObject = null; old.remove(); } catch (e) {} delete m.audioEls[pid]; }
-            if (rs) { const el = document.createElement("audio"); el.autoplay = true; el.srcObject = rs; el.muted = !!mutedPeersRef.current[pid]; document.body.appendChild(el); m.audioEls[pid] = el; if (runAI && !mutedPeersRef.current[pid]) m.inMix.add(rs); }
+            if (rs) { const el = document.createElement("audio"); el.autoplay = true; el.srcObject = rs; el.muted = !!mutedPeersRef.current[pid]; document.body.appendChild(el); m.audioEls[pid] = el; if (runAIRef.current && !mutedPeersRef.current[pid]) m.inMix.add(rs); }
           },
         });
         meshRef.current = mesh;
         await mesh.start(); setTurn(mesh.turn);
         if (stale()) { mesh.close(); return; }
         window.__oryntixInCall = true;
-        const beat = () => api.post(`/conversations/${cid}/call/presence`).catch(() => {});
-        beat(); presenceRef.current = setInterval(beat, 30000);
+        const beat = async () => {
+          const total = await readBytes(); const delta = Math.max(0, total - bytesRef.current); bytesRef.current = total;
+          try { const r = await api.post(`/conversations/${cid}/call/presence`, { bytes_delta: delta }); setCallHost(r.data); if (r.data.is_host) setBw((b) => ({ mb: b.mb + delta / 1e6, credits: b.credits + (r.data.charged || 0) })); } catch (e) {}
+        };
+        await beat(); presenceRef.current = setInterval(beat, 30000);
       }
       if (!runAI) { startedAtRef.current = Date.now(); listening(); return; }
       const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, role: x.role, stream: aiInput, sendAudio: x.role !== "panelist", sensitivity: micPrefs.sensitivity, createResponse: false, onEvent: handleEvent, onError: () => { if (!endedRef.current) toast.message("Koneksi salah satu peserta terputus"); },
@@ -418,6 +442,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     <div className="fixed inset-0 z-[96] flex flex-col" style={{ background: "radial-gradient(1200px 500px at 50% -10%, #16213e 0%, #0a0f1f 60%)" }} data-testid="realtime-meeting">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 text-white sm:px-6">
         <span className="flex h-9 items-center gap-2 rounded-full bg-white/10 px-3 text-sm font-semibold backdrop-blur"><span className={`h-2 w-2 rounded-full ${phase === "connecting" ? "bg-amber-400 animate-pulse" : "bg-emerald-400"}`} /> {conv.title}</span>
+        {humans.length > 0 && callHost && <span className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3 text-xs font-semibold text-white/80 backdrop-blur" data-testid="rtm-bandwidth" title="Biaya data panggilan $0,75/GB ditanggung host (pemulai panggilan)">{callHost.is_host ? `Host · ${bw.mb.toFixed(1)} MB · ${bw.credits} kredit` : "Gratis · host membayar data"}</span>}
         {humans.length > 0 && <span className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3 text-xs font-semibold text-white/80 backdrop-blur" data-testid="rtm-humans" title={turn === false ? "Tanpa server TURN (hanya STUN) — di jaringan ketat suara teman bisa gagal tersambung" : "WebRTC + TURN aktif"}>{peers.filter((p) => p.state === "connected").length}/{humans.length} teman terhubung{runAI ? " · asisten via host" : hasAI ? " · asisten dijalankan host" : ""}</span>}
         <span className="flex items-center gap-1 rounded-full bg-[#2F6BFF]/20 px-2.5 py-1 text-[11px] font-bold text-[#8FB0FF]" data-testid="rtm-badge"><Zap size={11} /> Realtime · {members.length} agen</span>
         <label className="flex h-9 items-center gap-1.5 rounded-full bg-amber-400/15 px-3 text-xs font-semibold text-amber-200" data-testid="rtm-moderator-picker">

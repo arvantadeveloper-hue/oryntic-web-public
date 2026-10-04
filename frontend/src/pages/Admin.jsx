@@ -96,7 +96,7 @@ export default function Admin() {
                   <p className="font-bold text-slate-900">{p.name}</p>
                   <p className="text-sm text-slate-600">{p.credits} kredit</p>
                   <p className="text-xs text-slate-500">Rp {p.price_idr.toLocaleString("id-ID")}</p>
-                  <p className="mt-1 text-xs text-[#2F6BFF]">Margin {(p.margin * 100).toFixed(0)}%</p>
+                  <p className="mt-1 text-xs text-[#2F6BFF]">${p.usd}{p.discount_pct ? ` · diskon ${p.discount_pct}%` : ""}</p>
                 </div>
               ))}
             </div>

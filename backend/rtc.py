@@ -2,6 +2,7 @@ import os
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from auth import current_user
 from db import db, now_iso
@@ -47,15 +48,42 @@ async def badges(u: dict = Depends(current_user)):
 CALL_TTL_SEC = 120
 
 
+USD_PER_GB = 0.75  # friend-call bandwidth tariff (margin included)
+
+
+class PresenceIn(BaseModel):
+    bytes_delta: int = Field(default=0, ge=0, le=50_000_000_000)
+
+
 @router.post("/conversations/{cid}/call/presence")
-async def call_presence(cid: str, u: dict = Depends(current_user)):
-    """Heartbeat (every ~30s) while the user is inside the call room → other participants get an incoming-call ring."""
+async def call_presence(cid: str, x: PresenceIn = PresenceIn(), u: dict = Depends(current_user)):
+    """Heartbeat (every ~30s) while in the call room. The first person in becomes the call host and pays the
+    WebRTC bandwidth ($0.75/GB → credits) reported by their browser; others ring and may join for free."""
     from chat import _can_access
+    from datetime import datetime, timezone, timedelta
+    from llm import record_usage
+    from pricing import get_pricing
     conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
     if not conv or not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
-    await db.conversations.update_one({"id": cid}, {"$set": {f"active_call.{u['id']}": {"name": u.get("name") or "Peserta", "at": now_iso()}}})
-    return {"ok": True}
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=CALL_TTL_SEC)).isoformat()
+    live = {k: v for k, v in (conv.get("active_call") or {}).items() if (v.get("at") or "") > cutoff}
+    host = conv.get("call_host") if conv.get("call_host") in live else None
+    if not host:
+        host = u["id"]
+    upd = {f"active_call.{u['id']}": {"name": u.get("name") or "Peserta", "at": now_iso()}, "call_host": host}
+    charged = 0
+    if host == u["id"] and x.bytes_delta:
+        p = await get_pricing()
+        pending = float(conv.get("call_pending_mb") or 0) + x.bytes_delta / 1e6
+        per_mb = USD_PER_GB / 1024 / max(float(p.get("usd_per_credit") or 0.001), 1e-6)
+        charged = int(pending * per_mb)
+        if charged:
+            await record_usage(u["id"], "call_bandwidth", charged, {"conversation_id": cid, "mb": round(pending, 2)})
+            pending -= charged / per_mb
+        upd["call_pending_mb"] = pending
+    await db.conversations.update_one({"id": cid}, {"$set": upd})
+    return {"ok": True, "host": host, "is_host": host == u["id"], "charged": charged}
 
 
 @router.post("/conversations/{cid}/call/leave")

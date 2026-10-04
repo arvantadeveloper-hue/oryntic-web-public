@@ -61,9 +61,10 @@ export default function Wallet() {
           <div key={p.id} className={`aivora-card aivora-card-hover relative p-5 ${p.best_value ? "ring-1 ring-[#00D1FF]" : ""}`} data-testid={`pkg-${p.id}`}>
             {p.best_value && <span className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-full btn-grad px-3 py-0.5 text-[10px] font-bold">BEST VALUE</span>}
             <p className="text-sm font-bold text-slate-900">{p.name}</p>
-            <p className="mt-2 text-3xl font-extrabold grad-text">{p.credits}</p>
-            <p className="text-xs text-slate-500">kredit</p>
-            <p className="mt-3 text-sm text-slate-600">Rp {p.price_idr.toLocaleString("id-ID")}</p>
+            <p className="mt-2 text-3xl font-extrabold grad-text">{p.credits.toLocaleString("id-ID")}</p>
+            <p className="text-xs text-slate-500">kredit · ${p.usd}</p>
+            <p className="mt-3 text-sm font-semibold text-slate-700">Rp {p.price_idr.toLocaleString("id-ID")}</p>
+            {p.discount_pct > 0 && <span className="mt-1 inline-block rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700" data-testid={`pkg-discount-${p.id}`}>Hemat {p.discount_pct}%</span>}
             <button onClick={() => topup(p)} disabled={busy === p.id} className="btn-grad mt-4 w-full rounded-xl py-2.5 text-sm" data-testid={`topup-${p.id}`}>{busy === p.id ? "..." : "Beli"}</button>
           </div>
         ))}

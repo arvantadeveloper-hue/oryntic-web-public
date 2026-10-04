@@ -439,6 +439,11 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     mems = _relevant_memories(await db.memory_items.find({"user_id": user["id"], "persona_id": persona["id"], "enabled": True}).to_list(50), query)
     if mems:
         parts.append("Saved memory about the user: " + "; ".join(m["content"] for m in mems))
+    if query:
+        from knowledge import relevant_knowledge
+        kn = await relevant_knowledge(persona["id"], query)
+        if kn:
+            parts.append("Reference knowledge relevant to this message (from the assistant's uploaded documents; cite the title when you use it):\n" + "\n".join(f"[{x['title']}] {x['text']}" for x in kn))
     if roster:
         others = [n for n in roster if n != persona["name"]]
         if others:
@@ -852,13 +857,16 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
         responders = await _route_group(x, personas, cid)
     roster = [p["name"] for p in personas] if len(personas) > 1 else None
     extra = _reply_extra(x, attach_text)
-    bill_user = u if u["id"] == conv.get("user_id") or not responders else (await db.users.find_one({"id": conv["user_id"]}, {"_id": 0}) or u)
+    async def _bill_user(p: dict) -> dict:  # each assistant's replies are paid by the assistant's owner
+        if p.get("user_id") in (u["id"], u.get("owner_id")):
+            return u
+        return await db.users.find_one({"id": p.get("user_id")}, {"_id": 0}) or u
 
     async def stream():
         totals = [0]
         for persona in responders:
             prompt = (await _history_text(cid, query=x.content)) + extra + f"\n{persona['name']}:"
-            ctx = ReplyCtx(cid=cid, user=bill_user, persona=persona, roster=roster, prompt=prompt, voice_mode=x.voice_mode,
+            ctx = ReplyCtx(cid=cid, user=await _bill_user(persona), persona=persona, roster=roster, prompt=prompt, voice_mode=x.voice_mode,
                            via=x.channel, user_text=x.content, attach_len=len(attach_text))
             async for ev in _collect(_persona_reply(ctx), totals):
                 yield ev
