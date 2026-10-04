@@ -402,6 +402,6 @@ class TestAdmin:
 
 
 # ---------- Cleanup ----------
-def test_zz_cleanup_persona(s):
+def test_zz_cleanup_persona(s) -> None:
     s.delete(f"{API}/personas/{state.get('persona_id','')}",
              headers=auth_headers(state["token"]))

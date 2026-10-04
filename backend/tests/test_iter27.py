@@ -1,7 +1,6 @@
 """Iter 27 — shares (public gallery links), friends (invite/accept/dm), memory pin, mixed-group AI silence, two-tier compact summary."""
 import os
 import time
-import re
 import pytest
 import requests
 
@@ -54,7 +53,7 @@ def image_item(demo_h):
     return with_path[0]
 
 
-def test_share_document_full_flow(demo_h, doc_task_id):
+def test_share_document_full_flow(demo_h, doc_task_id) -> None:
     # invalid hours
     bad = requests.post(f"{API}/shares", json={"kind": "document", "name": "QA Doc", "task_id": doc_task_id, "hours": 5}, headers=demo_h, timeout=30)
     assert bad.status_code == 400
@@ -85,7 +84,7 @@ def test_share_document_full_flow(demo_h, doc_task_id):
     assert g.status_code == 404
 
 
-def test_share_image_file(demo_h, image_item):
+def test_share_image_file(demo_h, image_item) -> None:
     r = requests.post(f"{API}/shares", json={"kind": "image", "name": image_item.get("name") or "image.png", "path": image_item["path"], "hours": 24}, headers=demo_h, timeout=30)
     assert r.status_code == 200, r.text
     code = r.json()["code"]
@@ -95,13 +94,13 @@ def test_share_image_file(demo_h, image_item):
 
 
 # ---------- Friends ----------
-def test_friends_demo_already_friends_with_budi(demo_h):
+def test_friends_demo_already_friends_with_budi(demo_h) -> None:
     r = requests.post(f"{API}/friends/invite", json={"email": "budi@aivora.ai"}, headers=demo_h, timeout=30)
     assert r.status_code == 400
     assert "berteman" in r.text.lower()
 
 
-def test_friends_list_shape_demo_sees_budi(demo_h):
+def test_friends_list_shape_demo_sees_budi(demo_h) -> None:
     r = requests.get(f"{API}/friends", headers=demo_h, timeout=30)
     assert r.status_code == 200
     data = r.json()
@@ -111,7 +110,7 @@ def test_friends_list_shape_demo_sees_budi(demo_h):
     return data
 
 
-def test_friend_chat_idempotent(demo_h):
+def test_friend_chat_idempotent(demo_h) -> None:
     budi_id = next(f["id"] for f in requests.get(f"{API}/friends", headers=demo_h, timeout=30).json()["friends"] if f["email"] == "budi@aivora.ai")
     r1 = requests.post(f"{API}/friends/{budi_id}/chat", headers=demo_h, timeout=30)
     assert r1.status_code == 200, r1.text
@@ -121,7 +120,7 @@ def test_friend_chat_idempotent(demo_h):
     assert r2.json()["id"] == cid1
 
 
-def test_friend_dm_title_per_user(demo_h, budi_h):
+def test_friend_dm_title_per_user(demo_h, budi_h) -> None:
     convs_d = requests.get(f"{API}/conversations", headers=demo_h, timeout=30).json()
     dms_d = [c for c in convs_d if c.get("type") == "dm"]
     assert dms_d, "demo should have at least one dm"
@@ -133,7 +132,7 @@ def test_friend_dm_title_per_user(demo_h, budi_h):
     assert any("demo" in (c.get("title") or "").lower() for c in dms_b)
 
 
-def test_friend_email_invite_unregistered(demo_h):
+def test_friend_email_invite_unregistered(demo_h) -> None:
     email = f"qa-teman-{int(time.time())}@example.com"
     r = requests.post(f"{API}/friends/invite", json={"email": email}, headers=demo_h, timeout=30)
     assert r.status_code == 200, r.text
@@ -145,7 +144,7 @@ def test_friend_email_invite_unregistered(demo_h):
 
 
 # ---------- Memory pin ----------
-def test_memory_pin_toggle(demo_h):
+def test_memory_pin_toggle(demo_h) -> None:
     # create a memory for Rio
     r = requests.post(f"{API}/memory", json={"persona_id": RIO, "content": f"QA pin test {int(time.time())}", "enabled": True}, headers=demo_h, timeout=30)
     assert r.status_code in (200, 201), r.text
@@ -166,7 +165,7 @@ def _sse_events(resp):
     return out
 
 
-def test_mixed_group_no_ai_on_casual_message(budi_h):
+def test_mixed_group_no_ai_on_casual_message(budi_h) -> None:
     import json as _json
     r = requests.post(f"{API}/conversations/{MIXED_GROUP}/send", json={"content": "oke siap"}, headers=budi_h, timeout=120, stream=True)
     assert r.status_code == 200, r.text
@@ -183,7 +182,7 @@ def test_mixed_group_no_ai_on_casual_message(budi_h):
     assert not had_persona, f"expected no AI reply, got events: {evs[:5]}"
 
 
-def test_mixed_group_ai_replies_when_addressed(budi_h):
+def test_mixed_group_ai_replies_when_addressed(budi_h) -> None:
     import json as _json
     r = requests.post(f"{API}/conversations/{MIXED_GROUP}/send", json={"content": "Rio, tolong sebutkan 2 manfaat menabung"}, headers=budi_h, timeout=180, stream=True)
     assert r.status_code == 200, r.text
@@ -201,7 +200,7 @@ def test_mixed_group_ai_replies_when_addressed(budi_h):
 
 
 # ---------- Two-tier compact summary ----------
-def test_compact_two_tier_summary(demo_h, budi_h):
+def test_compact_two_tier_summary(demo_h, budi_h) -> None:
     cid = MIXED_GROUP  # has multiple live messages from mixed-group tests above
     msgs = requests.get(f"{API}/conversations/{cid}/messages?limit=200", headers=demo_h, timeout=30).json()
     live_count = sum(1 for m in msgs.get("messages", []) if not m.get("archived"))
@@ -225,19 +224,19 @@ def test_compact_two_tier_summary(demo_h, budi_h):
 
 
 # ---------- Regression ----------
-def test_login_both():
+def test_login_both() -> None:
     assert _login(*DEMO)
     assert _login(*BUDI)
 
 
-def test_archives_and_workspace_load(demo_h):
+def test_archives_and_workspace_load(demo_h) -> None:
     a = requests.get(f"{API}/archives?limit=5", headers=demo_h, timeout=30)
     assert a.status_code == 200
     w = requests.get(f"{API}/tasks?limit=5", headers=demo_h, timeout=30)
     assert w.status_code == 200
 
 
-def test_gallery_search(demo_h):
+def test_gallery_search(demo_h) -> None:
     r = requests.get(f"{API}/gallery?q=Bandung&limit=10", headers=demo_h, timeout=30)
     assert r.status_code == 200
     assert "items" in r.json()

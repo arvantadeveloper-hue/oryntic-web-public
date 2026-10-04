@@ -160,25 +160,32 @@ class AssignIn(BaseModel):
     assignments: Optional[list] = Field(default=None, max_length=10)  # [{assistant, part}] explicit "bagian X minta Nova"
 
 
+async def _target_persona(conv: dict, requested: Optional[str]) -> dict:
+    ids = conv.get("persona_ids") or []
+    pid = requested if requested in ids else conv.get("persona_id") or (ids or [None])[0]
+    persona = (await _get_personas([pid]) or [None])[0]
+    if not persona:
+        raise HTTPException(400, "Asisten tidak ditemukan")
+    return persona
+
+
 @router.post("/conversations/{cid}/tasks")
 async def assign_task(cid: str, x: AssignIn, u: dict = Depends(current_user)):
     """Direct assignment (used by the Realtime `assign_task` voice tool and the meeting chat)."""
     conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
     if not conv or not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
-    pid = x.persona_id if x.persona_id in (conv.get("persona_ids") or []) else conv.get("persona_id") or (conv.get("persona_ids") or [None])[0]
-    persona = (await _get_personas([pid]) or [None])[0]
-    if not persona:
-        raise HTTPException(400, "Asisten tidak ditemukan")
+    persona = await _target_persona(conv, x.persona_id)
     assignments = [a for a in (x.assignments or []) if isinstance(a, dict) and a.get("assistant")]
     plan = {"title": x.title, "brief": x.brief, "scheduled_at": x.scheduled_at, "assignments": assignments}
     src = "meeting" if conv.get("type") == "meeting" else "call"
-    team = x.team or bool(assignments)
-    task = await (create_team_task(u, persona, conv, plan, src) if team else create_assigned_task(u, persona, conv, plan, src))
+    create = create_team_task if (x.team or assignments) else create_assigned_task
+    task = await create(u, persona, conv, plan, src)
     tz = (u.get("settings") or {}).get("timezone") or "Asia/Jakarta"
+    when = when_text(task.get("scheduled_at"), tz)
     detail = f" {team_summary(task)}" if task.get("team") else ""
-    await _save_ai_msg(cid, persona, f"📌 Tugas **{task['goal']}** dicatat ke Ruang Kerja, dikerjakan {when_text(task.get('scheduled_at'), tz)}.{detail} [Lihat](/workspace/{task['id']})", 0, "text", {"tool": "task_assigned", "task_id": task["id"]})
-    return {"task_id": task["id"], "status": task["status"], "when": when_text(task.get("scheduled_at"), tz), "assistant": persona["name"],
+    await _save_ai_msg(cid, persona, f"📌 Tugas **{task['goal']}** dicatat ke Ruang Kerja, dikerjakan {when}.{detail} [Lihat](/workspace/{task['id']})", 0, "text", {"tool": "task_assigned", "task_id": task["id"]})
+    return {"task_id": task["id"], "status": task["status"], "when": when, "assistant": persona["name"],
             "subtasks": [f"{s['persona_name']}: {s['title']}" for s in task.get("subtasks") or []], "unmatched_assistants": task.get("unmatched") or []}
 
 
@@ -495,17 +502,9 @@ async def create_team_task(u: dict, lead: dict, conv: dict, plan: dict, source: 
     return parent
 
 
-async def _maybe_assemble(parent_id: str):
-    parent = await db.tasks.find_one({"id": parent_id}, {"_id": 0})
-    if not parent or parent.get("status") == "completed":
-        return
-    kids = await db.tasks.find({"parent_id": parent_id}, {"_id": 0}).to_list(20)
-    await db.tasks.update_one({"id": parent_id}, {"$set": {"subtasks": [{"id": k["id"], "title": k["goal"], "persona_id": k.get("persona_id"), "persona_name": k.get("persona_name"), "status": k["status"], "pinned": bool(k.get("pinned"))} for k in kids], "updated_at": now_iso()}})
-    if any(k["status"] not in ("completed", "failed") for k in kids):
-        return
-    claimed = await db.tasks.find_one_and_update({"id": parent_id, "status": {"$nin": ["assembling", "completed"]}}, {"$set": {"status": "assembling"}})
-    if not claimed:
-        return  # another child's completion is already assembling
+async def _assemble_team_output(parent: dict, kids: list) -> None:
+    """Team lead merges finished sub-task results into the parent's final document and announces it."""
+    parent_id = parent["id"]
     u = await db.users.find_one({"id": parent["user_id"]}, {"_id": 0}) or {}
     lead = await db.personas.find_one({"id": parent.get("persona_id")}, {"_id": 0}) or {"name": "Asisten"}
     parts = "\n\n".join(f"## {k['goal']} (oleh {k.get('persona_name')})\n{k.get('final_output') or '(gagal)'}" for k in kids)
@@ -522,3 +521,17 @@ async def _maybe_assemble(parent_id: str):
     who = ", ".join(f"{k.get('persona_name')} ({k['goal']})" for k in kids)
     for cid in parent.get("conversation_ids") or []:
         await _save_ai_msg(cid, lead, f"Tugas tim **{parent.get('goal')}** selesai ✅ — bagian dikerjakan oleh {who}; saya rangkai jadi satu dokumen di Ruang Kerja: [buka hasilnya](/workspace/{parent_id}).", 0, "text", {"tool": "task_done", "task_id": parent_id})
+
+
+async def _maybe_assemble(parent_id: str):
+    parent = await db.tasks.find_one({"id": parent_id}, {"_id": 0})
+    if not parent or parent.get("status") == "completed":
+        return
+    kids = await db.tasks.find({"parent_id": parent_id}, {"_id": 0}).to_list(20)
+    subtasks = [{"id": k["id"], "title": k["goal"], "persona_id": k.get("persona_id"), "persona_name": k.get("persona_name"), "status": k["status"], "pinned": bool(k.get("pinned"))} for k in kids]
+    await db.tasks.update_one({"id": parent_id}, {"$set": {"subtasks": subtasks, "updated_at": now_iso()}})
+    if any(k["status"] not in ("completed", "failed") for k in kids):
+        return
+    claimed = await db.tasks.find_one_and_update({"id": parent_id, "status": {"$nin": ["assembling", "completed"]}}, {"$set": {"status": "assembling"}})
+    if claimed:  # otherwise another child's completion is already assembling
+        await _assemble_team_output(parent, kids)

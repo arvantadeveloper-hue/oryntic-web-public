@@ -1,6 +1,6 @@
 """Iter 24: forgot/reset password + delegation (named assistants) regression."""
 import os
-import time
+from tests.creds import DEMO_EMAIL, DEMO_PASSWORD, BUDI_EMAIL, BUDI_PASSWORD
 import requests
 import pytest
 
@@ -18,18 +18,18 @@ API = f"{BASE}/api"
 
 @pytest.fixture(scope="session")
 def demo_token():
-    r = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": "demo123456"})
+    r = requests.post(f"{API}/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
     assert r.status_code == 200, r.text
     return r.json()["access_token"]
 
 
-def test_login_demo_ok():
-    r = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": "demo123456"})
+def test_login_demo_ok() -> None:
+    r = requests.post(f"{API}/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
     assert r.status_code == 200
     assert r.json().get("access_token")
 
 
-def test_forgot_unknown_email_no_leak():
+def test_forgot_unknown_email_no_leak() -> None:
     r = requests.post(f"{API}/auth/forgot-password", json={"email": "nobody-xyz-12345@example.com"})
     assert r.status_code == 200
     d = r.json()
@@ -38,13 +38,13 @@ def test_forgot_unknown_email_no_leak():
     assert "debug_link" not in d or d.get("debug_link") in (None, "")
 
 
-def test_reset_password_bad_token():
+def test_reset_password_bad_token() -> None:
     r = requests.post(f"{API}/auth/reset-password", json={"token": "totallybogus", "password": "whatever123"})
     assert r.status_code == 400
 
 
-def test_forgot_budi_returns_debug_link():
-    r = requests.post(f"{API}/auth/forgot-password", json={"email": "budi@aivora.ai"})
+def test_forgot_budi_returns_debug_link() -> None:
+    r = requests.post(f"{API}/auth/forgot-password", json={"email": BUDI_EMAIL})
     assert r.status_code == 200
     d = r.json()
     assert d.get("ok") is True
@@ -53,22 +53,22 @@ def test_forgot_budi_returns_debug_link():
     assert "token=" in d["debug_link"]
 
 
-def test_full_reset_flow_and_restore():
+def test_full_reset_flow_and_restore() -> None:
     # 1) forgot
-    r = requests.post(f"{API}/auth/forgot-password", json={"email": "budi@aivora.ai"})
+    r = requests.post(f"{API}/auth/forgot-password", json={"email": BUDI_EMAIL})
     assert r.status_code == 200
     link = r.json()["debug_link"]
     token = link.split("token=")[-1].split("&")[0]
     # 2) reset to new password
-    r2 = requests.post(f"{API}/auth/reset-password", json={"token": token, "password": "budi123456"})
+    r2 = requests.post(f"{API}/auth/reset-password", json={"token": token, "password": BUDI_PASSWORD})
     assert r2.status_code == 200, r2.text
     assert r2.json().get("access_token")
     # 3) login with (restored) password
-    r3 = requests.post(f"{API}/auth/login", json={"email": "budi@aivora.ai", "password": "budi123456"})
+    r3 = requests.post(f"{API}/auth/login", json={"email": BUDI_EMAIL, "password": BUDI_PASSWORD})
     assert r3.status_code == 200
 
 
-def test_delegation_named_assistants(demo_token):
+def test_delegation_named_assistants(demo_token) -> None:
     H = {"Authorization": f"Bearer {demo_token}"}
     # Rio persona id provided
     cid_resp = requests.post(

@@ -1,6 +1,5 @@
 """Iter 25 backend tests: team removal, gallery, change-password, files download, demo+budi login."""
 import os
-import time
 import pytest
 import requests
 
@@ -47,24 +46,24 @@ def H(t):
 
 
 # ---- Team / workspace invite removal ----
-def test_team_invites_removed(demo_token):
+def test_team_invites_removed(demo_token) -> None:
     r = requests.get(f"{API}/team/invites", headers=H(demo_token), timeout=20)
     assert r.status_code == 404, f"expected 404 got {r.status_code}"
 
 
-def test_auth_workspaces_removed(demo_token):
+def test_auth_workspaces_removed(demo_token) -> None:
     r = requests.get(f"{API}/auth/workspaces", headers=H(demo_token), timeout=20)
     assert r.status_code == 404
 
 
-def test_admin_create_user_removed(demo_token):
+def test_admin_create_user_removed(demo_token) -> None:
     r = requests.post(f"{API}/admin/users", json={"email": "x@x.com", "password": "pw1234567", "name": "x"},
                       headers=H(demo_token), timeout=20)
     assert r.status_code in (404, 405), f"expected 404/405 got {r.status_code}"
 
 
 # ---- Gallery ----
-def test_gallery_default(demo_token):
+def test_gallery_default(demo_token) -> None:
     r = requests.get(f"{API}/gallery?limit=5", headers=H(demo_token), timeout=30)
     assert r.status_code == 200
     j = r.json()
@@ -72,7 +71,7 @@ def test_gallery_default(demo_token):
     assert len(j["items"]) <= 5
 
 
-def test_gallery_pagination(demo_token):
+def test_gallery_pagination(demo_token) -> None:
     r1 = requests.get(f"{API}/gallery?limit=5", headers=H(demo_token), timeout=30).json()
     if not r1.get("has_more"):
         pytest.skip("not enough items for pagination test")
@@ -84,14 +83,14 @@ def test_gallery_pagination(demo_token):
     assert ids1.isdisjoint(ids2), "page2 should not overlap page1"
 
 
-def test_gallery_filter_image(demo_token):
+def test_gallery_filter_image(demo_token) -> None:
     r = requests.get(f"{API}/gallery?type=image&limit=20", headers=H(demo_token), timeout=30)
     assert r.status_code == 200
     for it in r.json()["items"]:
         assert it["kind"] == "image", f"non-image in image filter: {it}"
 
 
-def test_gallery_filter_document(demo_token):
+def test_gallery_filter_document(demo_token) -> None:
     r = requests.get(f"{API}/gallery?type=document&limit=20", headers=H(demo_token), timeout=30)
     assert r.status_code == 200
     for it in r.json()["items"]:
@@ -99,7 +98,7 @@ def test_gallery_filter_document(demo_token):
 
 
 # ---- Files download with ?auth=&download=1 ----
-def test_file_download_header(demo_token):
+def test_file_download_header(demo_token) -> None:
     # find an image item that has a path
     r = requests.get(f"{API}/gallery?type=image&limit=10", headers=H(demo_token), timeout=30).json()
     paths = [i["path"] for i in r.get("items", []) if i.get("path")]
@@ -113,7 +112,7 @@ def test_file_download_header(demo_token):
     assert "attachment" in cd.lower(), f"Content-Disposition missing attachment: {cd!r}"
 
 
-def test_task_export_docx_header(demo_token):
+def test_task_export_docx_header(demo_token) -> None:
     r = requests.get(f"{API}/gallery?type=document&limit=5", headers=H(demo_token), timeout=30).json()
     tasks = [i["task_id"] for i in r.get("items", []) if i.get("task_id")]
     if not tasks:
@@ -127,14 +126,14 @@ def test_task_export_docx_header(demo_token):
 
 
 # ---- Change password ----
-def test_change_password_wrong_old(demo_token):
+def test_change_password_wrong_old(demo_token) -> None:
     r = requests.post(f"{API}/auth/change-password",
                       json={"current_password": "WRONG_PASSWORD_xxxx", "new_password": "NewPass!2026"},
                       headers=H(demo_token), timeout=20)
     assert r.status_code == 400, f"expected 400 got {r.status_code} {r.text}"
 
 
-def test_change_password_roundtrip():
+def test_change_password_roundtrip() -> None:
     """Change demo password then restore it."""
     tok = _login(DEMO)
     new_pw = "Demo!2026x"
@@ -156,6 +155,6 @@ def test_change_password_roundtrip():
     assert r4.status_code == 200, "demo password NOT restored!"
 
 
-def test_budi_login_ok():
+def test_budi_login_ok() -> None:
     r = requests.post(f"{API}/auth/login", json=BUDI, timeout=20)
     assert r.status_code == 200

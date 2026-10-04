@@ -47,20 +47,20 @@ def kn_doc_id(demo_token):
     return d["id"]
 
 
-def test_knowledge_list_contains(demo_token, kn_doc_id):
+def test_knowledge_list_contains(demo_token, kn_doc_id) -> None:
     r = requests.get(f"{BASE}/api/personas/{PERSONA_ID}/knowledge", headers=H(demo_token), timeout=15)
     assert r.status_code == 200, r.text
     ids = [x["id"] for x in r.json()]
     assert kn_doc_id in ids
 
 
-def test_knowledge_get_text(demo_token, kn_doc_id):
+def test_knowledge_get_text(demo_token, kn_doc_id) -> None:
     r = requests.get(f"{BASE}/api/personas/{PERSONA_ID}/knowledge/{kn_doc_id}", headers=H(demo_token), timeout=15)
     assert r.status_code == 200, r.text
     assert "Sabtu" in r.json().get("text", "")
 
 
-def test_knowledge_toggle(demo_token, kn_doc_id):
+def test_knowledge_toggle(demo_token, kn_doc_id) -> None:
     r = requests.put(f"{BASE}/api/personas/{PERSONA_ID}/knowledge/{kn_doc_id}", headers=H(demo_token),
                      json={"enabled": False}, timeout=15)
     assert r.status_code == 200 and r.json()["enabled"] is False
@@ -69,7 +69,7 @@ def test_knowledge_toggle(demo_token, kn_doc_id):
     assert r2.status_code == 200 and r2.json()["enabled"] is True
 
 
-def test_knowledge_upload(demo_token):
+def test_knowledge_upload(demo_token) -> None:
     txt = ("Catatan internal: nomor telepon kantor pusat 021-5000-1234. " * 5).encode()
     b64 = "data:text/plain;base64," + base64.b64encode(txt).decode()
     r = requests.post(f"{BASE}/api/personas/{PERSONA_ID}/knowledge", headers=H(demo_token),
@@ -81,20 +81,20 @@ def test_knowledge_upload(demo_token):
     requests.delete(f"{BASE}/api/personas/{PERSONA_ID}/knowledge/{d['id']}", headers=H(demo_token), timeout=10)
 
 
-def test_knowledge_too_short(demo_token):
+def test_knowledge_too_short(demo_token) -> None:
     r = requests.post(f"{BASE}/api/personas/{PERSONA_ID}/knowledge", headers=H(demo_token),
                       json={"title": "X", "html": "<p>hi</p>"}, timeout=10)
     assert r.status_code == 400, r.text
 
 
-def test_knowledge_unsupported_ext(demo_token):
+def test_knowledge_unsupported_ext(demo_token) -> None:
     b64 = "data:application/octet-stream;base64," + base64.b64encode(b"\x00" * 200).decode()
     r = requests.post(f"{BASE}/api/personas/{PERSONA_ID}/knowledge", headers=H(demo_token),
                      json={"title": "virus", "file_name": "bad.exe", "file_data": b64}, timeout=10)
     assert r.status_code == 400, r.text
 
 
-def test_knowledge_wrong_workspace(budi_token):
+def test_knowledge_wrong_workspace(budi_token) -> None:
     # budi is in demo's workspace actually, so should work? Problem says "different workspace" -> 404
     # Re-read: budi.owner_id = demo so budi is in demo's workspace. The task says "budi (different workspace) GET demo persona knowledge → 404".
     # However, budi IS in demo's workspace per credentials. We'll just check and skip if 200.
@@ -103,7 +103,7 @@ def test_knowledge_wrong_workspace(budi_token):
     assert r.status_code in (200, 404), r.text
 
 
-def test_knowledge_retrieval_in_chat(demo_token, kn_doc_id):
+def test_knowledge_retrieval_in_chat(demo_token, kn_doc_id) -> None:
     # Create Rio direct conversation
     # list personas
     r = requests.get(f"{BASE}/api/personas", headers=H(demo_token), timeout=15)
@@ -129,7 +129,7 @@ def test_knowledge_retrieval_in_chat(demo_token, kn_doc_id):
                         json={"content": "Jam berapa kantor buka hari Sabtu?"}, timeout=120, stream=True)
     assert msg.status_code == 200, msg.text
     body = msg.text
-    import json as _json, re as _re
+    import json as _json
     deltas = []
     for line in body.splitlines():
         if line.startswith("data: "):
@@ -148,7 +148,7 @@ def test_knowledge_retrieval_in_chat(demo_token, kn_doc_id):
     requests.delete(f"{BASE}/api/personas/{rpid}/knowledge/{kid}", headers=H(demo_token), timeout=10)
 
 
-def test_knowledge_delete(demo_token, kn_doc_id):
+def test_knowledge_delete(demo_token, kn_doc_id) -> None:
     r = requests.delete(f"{BASE}/api/personas/{PERSONA_ID}/knowledge/{kn_doc_id}", headers=H(demo_token), timeout=10)
     assert r.status_code == 200
     r2 = requests.get(f"{BASE}/api/personas/{PERSONA_ID}/knowledge/{kn_doc_id}", headers=H(demo_token), timeout=10)
@@ -156,7 +156,7 @@ def test_knowledge_delete(demo_token, kn_doc_id):
 
 
 # -------------------- Bandwidth billing --------------------
-def test_bandwidth_billing(demo_token, budi_token):
+def test_bandwidth_billing(demo_token, budi_token) -> None:
     # ensure no live call
     requests.post(f"{BASE}/api/conversations/{DM_CID}/call/leave", headers=H(demo_token), timeout=10)
     requests.post(f"{BASE}/api/conversations/{DM_CID}/call/leave", headers=H(budi_token), timeout=10)
@@ -182,13 +182,13 @@ def test_bandwidth_billing(demo_token, budi_token):
     assert j2["is_host"] is False, j2
     assert j2["charged"] == 0, j2
 
-    # budi reports 50MB -> charged ~36
+    # budi reports 50MB -> ~41 credits (0.5 USD/GB × 1.5 margin × 1.11 PPN ÷ 0.001)
     r3 = requests.post(f"{BASE}/api/conversations/{DM_CID}/call/presence", headers=H(budi_token),
                        json={"bytes_delta": 50_000_000}, timeout=10)
     assert r3.status_code == 200, r3.text
     j3 = r3.json()
     assert j3["is_host"] is True, j3
-    assert 32 <= j3["charged"] <= 40, j3
+    assert 36 <= j3["charged"] <= 46, j3
 
     # usage event present for budi
     w = requests.get(f"{BASE}/api/wallet", headers=H(budi_token), timeout=15)
@@ -207,17 +207,17 @@ def test_bandwidth_billing(demo_token, budi_token):
 
 
 # -------------------- Packages --------------------
-def test_packages(demo_token):
+def test_packages(demo_token) -> None:
     r = requests.get(f"{BASE}/api/wallet/packages", headers=H(demo_token), timeout=15)
     assert r.status_code == 200, r.text
     pkgs = r.json()
     assert len(pkgs) == 5, pkgs
     expected = {
-        "starter":   (3,  3000,  63000,  0),
-        "basic":     (5,  5000,  105000, 0),
-        "plus":      (10, 10000, 201000, 5),
-        "pro":       (25, 25000, 481000, 10),
-        "ultimate":  (50, 50000, 916000, 15),
+        "starter":   (3,  3000,  69000,  0),
+        "basic":     (5,  5000,  115000, 0),
+        "plus":      (10, 10000, 220000, 5),
+        "pro":       (25, 25000, 524000, 10),
+        "ultimate":  (50, 50000, 999000, 15),
     }
     by_id = {p["id"]: p for p in pkgs}
     for pid, (usd, cr, price, disc) in expected.items():

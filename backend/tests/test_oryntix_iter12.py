@@ -34,7 +34,7 @@ def budi_h():
 
 
 # ----- rate-limits admin endpoints -----
-def test_rate_limits_defaults_and_rbac(admin_h, budi_h):
+def test_rate_limits_defaults_and_rbac(admin_h, budi_h) -> None:
     r = requests.get(f"{BASE}/api/admin/rate-limits", headers=admin_h, timeout=20)
     assert r.status_code == 200
     d = r.json()
@@ -62,7 +62,7 @@ def test_rate_limits_defaults_and_rbac(admin_h, budi_h):
 
 
 # ----- chat rate limiting -----
-def test_chat_rate_limit_429(admin_h, budi_h):
+def test_chat_rate_limit_429(admin_h, budi_h) -> None:
     # ensure chat_per_min=3 set
     r = requests.put(f"{BASE}/api/admin/rate-limits", headers=admin_h,
                      json={"chat_per_min": 3, "voice_per_min": 30, "calls_per_hour": 20,
@@ -108,7 +108,7 @@ def test_chat_rate_limit_429(admin_h, budi_h):
 
 
 # ----- admin not rate-limited at same low number (per-user bucket, admin has own counter but same limit=3; so admin would also be limited). The task says 'Regression: admin not limited at 20/min' — ensure we RESTORE to 20 first then verify admin burst is OK.
-def test_restore_and_admin_regression(admin_h):
+def test_restore_and_admin_regression(admin_h) -> None:
     r = requests.put(f"{BASE}/api/admin/rate-limits", headers=admin_h,
                      json={"chat_per_min": 20, "voice_per_min": 30, "calls_per_hour": 20,
                            "max_call_minutes": 60, "generation_per_hour": 30}, timeout=20)
@@ -132,14 +132,14 @@ def test_restore_and_admin_regression(admin_h):
 
 
 # ----- voice tts smoke -----
-def test_voice_tts_ok(admin_h):
+def test_voice_tts_ok(admin_h) -> None:
     r = requests.post(f"{BASE}/api/voice/tts", headers=admin_h,
                      json={"text": "halo", "voice": "nova"}, timeout=30)
     assert r.status_code == 200, r.text
 
 
 # ----- realtime calls: multi and single -----
-def test_realtime_calls_multi_and_single(admin_h):
+def test_realtime_calls_multi_and_single(admin_h) -> None:
     r = requests.get(f"{BASE}/api/personas", headers=admin_h, timeout=20)
     personas = [p for p in r.json() if not p.get("deleted")]
     assert len(personas) >= 2, "need 2 personas for multi meeting"
@@ -182,7 +182,7 @@ def test_realtime_calls_multi_and_single(admin_h):
 
 
 # ----- tick max duration -----
-def test_tick_max_duration_402(admin_h):
+def test_tick_max_duration_402(admin_h) -> None:
     # check admin credits first
     me = requests.get(f"{BASE}/api/auth/me", headers=admin_h, timeout=20).json()
     credits = me.get("credits", 0)

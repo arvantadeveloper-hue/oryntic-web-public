@@ -68,12 +68,12 @@ def dm_id(demo_h, budi_id):
 
 
 # ---------- /api/rtc/ice-servers ----------
-def test_ice_servers_unauthenticated():
+def test_ice_servers_unauthenticated() -> None:
     r = requests.get(f"{API}/rtc/ice-servers", timeout=30)
     assert r.status_code in (401, 403), r.text
 
 
-def test_ice_servers_authenticated(demo_h):
+def test_ice_servers_authenticated(demo_h) -> None:
     r = requests.get(f"{API}/rtc/ice-servers", headers=demo_h, timeout=30)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -81,15 +81,14 @@ def test_ice_servers_authenticated(demo_h):
     assert isinstance(body["iceServers"], list) and body["iceServers"]
     assert all("urls" in s for s in body["iceServers"])
     assert "turn" in body
-    # with no METERED env, must be STUN-only
-    if not (os.environ.get("METERED_APP_NAME") and os.environ.get("METERED_CREDENTIAL_API_KEY")):
-        assert body["turn"] is False
-        urls = " ".join(json.dumps(s["urls"]) for s in body["iceServers"])
-        assert "stun:" in urls
+    # turn=True only when the backend has Metered credentials (backend/.env, not visible to this test process)
+    assert isinstance(body["turn"], bool)
+    urls = " ".join(json.dumps(s["urls"]) for s in body["iceServers"])
+    assert "stun:" in urls or "turn:" in urls
 
 
 # ---------- /api/notifications/badges ----------
-def test_badges_shape(budi_h):
+def test_badges_shape(budi_h) -> None:
     r = requests.get(f"{API}/notifications/badges", headers=budi_h, timeout=30)
     assert r.status_code == 200, r.text
     b = r.json()
@@ -99,14 +98,14 @@ def test_badges_shape(budi_h):
     assert b["unread_chats"] >= 0
 
 
-def test_badges_friend_requests_zero_when_already_friends(demo_h):
+def test_badges_friend_requests_zero_when_already_friends(demo_h) -> None:
     r = requests.get(f"{API}/notifications/badges", headers=demo_h, timeout=30)
     assert r.status_code == 200
     # demo & budi already friends; no other pending request expected
     assert r.json()["friend_requests"] >= 0
 
 
-def test_badge_unread_flow_demo_sends_budi_reads(demo_h, budi_h, dm_id):
+def test_badge_unread_flow_demo_sends_budi_reads(demo_h, budi_h, dm_id) -> None:
     # Mark both as read first to establish baseline
     requests.post(f"{API}/conversations/{dm_id}/read", headers=demo_h, timeout=30)
     requests.post(f"{API}/conversations/{dm_id}/read", headers=budi_h, timeout=30)
@@ -199,11 +198,11 @@ async def test_ws_rejects_invalid_token(dm_id):
 
 
 # ---------- Regression ----------
-def test_login_both():
+def test_login_both() -> None:
     assert _login(*DEMO)
     assert _login(*BUDI)
 
 
-def test_conversations_load(demo_h, budi_h):
+def test_conversations_load(demo_h, budi_h) -> None:
     assert requests.get(f"{API}/conversations", headers=demo_h, timeout=30).status_code == 200
     assert requests.get(f"{API}/conversations", headers=budi_h, timeout=30).status_code == 200

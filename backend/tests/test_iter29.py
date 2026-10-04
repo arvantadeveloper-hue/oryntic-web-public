@@ -1,6 +1,5 @@
 """Iter29 — Metered TURN ICE, call presence/leave/incoming."""
 import os
-import re
 import pytest
 import requests
 
@@ -29,7 +28,7 @@ def H(t):
 
 
 # ---------- ICE / TURN ----------
-def test_ice_servers_turn_true(demo_token):
+def test_ice_servers_turn_true(demo_token) -> None:
     r = requests.get(f"{BASE}/api/rtc/ice-servers", headers=H(demo_token), timeout=20)
     assert r.status_code == 200, r.text
     data = r.json()
@@ -44,13 +43,13 @@ def test_ice_servers_turn_true(demo_token):
     assert has_cred, data
 
 
-def test_ice_servers_unauth():
+def test_ice_servers_unauth() -> None:
     r = requests.get(f"{BASE}/api/rtc/ice-servers", timeout=10)
     assert r.status_code in (401, 403)
 
 
 # ---------- call presence/leave/incoming ----------
-def test_presence_then_incoming_for_budi(demo_token, budi_token):
+def test_presence_then_incoming_for_budi(demo_token, budi_token) -> None:
     # ensure clean: both leave
     requests.post(f"{BASE}/api/conversations/{DM_CID}/call/leave", headers=H(demo_token), timeout=10)
     requests.post(f"{BASE}/api/conversations/{DM_CID}/call/leave", headers=H(budi_token), timeout=10)
@@ -75,7 +74,7 @@ def test_presence_then_incoming_for_budi(demo_token, budi_token):
     assert not any(x["conversation_id"] == DM_CID for x in r2.json())
 
 
-def test_leave_removes_incoming(demo_token, budi_token):
+def test_leave_removes_incoming(demo_token, budi_token) -> None:
     requests.post(f"{BASE}/api/conversations/{DM_CID}/call/presence", headers=H(demo_token), timeout=10)
     r = requests.post(f"{BASE}/api/conversations/{DM_CID}/call/leave", headers=H(demo_token), timeout=10)
     assert r.status_code == 200
@@ -83,7 +82,7 @@ def test_leave_removes_incoming(demo_token, budi_token):
     assert not any(x["conversation_id"] == DM_CID for x in r2.json())
 
 
-def test_presence_404_on_non_participant(demo_token, budi_token):
+def test_presence_404_on_non_participant(demo_token, budi_token) -> None:
     budi_me = requests.get(f"{BASE}/api/auth/me", headers=H(budi_token), timeout=10).json()
     budi_id = budi_me["id"]
     r = requests.get(f"{BASE}/api/conversations", headers=H(demo_token), timeout=15)
@@ -100,7 +99,7 @@ def test_presence_404_on_non_participant(demo_token, budi_token):
     assert r.status_code == 404, (r.status_code, r.text)
 
 
-def test_incoming_shape(demo_token, budi_token):
+def test_incoming_shape(demo_token, budi_token) -> None:
     requests.post(f"{BASE}/api/conversations/{DM_CID}/call/leave", headers=H(budi_token), timeout=10)
     requests.post(f"{BASE}/api/conversations/{DM_CID}/call/presence", headers=H(demo_token), timeout=10)
     r = requests.get(f"{BASE}/api/calls/incoming", headers=H(budi_token), timeout=10)

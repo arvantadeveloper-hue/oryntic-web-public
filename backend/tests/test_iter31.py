@@ -31,7 +31,7 @@ def H(tok):
 
 
 # ---------- packages (public) ----------
-def test_packages_public_fx18k():
+def test_packages_public_fx18k() -> None:
     r = requests.get(f"{BASE}/api/wallet/packages", timeout=20)
     assert r.status_code == 200
     pkgs = r.json()
@@ -44,7 +44,7 @@ def test_packages_public_fx18k():
 
 
 # ---------- admin pricing GET ----------
-def test_admin_pricing_get(padm_tok):
+def test_admin_pricing_get(padm_tok) -> None:
     r = requests.get(f"{BASE}/api/admin/pricing", headers=H(padm_tok), timeout=20)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -63,13 +63,13 @@ def test_admin_pricing_get(padm_tok):
     assert rates["vision"] == 9
 
 
-def test_admin_pricing_forbidden_for_workspace_admin(demo_tok):
+def test_admin_pricing_forbidden_for_workspace_admin(demo_tok) -> None:
     r = requests.get(f"{BASE}/api/admin/pricing", headers=H(demo_tok), timeout=20)
     assert r.status_code == 403
 
 
 # ---------- preview (no save) ----------
-def test_admin_pricing_preview(padm_tok):
+def test_admin_pricing_preview(padm_tok) -> None:
     g = requests.get(f"{BASE}/api/admin/pricing", headers=H(padm_tok), timeout=20).json()
     body = dict(g["pricing"])
     # whitelist writable fields in PlatformPricingIn
@@ -96,7 +96,7 @@ def test_admin_pricing_preview(padm_tok):
     assert (g2["pricing"].get("margin_overrides") or {}) == (g["pricing"].get("margin_overrides") or {})
 
 
-def test_admin_pricing_preview_invalid_override(padm_tok):
+def test_admin_pricing_preview_invalid_override(padm_tok) -> None:
     g = requests.get(f"{BASE}/api/admin/pricing", headers=H(padm_tok), timeout=20).json()
     body = {k: v for k, v in g["pricing"].items() if k not in ("updated_at",)}
     body["margin_overrides"] = {"foo": 5}
@@ -104,7 +104,7 @@ def test_admin_pricing_preview_invalid_override(padm_tok):
     assert r.status_code == 422, r.text
 
 
-def test_admin_pricing_preview_duplicate_pkg_ids(padm_tok):
+def test_admin_pricing_preview_duplicate_pkg_ids(padm_tok) -> None:
     g = requests.get(f"{BASE}/api/admin/pricing", headers=H(padm_tok), timeout=20).json()
     body = {k: v for k, v in g["pricing"].items() if k not in ("updated_at",)}
     body["packages"] = copy.deepcopy(body["packages"])
@@ -114,7 +114,7 @@ def test_admin_pricing_preview_duplicate_pkg_ids(padm_tok):
 
 
 # ---------- PUT roundtrip ----------
-def test_admin_pricing_put_roundtrip(padm_tok):
+def test_admin_pricing_put_roundtrip(padm_tok) -> None:
     g = requests.get(f"{BASE}/api/admin/pricing", headers=H(padm_tok), timeout=20).json()
     allowed = {"margin_pct", "tax_pct", "usd_to_idr", "idr_per_credit", "text_usd_per_1k_chars", "image_usd",
                "profile_usd", "stt_usd", "tts_usd", "provider_usd_per_min", "usd_per_credit",
@@ -133,7 +133,7 @@ def test_admin_pricing_put_roundtrip(padm_tok):
 
 
 # ---------- wallet /calls ----------
-def test_wallet_calls_list(demo_tok):
+def test_wallet_calls_list(demo_tok) -> None:
     r = requests.get(f"{BASE}/api/wallet/calls?limit=5", headers=H(demo_tok), timeout=20)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -151,7 +151,7 @@ def test_wallet_calls_list(demo_tok):
 
 
 # ---------- realtime vision rate ----------
-def test_vision_rate(demo_tok):
+def test_vision_rate(demo_tok) -> None:
     r = requests.get(f"{BASE}/api/realtime/vision-rate", headers=H(demo_tok), timeout=20)
     assert r.status_code == 200
     assert r.json().get("credits") == 9
@@ -167,7 +167,7 @@ def demo_persona(demo_tok):
     return items[0]["id"]
 
 
-def test_knowledge_from_url_full_flow(demo_tok, demo_persona):
+def test_knowledge_from_url_full_flow(demo_tok, demo_persona) -> None:
     url = "https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API"
     r = requests.post(f"{BASE}/api/personas/{demo_persona}/knowledge",
                       json={"url": url}, headers=H(demo_tok), timeout=60)
@@ -191,7 +191,7 @@ def test_knowledge_from_url_full_flow(demo_tok, demo_persona):
     assert rd.status_code == 200
 
 
-def test_knowledge_invalid_url(demo_tok, demo_persona):
+def test_knowledge_invalid_url(demo_tok, demo_persona) -> None:
     r = requests.post(f"{BASE}/api/personas/{demo_persona}/knowledge",
                       json={"url": "ftp://x"}, headers=H(demo_tok), timeout=20)
     assert r.status_code == 400
@@ -201,7 +201,7 @@ def test_knowledge_invalid_url(demo_tok, demo_persona):
 GROUP_CID = "90435108-e7d4-429c-9daa-f488d70035b7"
 
 
-def test_realtime_snapshot_billing(demo_tok):
+def test_realtime_snapshot_billing(demo_tok) -> None:
     # Get wallet before
     w0 = requests.get(f"{BASE}/api/wallet", headers=H(demo_tok), timeout=20).json()
     cons0 = w0["consumed"]

@@ -14,6 +14,7 @@ from pydantic import BaseModel, EmailStr, Field
 from pricing import get_trial
 from ratelimit import login_allowed
 from db import db, now_iso, new_id
+from invites import convert_email_invites
 from mailer import send_email, verification_email, reset_email, debug_links
 
 JWT_SECRET = os.environ["JWT_SECRET"]
@@ -255,7 +256,6 @@ async def register(x: RegisterIn, request: Request):
         "created_at": now_iso(),
     }
     await db.users.insert_one(doc)
-    from friends import convert_email_invites
     await convert_email_invites(doc)
     await db.credit_transactions.insert_one({
         "id": new_id(), "user_id": uid, "type": "grant", "amount": int(trial["trial_credits"]),

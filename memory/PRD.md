@@ -311,6 +311,12 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **Hardening**: `auth.user_from_token` + `token_is_fresh` — JWT dengan `iat` sebelum `password_changed_at` ditolak (dipakai `current_user`, WS `/api/ws`, `/api/files`); `change-password` mengembalikan `access_token` baru (Profile.jsx menyimpannya). CORS tetap via env `CORS_ORIGINS` (preview `*`; **produksi: set ke domain app**).
 - Verifikasi curl: SSRF ke 127.0.0.1/169.254.169.254/localhost/10.x/[::1]/metadata.google.internal/port 8080 → 400; MDN & redirect http→https GitHub OK; debug_link ada di host preview, hilang dengan Host lain; token lama → 401 setelah ganti password, token baru 200; pytest iter31 12/12.
 
+## Update 2026-06 (al) — Code review fixes
+- Circular import `auth.py ↔ friends.py` dihilangkan: `convert_email_invites` dipindah ke `invites.py` (hanya bergantung `db`).
+- Variabel yang mungkin belum didefinisikan: `knowledge._fetch_url` menginisialisasi `content/ctype/encoding` sebelum loop; `wallet.py` impor `datetime` di level modul.
+- Kompleksitas: `chat._persona_reply` → `_typed_intercepts` + `_plain_reply`; `_task_offer_turn` → `_offer_mode` + `_resolve_pending_offer` + `_make_offer`; `send_message` → `_choose_responders`; `_gallery_context` → `_gallery_task_context` + `_blob_text`; `assignments.assign_task` → `_target_persona`; `_maybe_assemble` → `_assemble_team_output`. Perilaku tidak berubah (pytest iter24/27/28/30/31 lulus; SSE chat, task offer → "terima beres" → task_assigned diverifikasi).
+- Tests: kredensial akun uji dibaca dari env lewat `tests/creds.py` (TEST_*_PASSWORD, default akun demo preview) — dipakai `test_iter24.py`; semua `def test_*` diberi `-> None`; impor tak terpakai dibersihkan; ekspektasi lama (kurs 16.500, bandwidth tanpa PPN, turn=False) diperbarui ke tarif sekarang. Catatan: `assert x is True/False` di tes adalah idiom singleton yang benar — dibiarkan.
+
 ## Next tasks
 - **Website Admin Platform** (terpisah dari admin pengguna): editor margin global + override per fitur, editor tier paket, biaya provider, pratinjau via `/admin/pricing/preview`, tabel `features`.
 - Uji nyata bagikan layar + cuplikan ke asisten dengan 2 browser/mic (user).

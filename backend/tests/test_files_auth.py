@@ -17,12 +17,12 @@ def _login(email, password):
     return r.json()["access_token"], r.json()["user"]["id"]
 
 
-def test_files_requires_auth():
+def test_files_requires_auth() -> None:
     r = requests.get(f"{API}/files/{DEMO_PATH}", timeout=30)
     assert r.status_code == 401, r.text
 
 
-def test_files_valid_token_200():
+def test_files_valid_token_200() -> None:
     token, uid = _login(DEMO_EMAIL, DEMO_PASSWORD)
     assert uid == DEMO_USER_ID
     r = requests.get(f"{API}/files/{DEMO_PATH}?auth={token}", timeout=30)
@@ -30,7 +30,7 @@ def test_files_valid_token_200():
     assert len(r.content) > 0
 
 
-def test_files_wrong_user_403():
+def test_files_wrong_user_403() -> None:
     # register fresh user, use their token to access DEMO path -> 403
     import uuid
     email = f"TEST_filesuser_{uuid.uuid4().hex[:8]}@aivora.ai"
@@ -41,7 +41,7 @@ def test_files_wrong_user_403():
     assert r.status_code == 403, f"expected 403 got {r.status_code}: {r.text}"
 
 
-def test_files_bearer_header_also_works():
+def test_files_bearer_header_also_works() -> None:
     token, _ = _login(DEMO_EMAIL, DEMO_PASSWORD)
     r = requests.get(f"{API}/files/{DEMO_PATH}", headers={"Authorization": f"Bearer {token}"}, timeout=30)
     assert r.status_code == 200

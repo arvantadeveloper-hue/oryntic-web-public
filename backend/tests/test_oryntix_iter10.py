@@ -88,7 +88,7 @@ def _consume_sse(resp):
 
 
 # ---------- (a) /send no longer creates meeting_notes ----------
-def test_send_does_not_create_meeting_notes_task(admin_headers, meeting_cid):
+def test_send_does_not_create_meeting_notes_task(admin_headers, meeting_cid) -> None:
     # baseline
     before = requests.get(f"{API}/tasks", headers=admin_headers, timeout=15).json()
     before_notes = [t for t in before if t.get("type") == "meeting_notes"]
@@ -108,7 +108,7 @@ def test_send_does_not_create_meeting_notes_task(admin_headers, meeting_cid):
     assert len(after_notes) == len(before_notes), "No meeting_notes task should be created by /send"
 
 
-def test_send_turn2_no_meeting_notes_task(admin_headers, meeting_cid):
+def test_send_turn2_no_meeting_notes_task(admin_headers, meeting_cid) -> None:
     before = requests.get(f"{API}/tasks", headers=admin_headers, timeout=15).json()
     before_notes = sum(1 for t in before if t.get("type") == "meeting_notes")
 
@@ -123,7 +123,7 @@ def test_send_turn2_no_meeting_notes_task(admin_headers, meeting_cid):
 
 
 # ---------- (b,c) /summary ----------
-def test_summary_creates_one_meeting_notes_task(admin_headers, meeting_cid):
+def test_summary_creates_one_meeting_notes_task(admin_headers, meeting_cid) -> None:
     before = requests.get(f"{API}/tasks", headers=admin_headers, timeout=15).json()
     before_notes = sum(1 for t in before if t.get("type") == "meeting_notes")
 
@@ -137,7 +137,7 @@ def test_summary_creates_one_meeting_notes_task(admin_headers, meeting_cid):
     assert after_notes == before_notes + 1, "Exactly one meeting_notes task should be created"
 
 
-def test_summary_private_returns_400(admin_headers, two_personas):
+def test_summary_private_returns_400(admin_headers, two_personas) -> None:
     pid = two_personas[0]["id"]
     r = requests.post(f"{API}/conversations", headers=admin_headers,
                       json={"persona_ids": [pid], "type": "private", "title": "TEST_iter10_priv"}, timeout=15)
@@ -153,7 +153,7 @@ def test_summary_private_returns_400(admin_headers, two_personas):
         requests.delete(f"{API}/conversations/{cid}", headers=admin_headers, timeout=15)
 
 
-def test_summary_allowed_for_participant(admin_headers, budi_headers, budi_token, two_personas):
+def test_summary_allowed_for_participant(admin_headers, budi_headers, budi_token, two_personas) -> None:
     """Budi is invited as participant; he should be able to call /summary (not 404)."""
     pids = [p["id"] for p in two_personas]
     # get budi id
@@ -177,7 +177,7 @@ def test_summary_allowed_for_participant(admin_headers, budi_headers, budi_token
 
 
 # ---------- (d) invite links ----------
-def test_invite_link_structure_and_expiry(admin_headers, meeting_cid):
+def test_invite_link_structure_and_expiry(admin_headers, meeting_cid) -> None:
     r = requests.post(f"{API}/conversations/{meeting_cid}/invite-link", headers=admin_headers, timeout=15)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -201,7 +201,7 @@ def test_invite_link_structure_and_expiry(admin_headers, meeting_cid):
     assert "kedaluwarsa" in r3.json().get("detail", "")
 
 
-def test_invite_register_sets_daily_limit_200(admin_headers, meeting_cid):
+def test_invite_register_sets_daily_limit_200(admin_headers, meeting_cid) -> None:
     r = requests.post(f"{API}/conversations/{meeting_cid}/invite-link", headers=admin_headers, timeout=15)
     assert r.status_code == 200
     token = r.json()["token"]
@@ -225,7 +225,7 @@ def test_invite_register_sets_daily_limit_200(admin_headers, meeting_cid):
 
 
 # ---------- (e) invite_token not leaked ----------
-def test_conversations_list_no_invite_token(admin_headers, meeting_cid):
+def test_conversations_list_no_invite_token(admin_headers, meeting_cid) -> None:
     # ensure an invite_token exists for the conv
     requests.post(f"{API}/conversations/{meeting_cid}/invite-link", headers=admin_headers, timeout=15)
     convs = requests.get(f"{API}/conversations", headers=admin_headers, timeout=15).json()
@@ -237,7 +237,7 @@ def test_conversations_list_no_invite_token(admin_headers, meeting_cid):
 
 
 # ---------- (f) persona_ids workspace isolation ----------
-def test_create_conv_rejects_foreign_persona(admin_headers):
+def test_create_conv_rejects_foreign_persona(admin_headers) -> None:
     r = requests.post(f"{API}/conversations", headers=admin_headers,
                       json={"persona_ids": ["00000000-0000-0000-0000-000000000000"], "type": "private"}, timeout=15)
     assert r.status_code == 400
@@ -245,7 +245,7 @@ def test_create_conv_rejects_foreign_persona(admin_headers):
 
 
 # ---------- (g) files path checks ----------
-def test_files_path_traversal_forbidden(admin_token):
+def test_files_path_traversal_forbidden(admin_token) -> None:
     me = requests.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {admin_token}"}, timeout=15).json()
     uid = me["id"]
     # path traversal
@@ -257,7 +257,7 @@ def test_files_path_traversal_forbidden(admin_token):
 
 
 # ---------- (h) voice/tts sanity ----------
-def test_voice_tts_sanity(admin_headers):
+def test_voice_tts_sanity(admin_headers) -> None:
     r = requests.post(f"{API}/voice/tts", headers=admin_headers,
                       json={"text": "halo", "voice": "nova"}, timeout=60)
     assert r.status_code == 200, r.text

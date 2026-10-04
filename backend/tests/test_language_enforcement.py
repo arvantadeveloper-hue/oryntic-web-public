@@ -102,7 +102,7 @@ def _stream_send(cid, content, headers, moderator=True, timeout=120):
     return finals
 
 
-def test_private_persona_language(headers):
+def test_private_persona_language(headers) -> None:
     _ensure_id_setting(headers)
     finals = _stream_send(PRIVATE_CID, INDO_PROMPT, headers, moderator=True)
     assert finals, "no final events received"
@@ -114,7 +114,7 @@ def test_private_persona_language(headers):
         assert lang == "id", f"Private persona reply not in Indonesian. id={idh} en={enh}. Content: {content[:300]}"
 
 
-def test_group_persona_language(headers):
+def test_group_persona_language(headers) -> None:
     _ensure_id_setting(headers)
     finals = _stream_send(GROUP_CID, INDO_PROMPT, headers, moderator=True)
     assert len(finals) >= 2, f"expected >=2 persona finals in group, got {len(finals)}"
@@ -144,7 +144,7 @@ def fresh_meeting_cid(headers):
     return cid
 
 
-def test_meeting_moderator_per_turn_summary_language(headers, fresh_meeting_cid):
+def test_meeting_moderator_per_turn_summary_language(headers, fresh_meeting_cid) -> None:
     _ensure_id_setting(headers)
     finals = _stream_send(fresh_meeting_cid, INDO_PROMPT, headers, moderator=True)
     mod = [f for f in finals if f.get("is_moderator")]
@@ -156,7 +156,7 @@ def test_meeting_moderator_per_turn_summary_language(headers, fresh_meeting_cid)
     assert lang == "id", f"Meeting moderator summary not Indonesian. id={idh} en={enh}: {content[:300]}"
 
 
-def test_meeting_moderator_interjection_language(headers, fresh_meeting_cid):
+def test_meeting_moderator_interjection_language(headers, fresh_meeting_cid) -> None:
     _ensure_id_setting(headers)
     # Need even user-message count for interject to fire. The per-turn-summary test above already sent 1 user msg.
     # Send 1st moderator:false (user count=2 -> even -> interject)
@@ -174,7 +174,7 @@ def test_meeting_moderator_interjection_language(headers, fresh_meeting_cid):
     assert lang == "id", f"Moderator interjection not Indonesian. id={idh} en={enh}: {content[:300]}"
 
 
-def test_meeting_summary_endpoint_language(headers, fresh_meeting_cid):
+def test_meeting_summary_endpoint_language(headers, fresh_meeting_cid) -> None:
     _ensure_id_setting(headers)
     r = requests.post(f"{BASE_URL}/api/conversations/{fresh_meeting_cid}/summary", headers=headers, timeout=60)
     assert r.status_code == 200, f"summary failed {r.status_code}: {r.text[:400]}"

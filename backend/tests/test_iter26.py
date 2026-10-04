@@ -32,7 +32,7 @@ def h(demo_token):
 
 # ---------- (B)/(A) Direct conv idempotence + unread + mark_read ----------
 
-def test_direct_conv_idempotent(h):
+def test_direct_conv_idempotent(h) -> None:
     r1 = requests.post(f"{API}/conversations/direct", json={"persona_id": RIO}, headers=h, timeout=30)
     assert r1.status_code == 200, r1.text
     cid1 = r1.json()["id"]
@@ -41,7 +41,7 @@ def test_direct_conv_idempotent(h):
     assert r2.json()["id"] == cid1, "direct conv must be idempotent per assistant"
 
 
-def test_list_conversations_has_unread_flag(h):
+def test_list_conversations_has_unread_flag(h) -> None:
     r = requests.get(f"{API}/conversations", headers=h, timeout=30)
     assert r.status_code == 200
     convs = r.json()
@@ -51,7 +51,7 @@ def test_list_conversations_has_unread_flag(h):
         assert c.get("archived_conv") is not True  # only non-archived
 
 
-def test_mark_read_clears_unread(h):
+def test_mark_read_clears_unread(h) -> None:
     # pick a conv with last_message so unread flag toggles
     convs = requests.get(f"{API}/conversations", headers=h, timeout=30).json()
     target = next((c for c in convs if c.get("last_message")), None)
@@ -66,7 +66,7 @@ def test_mark_read_clears_unread(h):
 
 # ---------- (B) Task chat-target + discuss ----------
 
-def test_chat_target_existing_group(h):
+def test_chat_target_existing_group(h) -> None:
     r = requests.get(f"{API}/tasks/{TEAM_TASK_EXISTS_GROUP}/chat-target", headers=h, timeout=30)
     assert r.status_code == 200, r.text
     data = r.json()
@@ -76,7 +76,7 @@ def test_chat_target_existing_group(h):
     assert data.get("group") is not None, "expected exact-match group to exist"
 
 
-def test_chat_target_second_team_task(h):
+def test_chat_target_second_team_task(h) -> None:
     r = requests.get(f"{API}/tasks/{TEAM_TASK_NO_GROUP}/chat-target", headers=h, timeout=30)
     assert r.status_code == 200, r.text
     data = r.json()
@@ -84,7 +84,7 @@ def test_chat_target_second_team_task(h):
     assert len(data["personas"]) >= 2
 
 
-def test_discuss_task_creates_or_reuses_group(h):
+def test_discuss_task_creates_or_reuses_group(h) -> None:
     # Use the "no group" team task to create a group via POST discuss
     pids = [NOVA, NADIA]
     r = requests.post(f"{API}/tasks/{TEAM_TASK_NO_GROUP}/discuss",
@@ -114,7 +114,7 @@ def archive_items(h):
     return data
 
 
-def test_archives_pagination_shape(archive_items):
+def test_archives_pagination_shape(archive_items) -> None:
     assert isinstance(archive_items["items"], list)
     assert isinstance(archive_items["has_more"], bool)
     if archive_items["has_more"]:
@@ -123,7 +123,7 @@ def test_archives_pagination_shape(archive_items):
         assert archive_items["next_before"] in (None, "")
 
 
-def test_archives_search_q(h):
+def test_archives_search_q(h) -> None:
     r = requests.get(f"{API}/archives?q=kasir", headers=h, timeout=30)
     assert r.status_code == 200
     items = r.json()["items"]
@@ -131,7 +131,7 @@ def test_archives_search_q(h):
     assert isinstance(items, list)
 
 
-def test_archive_detail_has_messages(h, archive_items):
+def test_archive_detail_has_messages(h, archive_items) -> None:
     if not archive_items["items"]:
         pytest.skip("no archives present")
     aid = archive_items["items"][0]["id"]
@@ -142,7 +142,7 @@ def test_archive_detail_has_messages(h, archive_items):
     assert data.get("id") == aid
 
 
-def test_restore_archive_marks_messages_live(h, archive_items):
+def test_restore_archive_marks_messages_live(h, archive_items) -> None:
     # pick a non-restored archive
     candidates = [a for a in archive_items["items"] if not a.get("restored")]
     if not candidates:
@@ -168,7 +168,7 @@ def test_restore_archive_marks_messages_live(h, archive_items):
     assert g.get("restored") is True
 
 
-def test_archive_remind_creates_reminder(h, archive_items):
+def test_archive_remind_creates_reminder(h, archive_items) -> None:
     if not archive_items["items"]:
         pytest.skip("no archives present")
     aid = archive_items["items"][0]["id"]
@@ -186,7 +186,7 @@ def test_archive_remind_creates_reminder(h, archive_items):
 
 # ---------- Settings auto_archive_hours ----------
 
-def test_settings_auto_archive_hours_valid_and_restore(h):
+def test_settings_auto_archive_hours_valid_and_restore(h) -> None:
     # Set to 72
     r = requests.put(f"{API}/auth/settings", json={"auto_archive_hours": 72}, headers=h, timeout=30)
     assert r.status_code == 200, r.text
@@ -203,14 +203,14 @@ def test_settings_auto_archive_hours_valid_and_restore(h):
 
 # ---------- Regression: login budi + galeri ----------
 
-def test_login_budi_regression():
+def test_login_budi_regression() -> None:
     time.sleep(1)
     r = requests.post(f"{API}/auth/login", json={"email": "budi@aivora.ai", "password": "budi123456"}, timeout=30)
     assert r.status_code == 200, r.text
     assert "access_token" in r.json()
 
 
-def test_gallery_still_works(h):
+def test_gallery_still_works(h) -> None:
     r = requests.get(f"{API}/gallery?limit=5", headers=h, timeout=30)
     assert r.status_code == 200
     assert "items" in r.json()

@@ -106,6 +106,7 @@ async def _fetch_url(url: str) -> tuple:
     import trafilatura
     import asyncio
     await asyncio.to_thread(_check_url, url)
+    content, ctype, encoding = b"", "", "utf-8"
     try:
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", "Accept-Language": "id,en;q=0.8"}) as client:
             for _ in range(5):
@@ -121,7 +122,7 @@ async def _fetch_url(url: str) -> tuple:
                         body.extend(chunk)
                         if len(body) > MAX_BYTES:
                             raise HTTPException(400, "Halaman lebih dari 8 MB")
-                    content = bytes(body)
+                    content, encoding = bytes(body), r.encoding or "utf-8"
                     break
             else:
                 raise HTTPException(400, "Terlalu banyak pengalihan")
@@ -129,7 +130,7 @@ async def _fetch_url(url: str) -> tuple:
         raise HTTPException(400, f"Situs menolak permintaan (HTTP {exc.response.status_code})") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(400, "Tautan tidak dapat diakses") from exc
-    text_body = content.decode(r.encoding or "utf-8", "ignore")
+    text_body = content.decode(encoding, "ignore")
     if "html" in ctype or not ctype:
         html = text_body
         text = trafilatura.extract(html, include_comments=False, include_tables=True, favor_recall=True) or _html_to_text(html)

@@ -37,7 +37,7 @@ def persona_id(h):
 
 
 # ---------- Settings validation ----------
-def test_settings_daily_digest_echo(h, persona_id):
+def test_settings_daily_digest_echo(h, persona_id) -> None:
     r = requests.put(f"{API}/auth/settings",
                      json={"daily_digest": {"enabled": True, "channel": "both", "time": "07:00", "persona_id": persona_id}},
                      headers=h, timeout=15)
@@ -49,7 +49,7 @@ def test_settings_daily_digest_echo(h, persona_id):
     assert dd.get("persona_id") == persona_id
 
 
-def test_settings_invalid_time(h, persona_id):
+def test_settings_invalid_time(h, persona_id) -> None:
     r = requests.put(f"{API}/auth/settings",
                      json={"daily_digest": {"enabled": True, "channel": "chat", "time": "7am", "persona_id": persona_id}},
                      headers=h, timeout=15)
@@ -57,7 +57,7 @@ def test_settings_invalid_time(h, persona_id):
     assert "HH:MM" in (r.json().get("detail") or "")
 
 
-def test_settings_channel_coerced(h, persona_id):
+def test_settings_channel_coerced(h, persona_id) -> None:
     r = requests.put(f"{API}/auth/settings",
                      json={"daily_digest": {"enabled": True, "channel": "sms", "time": "07:00", "persona_id": persona_id}},
                      headers=h, timeout=15)
@@ -70,7 +70,7 @@ def _decline_rem(h, rid):
     requests.post(f"{API}/reminders/{rid}/respond", json={"action": "decline"}, headers=h, timeout=10)
 
 
-def test_send_now_both(h, persona_id):
+def test_send_now_both(h, persona_id) -> None:
     # ensure enabled + both
     requests.put(f"{API}/auth/settings",
                  json={"daily_digest": {"enabled": True, "channel": "both", "time": "07:00", "persona_id": persona_id}},
@@ -108,7 +108,7 @@ def test_send_now_both(h, persona_id):
     _decline_rem(h, j["reminder_id"])
 
 
-def test_send_now_chat_only(h, persona_id):
+def test_send_now_chat_only(h, persona_id) -> None:
     requests.put(f"{API}/auth/settings",
                  json={"daily_digest": {"enabled": True, "channel": "chat", "time": "07:00", "persona_id": persona_id}},
                  headers=h, timeout=15)
@@ -121,7 +121,7 @@ def test_send_now_chat_only(h, persona_id):
     assert "reminder_id" not in j or not j.get("reminder_id")
 
 
-def test_send_now_disabled_force(h, persona_id):
+def test_send_now_disabled_force(h, persona_id) -> None:
     requests.put(f"{API}/auth/settings",
                  json={"daily_digest": {"enabled": False, "channel": "chat", "time": "07:00", "persona_id": persona_id}},
                  headers=h, timeout=15)
@@ -132,7 +132,7 @@ def test_send_now_disabled_force(h, persona_id):
 
 
 # ---------- Meeting → Panggilan wording ----------
-def test_conversations_no_meeting_prefix(h):
+def test_conversations_no_meeting_prefix(h) -> None:
     r = requests.get(f"{API}/conversations", headers=h, timeout=15)
     assert r.status_code == 200
     titles = [c.get("title", "") for c in r.json()]
@@ -140,7 +140,7 @@ def test_conversations_no_meeting_prefix(h):
     assert not bad, f"found legacy titles: {bad}"
 
 
-def test_create_meeting_title_is_panggilan(h):
+def test_create_meeting_title_is_panggilan(h) -> None:
     pr = requests.get(f"{API}/personas", headers=h, timeout=10).json()
     assert len(pr) >= 2
     pids = [pr[0]["id"], pr[1]["id"]]
@@ -154,7 +154,7 @@ def test_create_meeting_title_is_panggilan(h):
     requests.delete(f"{API}/conversations/{cid}", headers=h, timeout=10)
 
 
-def test_task_discuss_meeting_mode_title(h):
+def test_task_discuss_meeting_mode_title(h) -> None:
     # create a task
     tr = requests.post(f"{API}/tasks",
                        json={"title": "TEST_iter22 panggilan wording", "goal": "verifikasi judul panggilan", "deadline": None, "context": ""},

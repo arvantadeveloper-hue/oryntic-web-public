@@ -58,7 +58,7 @@ def _task_count(h):
 
 
 # --- summary endpoint ---
-def test_summary_empty_conversation_returns_400(h, persona_ids):
+def test_summary_empty_conversation_returns_400(h, persona_ids) -> None:
     r = requests.post(f"{API}/conversations", headers=h,
                       json={"persona_ids": persona_ids, "type": "meeting", "title": "TEST_empty"})
     assert r.status_code == 200, r.text
@@ -68,7 +68,7 @@ def test_summary_empty_conversation_returns_400(h, persona_ids):
     requests.delete(f"{API}/conversations/{cid}", headers=h)
 
 
-def test_summary_private_conversation_returns_400(h, persona_ids):
+def test_summary_private_conversation_returns_400(h, persona_ids) -> None:
     r = requests.post(f"{API}/conversations", headers=h,
                       json={"persona_ids": [persona_ids[0]], "type": "private", "title": "TEST_priv"})
     assert r.status_code == 200, r.text
@@ -78,7 +78,7 @@ def test_summary_private_conversation_returns_400(h, persona_ids):
     requests.delete(f"{API}/conversations/{cid}", headers=h)
 
 
-def test_summary_creates_meeting_notes_task(h):
+def test_summary_creates_meeting_notes_task(h) -> None:
     msg = f"TEST ringkas: apa agenda rapat singkat kita? {uuid.uuid4().hex[:6]}"
     with requests.post(f"{API}/conversations/{LEGACY_MEETING_CID}/send", headers=h,
                        json={"content": msg, "moderator": False}, stream=True, timeout=180) as resp:
@@ -103,7 +103,7 @@ def test_summary_creates_meeting_notes_task(h):
 
 
 # --- Moderator Aktif: interjection on even turns, no task ---
-def test_moderator_interject_even_turns_no_task(h, persona_ids):
+def test_moderator_interject_even_turns_no_task(h, persona_ids) -> None:
     r = requests.post(f"{API}/conversations", headers=h,
                       json={"persona_ids": persona_ids, "type": "meeting", "title": "TEST_interject"})
     assert r.status_code == 200, r.text
@@ -143,7 +143,7 @@ def test_moderator_interject_even_turns_no_task(h, persona_ids):
 
 
 # --- Legacy: moderator:true still emits full summary + creates meeting_notes task ---
-def test_moderator_true_emits_summary_and_creates_task(h, persona_ids):
+def test_moderator_true_emits_summary_and_creates_task(h, persona_ids) -> None:
     r = requests.post(f"{API}/conversations", headers=h,
                       json={"persona_ids": persona_ids, "type": "meeting", "title": "TEST_modtrue"})
     assert r.status_code == 200

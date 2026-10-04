@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -90,7 +91,6 @@ async def call_report(before: str | None = None, limit: int = 20, u: dict = Depe
         r["title"] = (c.get("titles") or {}).get(u["id"]) or c.get("title") or "Panggilan"
         r["type"] = c.get("type")
         if not r["with_ai"] and r["started_at"] and r["ended_at"]:
-            from datetime import datetime
             r["seconds"] = int((datetime.fromisoformat(r["ended_at"]) - datetime.fromisoformat(r["started_at"])).total_seconds()) + 30
         r["data_mb"] = round(r["data_mb"], 2)
         r["total"] = r["assistant_credits"] + r["data_credits"] + r["snapshot_credits"]

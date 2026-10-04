@@ -46,7 +46,7 @@ def headers(token):
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
-def test_voices_list(headers):
+def test_voices_list(headers) -> None:
     r = requests.get(f"{API}/voice/voices", headers=headers, timeout=15)
     assert r.status_code == 200
     data = r.json()
@@ -56,12 +56,12 @@ def test_voices_list(headers):
         assert v in data["voices"]
 
 
-def test_tts_empty_text_400(headers):
+def test_tts_empty_text_400(headers) -> None:
     r = requests.post(f"{API}/voice/tts", headers=headers, json={"text": "", "voice": "nova"}, timeout=15)
     assert r.status_code == 400
 
 
-def test_tts_returns_audio(headers):
+def test_tts_returns_audio(headers) -> None:
     r = requests.post(f"{API}/voice/tts", headers=headers,
                       json={"text": "Halo apa kabar", "voice": "nova"}, timeout=60)
     assert r.status_code == 200, r.text[:200]
@@ -83,7 +83,7 @@ def _assert_indonesian(text: str):
     assert len(hits) >= 3, f"transcript not Indonesian (hits={hits}): {text!r}"
 
 
-def test_stt_defaults_to_indonesian_from_user_setting(headers, id_audio_b64):
+def test_stt_defaults_to_indonesian_from_user_setting(headers, id_audio_b64) -> None:
     # No language in body -> should fallback to user.settings.conversation_language or 'id'
     r = requests.post(f"{API}/voice/transcribe", headers=headers,
                       json={"audio_b64": id_audio_b64, "filename": "audio.mp3"}, timeout=90)
@@ -94,7 +94,7 @@ def test_stt_defaults_to_indonesian_from_user_setting(headers, id_audio_b64):
     _assert_indonesian(text)
 
 
-def test_stt_explicit_language_id(headers, id_audio_b64):
+def test_stt_explicit_language_id(headers, id_audio_b64) -> None:
     r = requests.post(f"{API}/voice/transcribe", headers=headers,
                       json={"audio_b64": id_audio_b64, "filename": "audio.mp3", "language": "id"},
                       timeout=90)
@@ -105,7 +105,7 @@ def test_stt_explicit_language_id(headers, id_audio_b64):
     _assert_indonesian(text)
 
 
-def test_stt_deducts_credits(headers, id_audio_b64):
+def test_stt_deducts_credits(headers, id_audio_b64) -> None:
     me1 = requests.get(f"{API}/auth/me", headers=headers, timeout=15).json()
     bal_before = int(me1.get("credits", 0))
     r = requests.post(f"{API}/voice/transcribe", headers=headers,

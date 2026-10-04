@@ -33,37 +33,44 @@ def _pdf_text(data: str) -> str:
     return "".join((p.extract_text() or "") + "\n" for p in reader.pages[:20])[:6000]
 
 
+async def _gallery_task_context(a: dict, user_id: str) -> Optional[str]:
+    from files import _same_workspace
+    t = await db.tasks.find_one({"id": a["task_id"]}, {"_id": 0, "goal": 1, "final_output": 1, "workspace_id": 1, "user_id": 1})
+    if not t or not (t.get("user_id") == user_id or await _same_workspace(user_id, t.get("workspace_id") or "")):
+        return None
+    return f"[Dokumen Galeri '{t.get('goal') or a.get('name', 'berkas')}' (/workspace/{a['task_id']})]:\n{(t.get('final_output') or '')[:6000]}"
+
+
+def _blob_text(data: bytes, path: str, name: str) -> str:
+    ext = path.rsplit(".", 1)[-1].lower()
+    if ext == "pdf":
+        return f"[PDF '{name}']:\n{_pdf_text(base64.b64encode(data).decode())}"
+    if ext == "docx":
+        from docx import Document
+        return f"[Dokumen '{name}']:\n" + "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs)[:6000]
+    return f"[Berkas '{name}']:\n{data.decode('utf-8', 'ignore')[:6000]}"
+
+
 async def _gallery_context(a: dict, user_id: str) -> Optional[str]:
     """Attachment picked from the Gallery: read the stored object / task result — no re-upload."""
     from files import _path_parts, _same_workspace
     from storage import get_object
-    name = a.get("name", "berkas")
     if a.get("task_id"):
-        t = await db.tasks.find_one({"id": a["task_id"]}, {"_id": 0, "goal": 1, "final_output": 1, "workspace_id": 1, "user_id": 1})
-        if not t or not (t.get("user_id") == user_id or await _same_workspace(user_id, t.get("workspace_id") or "")):
-            return None
-        return f"[Dokumen Galeri '{t.get('goal') or name}' (/workspace/{a['task_id']})]:\n{(t.get('final_output') or '')[:6000]}"
-    path = a.get("path") or ""
+        return await _gallery_task_context(a, user_id)
+    name, path = a.get("name", "berkas"), a.get("path") or ""
     parts = _path_parts(path)
     if parts[2] != user_id and not await _same_workspace(user_id, parts[2]):
         return None
     if a.get("kind") == "video":
         return f"[Video Galeri '{name}' dilampirkan sebagai tautan]"
     data, ctype = await asyncio.to_thread(get_object, path)
-    if a.get("kind") == "image" or (ctype or "").startswith("image/"):
-        desc = await describe_image(base64.b64encode(data).decode())
-        if not desc:
-            return None
-        await record_usage(user_id, "vision", VISION_CREDITS, {"name": name})
-        return f"[Gambar Galeri '{name}']: {desc}"
-    ext = path.rsplit(".", 1)[-1].lower()
-    if ext == "pdf":
-        return f"[PDF '{name}']:\n{_pdf_text(base64.b64encode(data).decode())}"
-    if ext == "docx":
-        from docx import Document
-        doc = Document(io.BytesIO(data))
-        return f"[Dokumen '{name}']:\n" + "\n".join(p.text for p in doc.paragraphs)[:6000]
-    return f"[Berkas '{name}']:\n{data.decode('utf-8', 'ignore')[:6000]}"
+    if a.get("kind") != "image" and not (ctype or "").startswith("image/"):
+        return _blob_text(data, path, name)
+    desc = await describe_image(base64.b64encode(data).decode())
+    if not desc:
+        return None
+    await record_usage(user_id, "vision", VISION_CREDITS, {"name": name})
+    return f"[Gambar Galeri '{name}']: {desc}"
 
 
 async def _attachment_context(a: dict, user_id: str) -> Optional[str]:
@@ -656,23 +663,47 @@ async def _task_offer_turn(ctx):
     if (conv.get("persona_ids") or [ctx.persona["id"]])[0] != ctx.persona["id"]:
         return  # in group chats only the first assistant handles task offers (avoids duplicate offers)
     if conv.get("pending_task"):
-        from assignments import accept_pending, names_mentioned
-        named = []
-        if conv["pending_task"].get("team_possible"):
-            roster = await db.personas.find({"user_id": workspace_id(ctx.user), "deleted": {"$ne": True}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
-            named = names_mentioned(ctx.user_text, roster, exclude_id=ctx.persona["id"])
-        mode = "team" if (TEAM_RE.search(ctx.user_text) or named) else "delegate" if DELEGATE_RE.search(ctx.user_text) else "discuss" if DISCUSS_RE.search(ctx.user_text) else None
-        if mode:
-            yield ctx.sse(start=True)
-            yield ctx.sse(status="Mencatat tugas..." if mode == "delegate" else "Membagi tugas ke tim..." if mode == "team" else "Menyusun langkah...")
-            pending = {**conv["pending_task"], "directives": ((conv["pending_task"].get("directives") or "") + "\n" + ctx.user_text).strip()}
-            msg = await accept_pending({"id": ctx.cid, **conv, "pending_task": pending, "persona_id": ctx.persona["id"]}, ctx.user, mode)
-            yield ctx.sse(final=True, content=msg["content"], message_id=msg["id"], credits_used=msg.get("credits", 0), **{k: msg[k] for k in ("tool", "task_id") if k in msg})
+        resolved = False
+        async for ev in _resolve_pending_offer(ctx, conv):
+            resolved = True
+            yield ev
+        if resolved:
             return
         await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_task": None}})  # user moved on
     plan = await plan_task(ctx.user_text, (ctx.user.get("settings") or {}).get("timezone"), ctx.prompt[-600:] if ctx.prompt else "")
     if not plan.get("is_task") or not (plan.get("long") or plan.get("scheduled_at")):
         return
+    async for ev in _make_offer(ctx, plan):
+        yield ev
+
+
+async def _offer_mode(ctx, pending: dict) -> Optional[str]:
+    """How the user answered a pending task offer: team / delegate / discuss, or None when the reply is unrelated."""
+    from assignments import names_mentioned
+    named = []
+    if pending.get("team_possible"):
+        roster = await db.personas.find({"user_id": workspace_id(ctx.user), "deleted": {"$ne": True}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
+        named = names_mentioned(ctx.user_text, roster, exclude_id=ctx.persona["id"])
+    if TEAM_RE.search(ctx.user_text) or named:
+        return "team"
+    if DELEGATE_RE.search(ctx.user_text):
+        return "delegate"
+    return "discuss" if DISCUSS_RE.search(ctx.user_text) else None
+
+
+async def _resolve_pending_offer(ctx, conv: dict):
+    from assignments import accept_pending
+    mode = await _offer_mode(ctx, conv["pending_task"])
+    if not mode:
+        return
+    yield ctx.sse(start=True)
+    yield ctx.sse(status={"delegate": "Mencatat tugas...", "team": "Membagi tugas ke tim..."}.get(mode, "Menyusun langkah..."))
+    pending = {**conv["pending_task"], "directives": ((conv["pending_task"].get("directives") or "") + "\n" + ctx.user_text).strip()}
+    msg = await accept_pending({"id": ctx.cid, **conv, "pending_task": pending, "persona_id": ctx.persona["id"]}, ctx.user, mode)
+    yield ctx.sse(final=True, content=msg["content"], message_id=msg["id"], credits_used=msg.get("credits", 0), **{k: msg[k] for k in ("tool", "task_id") if k in msg})
+
+
+async def _make_offer(ctx, plan: dict):
     from assignments import offer_text
     team_possible = bool(plan.get("long")) and await db.personas.count_documents({"user_id": workspace_id(ctx.user), "deleted": {"$ne": True}}) > 1
     await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_task": {**plan, "persona_id": ctx.persona["id"], "team_possible": team_possible, "directives": ctx.user_text, "offered_at": now_iso()}}})
@@ -710,38 +741,39 @@ async def _revise_turn(ctx):
         yield ev
 
 
-async def _persona_reply(ctx: ReplyCtx):
-    """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
-    await _prepare_ctx(ctx)
-    if ctx.user_text and not ctx.voice_mode:
-        from archives import archive_turn_text
-        hit = await archive_turn_text(ctx)
-        if hit:
-            yield ctx.sse(start=True)
-            async for ev in _emit_final(ctx, hit["content"], 0, hit["extra"]):
-                yield ev
-            return
-    if ctx.user_text and not ctx.voice_mode and SEARCH_RE.search(ctx.user_text) and not TASK_RE_STRONG.search(ctx.user_text):
+async def _typed_intercepts(ctx: ReplyCtx):
+    """Special handling for a TYPED user message (archive recall, web search, task offer, revision, tools). Yields nothing when none applies."""
+    from archives import archive_turn_text
+    hit = await archive_turn_text(ctx)
+    if hit:
+        yield ctx.sse(start=True)
+        async for ev in _emit_final(ctx, hit["content"], 0, hit["extra"]):
+            yield ev
+        return
+    if SEARCH_RE.search(ctx.user_text) and not TASK_RE_STRONG.search(ctx.user_text):
         async for ev in _search_turn(ctx):
             yield ev
         return
-    if ctx.user_text and not ctx.voice_mode and not ctx.task:
+    if not ctx.task:
         handled = False
         async for ev in _task_offer_turn(ctx):
             handled = True
             yield ev
         if handled:
             return
-    if ctx.task and ctx.user_text and not ctx.voice_mode and await _wants_revision(ctx.user_text, ctx.task):
+    elif await _wants_revision(ctx.user_text, ctx.task):
         async for ev in _revise_turn(ctx):
             yield ev
         return
-    if ctx.user_text and not ctx.voice_mode and wants_tool(ctx.user_text):
+    if wants_tool(ctx.user_text):
         plan = await plan_tool(ctx.user_text, ctx.prompt)
         if plan.get("tool") != "none":
             async for ev in _tool_turn(ctx, plan):
                 yield ev
-            return
+
+
+async def _plain_reply(ctx: ReplyCtx):
+    """Default streamed LLM answer; the last yielded item is the int credits used."""
     yield ctx.sse(start=True)
     try:
         full = await llm_text(ctx.system, ctx.prompt, ctx.model_key)
@@ -757,6 +789,20 @@ async def _persona_reply(ctx: ReplyCtx):
     yield ctx.sse(final=True, message_id=ai_msg["id"], content=full)
     await notify(ctx.cid, {"type": "message", "role": "assistant", "persona_id": ctx.persona["id"]})
     yield used
+
+
+async def _persona_reply(ctx: ReplyCtx):
+    """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
+    await _prepare_ctx(ctx)
+    if ctx.user_text and not ctx.voice_mode:
+        intercepted = False
+        async for ev in _typed_intercepts(ctx):
+            intercepted = True
+            yield ev
+        if intercepted:
+            return
+    async for ev in _plain_reply(ctx):
+        yield ev
 
 
 async def _finish_stream(cid: str, u: dict, total: int, last_message: str):
@@ -842,19 +888,27 @@ async def _moderator_if_stuck(cid: str, conv: dict, responders: list, roster, x:
     return roster if user_turns >= 2 and await _is_stuck(cid) else None
 
 
+async def _choose_responders(x: MsgIn, conv: dict, personas: list, cid: str) -> list:
+    """Which assistants answer this message: @mentions win; otherwise route by relevance (and only when addressed, in human chats)."""
+    if not personas:
+        return []
+    if _mentioned(x.content, personas):
+        return _pick_responders(x, personas)
+    humans_chat = len(conv.get("participants") or []) > 1 and conv.get("type") != "meeting"
+    if humans_chat:  # people talking to each other: assistants only step in when clearly addressed
+        return (await _route_group(x, personas, cid)) if _addressed_to_ai(x.content, personas) else []
+    if conv.get("type") == "group" and len(personas) > 1 and x.channel != "meeting_chat":
+        return await _route_group(x, personas, cid)
+    return _pick_responders(x, personas)
+
+
 @router.post("/conversations/{cid}/send")
 async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     await rate_limit(u, "chat")
     conv, personas = await _load_ai_conv(cid, u)
     attach_text, attach_meta = await _process_attachments(x.attachments, u["id"])
     await _store_user_message(cid, x, u, attach_text, attach_meta)
-    responders = _pick_responders(x, personas) if personas else []
-    humans_chat = len(conv.get("participants") or []) > 1 and conv.get("type") != "meeting"
-    if humans_chat and personas and not _mentioned(x.content, personas):
-        # people talking to each other: assistants only step in when clearly addressed
-        responders = (await _route_group(x, personas, cid)) if _addressed_to_ai(x.content, personas) else []
-    elif conv.get("type") == "group" and len(personas) > 1 and not _mentioned(x.content, personas) and x.channel != "meeting_chat":
-        responders = await _route_group(x, personas, cid)
+    responders = await _choose_responders(x, conv, personas, cid)
     roster = [p["name"] for p in personas] if len(personas) > 1 else None
     extra = _reply_extra(x, attach_text)
     async def _bill_user(p: dict) -> dict:  # each assistant's replies are paid by the assistant's owner
