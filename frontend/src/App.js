@@ -26,7 +26,7 @@ import SharePage from "./pages/SharePage";
 import Friends from "./pages/Friends";
 import ResetPassword from "./pages/ResetPassword";
 import Calendar from "./pages/Calendar";
-import PlatformApp from "./pages/platform/PlatformApp";
+import PlatformApp, { PLATFORM_MODE } from "./pages/platform/PlatformApp";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -52,6 +52,13 @@ function Gate() {
 }
 
 function App() {
+  if (PLATFORM_MODE) { // standalone admin site build (admin.oryntix.com): only the back-office, mounted at "/"
+    return (
+      <div className="App"><I18nProvider><AuthProvider><BrowserRouter><Toaster position="top-center" theme="dark" richColors /><ErrorBoundary>
+        <Routes><Route path="/reset-password" element={<ResetPassword />} /><Route path="/*" element={<PlatformApp />} /></Routes>
+      </ErrorBoundary></BrowserRouter></AuthProvider></I18nProvider></div>
+    );
+  }
   return (
     <div className="App">
       <I18nProvider>

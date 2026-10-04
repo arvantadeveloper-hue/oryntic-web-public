@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Percent, Package, Users, ShieldCheck, Timer, LogOut, Loader2, Lock } from "lucide-react";
+import { LayoutDashboard, Percent, Package, Users, ShieldCheck, Timer, LogOut, Loader2, Lock, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
@@ -10,15 +10,20 @@ import PlatformPackages from "./PlatformPackages";
 import PlatformUsers from "./PlatformUsers";
 import PlatformStaff from "./PlatformStaff";
 import PlatformTrial from "./PlatformTrial";
+import PlatformFinance from "./PlatformFinance";
 
-// Separate back-office site (future admin.oryntix.com). Menu depends on the staff role: super_admin = everything, finance = reports only.
+// Separate back-office site. PLATFORM_MODE (env REACT_APP_PLATFORM_MODE=1 or host "admin.*"/"platform.*") serves it at "/" for admin.oryntix.com.
+export const PLATFORM_MODE = process.env.REACT_APP_PLATFORM_MODE === "1" || /^(admin|platform)\./i.test(window.location.hostname);
+export const BASE = PLATFORM_MODE ? "" : "/platform";
+// Menu depends on the staff role: super_admin = everything, finance = reports only.
 const NAV = [
-  { to: "/platform", end: true, icon: LayoutDashboard, label: "Dasbor", roles: ["super_admin", "finance"] },
-  { to: "/platform/pricing", icon: Percent, label: "Tarif & Margin", roles: ["super_admin", "finance"] },
-  { to: "/platform/packages", icon: Package, label: "Paket Kredit", roles: ["super_admin"] },
-  { to: "/platform/users", icon: Users, label: "Pengguna", roles: ["super_admin", "finance"] },
-  { to: "/platform/staff", icon: ShieldCheck, label: "Staf & Peran", roles: ["super_admin"] },
-  { to: "/platform/trial", icon: Timer, label: "Trial & Batas", roles: ["super_admin"] },
+  { to: BASE || "/", end: true, icon: LayoutDashboard, label: "Dasbor", roles: ["super_admin", "finance"] },
+  { to: `${BASE}/finance`, icon: Receipt, label: "Laporan Keuangan", roles: ["super_admin", "finance"] },
+  { to: `${BASE}/pricing`, icon: Percent, label: "Tarif & Margin", roles: ["super_admin", "finance"] },
+  { to: `${BASE}/packages`, icon: Package, label: "Paket Kredit", roles: ["super_admin"] },
+  { to: `${BASE}/users`, icon: Users, label: "Pengguna", roles: ["super_admin", "finance"] },
+  { to: `${BASE}/staff`, icon: ShieldCheck, label: "Staf & Peran", roles: ["super_admin"] },
+  { to: `${BASE}/trial`, icon: Timer, label: "Trial & Batas", roles: ["super_admin"] },
 ];
 export const ROLE_LABEL = { super_admin: "Super Admin", finance: "Finance" };
 
@@ -66,7 +71,7 @@ function Shell() {
         <div className="border-t border-white/10 p-4">
           <p className="truncate text-xs font-semibold">{user.name || user.email}</p>
           <p className="text-[11px] text-white/50" data-testid="platform-role-badge">{ROLE_LABEL[role]}</p>
-          <button onClick={() => { logout(); nav("/platform"); }} className="mt-3 flex items-center gap-2 text-xs text-white/60 hover:text-white" data-testid="platform-logout"><LogOut size={13} /> Keluar</button>
+          <button onClick={() => { logout(); nav(BASE || "/"); }} className="mt-3 flex items-center gap-2 text-xs text-white/60 hover:text-white" data-testid="platform-logout"><LogOut size={13} /> Keluar</button>
         </div>
       </aside>
       <main className="min-w-0 flex-1 overflow-y-auto p-6 lg:p-10"><Outlet context={{ role }} /></main>
@@ -86,12 +91,13 @@ export default function PlatformApp() {
     <Routes>
       <Route element={<Shell />}>
         <Route index element={<PlatformDashboard />} />
+        <Route path="finance" element={<PlatformFinance />} />
         <Route path="pricing" element={<PlatformPricing readOnly={!can(["super_admin"])} />} />
-        <Route path="packages" element={can(["super_admin"]) ? <PlatformPackages /> : <Navigate to="/platform" replace />} />
+        <Route path="packages" element={can(["super_admin"]) ? <PlatformPackages /> : <Navigate to={BASE || "/"} replace />} />
         <Route path="users" element={<PlatformUsers readOnly={!can(["super_admin"])} />} />
-        <Route path="staff" element={can(["super_admin"]) ? <PlatformStaff /> : <Navigate to="/platform" replace />} />
-        <Route path="trial" element={can(["super_admin"]) ? <PlatformTrial /> : <Navigate to="/platform" replace />} />
-        <Route path="*" element={<Navigate to="/platform" replace />} />
+        <Route path="staff" element={can(["super_admin"]) ? <PlatformStaff /> : <Navigate to={BASE || "/"} replace />} />
+        <Route path="trial" element={can(["super_admin"]) ? <PlatformTrial /> : <Navigate to={BASE || "/"} replace />} />
+        <Route path="*" element={<Navigate to={BASE || "/"} replace />} />
       </Route>
     </Routes>
   );

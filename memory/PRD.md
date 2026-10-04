@@ -327,9 +327,12 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - **Peran staf** (`auth.platform_role`, dibaca dari DB tiap request, bukan dari JWT): `super_admin` (semua) & `finance` (baca dasbor/tarif/pengguna). `ADMIN_EMAIL` selalu super_admin (pemilik, tak bisa diubah/dicabut). Dependency `require_platform_admin` (super_admin) & `require_platform_staff`. Guard: tidak bisa ubah/cabut diri sendiri, minimal 1 super_admin eksplisit, super admin tak bisa dinonaktifkan. Akun `disabled` → login 403 & token 401. `last_login_at` dicatat. Audit `platform_audit`.
 - **API** `platform_admin.py` (`/api/platform/*`): me, stats, staff (GET/POST/PUT/DELETE; akun baru dibuat + tautan atur password via `issue_reset_link`, email undangan), users (q/before/limit, used_30d, personas), users/{uid}/credits (transaksi `adjustment`), users/{uid}/disable, audit. `GET /api/admin/pricing` kini boleh finance (baca).
 
+## Update 2026-06 (ao) — Laporan Keuangan (Finance) + platform mode untuk admin.oryntix.com
+- **Laporan Keuangan** (`platform_finance.py`, `GET /api/platform/finance?date_from&date_to&group=day|month`, `GET .../export.csv`; roles super_admin & finance): per periode top-up, pembeli, kredit terjual, pendapatan Rp (dari `credit_transactions.meta.price_idr`), penyesuaian manual, kredit terpakai; ringkasan per paket; CSV `;`-delimited + BOM, diaudit `finance.export`. UI `PlatformFinance.jsx` (rentang tanggal, Harian/Bulanan, kartu ringkasan, tabel, per paket, Unduh CSV via blob). Menu "Laporan Keuangan" muncul untuk kedua peran.
+- **Platform mode** (`PlatformApp.PLATFORM_MODE` = env `REACT_APP_PLATFORM_MODE=1` atau hostname `admin.*`/`platform.*`): `App.js` merender hanya back-office di `/` (+ `/reset-password`); `BASE` rute kosong. Diverifikasi di preview dengan flag sementara (login di `/`, navigasi `/users`). Panduan pemisahan domain: `/app/memory/PLATFORM_DEPLOY.md` (project baru + `REACT_APP_BACKEND_URL` → app utama + `CORS_ORIGINS`). Pembuatan project/domain baru dilakukan user di dashboard Emergent.
+
 ## Next tasks
-- **Pisahkan frontend Admin Platform** ke project/domain `admin.oryntix.com` (jalur B) saat siap publish; set `CORS_ORIGINS` di backend utama.
-- Laporan keuangan untuk peran Finance (ekspor CSV pendapatan/top-up per periode).
+- User: buat project admin + domain `admin.oryntix.com` sesuai `/app/memory/PLATFORM_DEPLOY.md`; set `CORS_ORIGINS` di backend utama.
 - Uji nyata bagikan layar + cuplikan ke asisten dengan 2 browser/mic (user).
 - Uji manual Mode Realtime (sela, giliran multi-agen) & panggilan pengingat dengan mikrofon nyata (user).
 - Verifikasi email saat daftar (ditunda; perlu Resend/SendGrid key).
