@@ -1,0 +1,27 @@
+{
+  "summary": "Iter31 — Oryntix: FX 18k packages, pricing engine (margin_overrides, feature table, preview, PUT roundtrip, 422 validators), /wallet/calls report with pagination, vision rate=9, Knowledge-from-URL (MDN WebRTC) full flow with refresh+delete, realtime call snapshot billing (9 credits, screen_snapshot feature in breakdown). Backend: 12/12 pytest cases PASS. Frontend: Wallet packages/cards show credits+kredit+Rp with NO '$' text, Riwayat Panggilan renders with all columns and 16 rows, KnowledgeTab 'Dari tautan' flow (URL input, Ambil & simpan, link icon row, kn-refresh, kn-delete) all work, call room (realtime-meeting) renders with rtm-share-screen next to layout controls (phase was running, not disabled), Admin Pricing tab shows new fields 'Cuplikan layar ke asisten', 'Data panggilan teman — TURN (USD / GB)', 'Margin paket kredit (%)' and chips 'kredit / cuplikan layar' + 'kredit / MB data panggilan'; pp-save PUT /api/admin/pricing → 200 with toast 'Tarif platform disimpan'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "PersonaDetail", "issues": ["React hydration warning: <span> inside <option> (data-ve-dynamic). Non-blocking but logged to console."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter31.py", "/app/test_reports/pytest/iter31.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PlatformPricingIn.margin_overrides default is {'call_bandwidth':50}; when preview/PUT body omits the key, it is reset to the default. This is intentional per batch design but note that the admin UI must always echo all override keys back on save or they will silently reset.",
+    "wallet.call_report: for sessions without realtime (bandwidth-only), seconds is computed as (end-start)+30; this includes a +30s buffer that could over-report. Acceptable but documented as intentional.",
+    "Login rate limit (5/5min) is IP-based and quickly blocks parallel test runs; consider raising for the preview env or allowing /auth/login to bypass for seeded test accounts.",
+    "KnowledgeTab after submitting a URL leaves the URL in kn-url-input (fill is not cleared), making it easy to accidentally re-submit and create a duplicate (I observed duplicate rows during UI testing). Suggest clearing kn-url-input on success."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter31.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "demo@aivora.ai/demo123456, admin@aivora.ai/Aivora!Admin2026, budi@aivora.ai/budi123456",
+  "seed_data_creation": "Topped up demo workspace with 'starter' (3000 credits) so that realtime call could start; added+deleted MDN WebRTC URL knowledge on persona e93a66a6 (Rio) via API and via UI (duplicate from UI retest also cleaned up).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests in /app/backend/tests/test_iter31.py cover: packages fx18k, admin pricing GET/forbidden/preview/invalid-override/dup-pkg-ids, PUT roundtrip, /wallet/calls shape+pagination, /realtime/vision-rate=9, knowledge from URL happy path + refresh + delete + invalid URL (400), realtime call snapshot (9 credits + screen_snapshot in breakdown + row visible in /wallet/calls). Frontend testids verified: pkg-starter..ultimate (no '$' text), call-report, call-row-*, kn-mode-url, kn-url-input, kn-save-url, kn-refresh, kn-delete, realtime-meeting, rtm-share-screen, pp-save. Admin pricing UI labels/chips confirmed present and PUT succeeds (200).",
+  "rca of the issue": "No blocking bugs. One UX nit: kn-url-input not cleared after save, enabling accidental duplicates (reproduced once in UI test; cleaned up afterwards)."
+}

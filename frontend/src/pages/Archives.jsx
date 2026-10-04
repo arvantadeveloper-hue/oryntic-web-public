@@ -38,10 +38,18 @@ export function ArchiveCard({ a, onRestored, compact = false }) {
   const [busy, setBusy] = useState(false);
   const [remind, setRemind] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  const toggle = async () => {
-    if (!open && !detail) { try { setDetail((await api.get(`/archives/${a.id}`)).data); } catch (e) {} }
-    setOpen(!open);
-  };
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const scrollRef = useRef(null);
+  const loadMsgs = useCallback(async () => {
+    if (loadingMsgs) return;
+    setLoadingMsgs(true);
+    try {
+      const offset = detail?.messages?.length || 0;
+      const r = await api.get(`/archives/${a.id}?limit=30&offset=${offset}`);
+      setDetail((d) => ({ ...r.data, messages: [...(d?.messages || []), ...r.data.messages] }));
+    } catch (e) {} finally { setLoadingMsgs(false); }
+  }, [a.id, detail?.messages?.length, loadingMsgs]);
+  const toggle = () => { if (!open && !detail) loadMsgs(); setOpen(!open); };
   const restore = async () => {
     setBusy(true);
     try { const r = await api.post(`/archives/${a.id}/restore`); toast.success(`${r.data.restored} pesan dipulihkan`); setConfirm(false); onRestored && onRestored(a, r.data); }
@@ -75,12 +83,14 @@ export function ArchiveCard({ a, onRestored, compact = false }) {
         <button onClick={() => nav(`/chat/${a.conversation_id}`)} className="rounded-lg border border-[#E7ECF3] px-2.5 py-1.5 text-xs font-semibold text-slate-700" data-testid="archive-open-chat">Buka chat</button>
       </div>
       {open && (
-        <div className="max-h-80 space-y-2 overflow-y-auto border-t border-[#E7ECF3] bg-[#F8FAFC] p-4" data-testid="archive-messages">
+        <div ref={scrollRef} className="max-h-80 space-y-2 overflow-y-auto border-t border-[#E7ECF3] bg-[#F8FAFC] p-4" data-testid="archive-messages">
           <div className="rounded-xl bg-white p-3 text-xs text-slate-700"><Markdown content={a.summary || ""} /></div>
-          {!detail && <p className="flex items-center gap-2 text-xs text-slate-400"><Loader2 size={13} className="animate-spin" /> Memuat pesan…</p>}
           {(detail?.messages || []).map((m) => (
             <div key={m.id} className={`text-xs ${m.role === "user" ? "text-right" : ""}`}><span className="font-semibold text-slate-500">{m.role === "user" ? m.sender_name || "Anda" : m.persona_name}: </span><span className="text-slate-700">{(m.content || "").slice(0, 400)}</span></div>
           ))}
+          {loadingMsgs && <p className="flex items-center gap-2 text-xs text-slate-400" data-testid="archive-msgs-loading"><Loader2 size={13} className="animate-spin" /> Memuat pesan…</p>}
+          {detail && !loadingMsgs && detail.has_more && <Sentinel onVisible={loadMsgs} root={scrollRef} />}
+          {detail && !detail.has_more && detail.total > 0 && <p className="pt-1 text-center text-[10px] text-slate-400" data-testid="archive-msgs-end">{detail.total} pesan · selesai</p>}
         </div>
       )}
       {remind && <RemindModal archive={a} onClose={() => setRemind(false)} />}

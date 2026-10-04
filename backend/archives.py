@@ -101,12 +101,15 @@ async def list_archives(q: Optional[str] = None, before: Optional[str] = None, l
 
 
 @router.get("/archives/{aid}")
-async def get_archive(aid: str, u: dict = Depends(current_user)):
+async def get_archive(aid: str, limit: int = 30, offset: int = 0, u: dict = Depends(current_user)):
+    """Archive detail with lazily paged messages (oldest first) so long chats load incrementally."""
     a = await db.chat_archives.find_one({"id": aid, "user_id": u["id"]}, {"_id": 0})
     if not a:
         raise HTTPException(404, "Arsip tidak ditemukan")
-    msgs = await db.messages.find({"id": {"$in": a.get("message_ids") or []}}, {"_id": 0, "id": 1, "role": 1, "content": 1, "persona_name": 1, "sender_name": 1, "created_at": 1, "media": 1}).sort("created_at", 1).to_list(5000)
-    return {**{k: v for k, v in a.items() if k != "message_ids"}, "messages": msgs}
+    ids = a.get("message_ids") or []
+    limit, offset = max(1, min(limit, 200)), max(0, offset)
+    msgs = await db.messages.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "role": 1, "content": 1, "persona_name": 1, "sender_name": 1, "created_at": 1, "media": 1}).sort("created_at", 1).skip(offset).limit(limit).to_list(limit)
+    return {**{k: v for k, v in a.items() if k != "message_ids"}, "messages": msgs, "total": len(ids), "offset": offset, "has_more": offset + len(msgs) < len(ids)}
 
 
 async def restore_archive(aid: str, u: dict) -> dict:
