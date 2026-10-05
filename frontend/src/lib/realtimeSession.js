@@ -119,21 +119,41 @@ export class RealtimeSession {
   }
 }
 
+// Posts a text card (markdown with links) from the assistant into the call chat panel — so links the user hears about are also clickable.
+const postCard = (callId, content) => (callId ? api.post(`/realtime/calls/${callId}/transcript`, { role: "assistant", content, via: "meeting_chat" }).catch(() => {}) : Promise.resolve());
+
 // Voice tools shared by solo calls and meetings: the model asks, we call our API, the result goes back as function_call_output.
-export async function runVoiceTool(name, args, cid) {
+export async function runVoiceTool(name, args, cid, callId = null) {
   try {
-    if (name === "assign_task") { const r = await api.post(`/conversations/${cid}/tasks`, { title: args.title, brief: args.brief, scheduled_at: args.scheduled_at || null, persona_id: args.persona_id || null, team: !!args.team, assignments: Array.isArray(args.assignments) ? args.assignments : null }); return { ok: true, ...r.data }; }
+    if (name === "assign_task") {
+      const r = await api.post(`/conversations/${cid}/tasks`, { title: args.title, brief: args.brief, scheduled_at: args.scheduled_at || null, persona_id: args.persona_id || null, team: !!args.team, assignments: Array.isArray(args.assignments) ? args.assignments : null });
+      if (r.data?.task_id || r.data?.id) await postCard(callId, `Tugas dibuat: **${args.title}** — [buka di Ruang Kerja](${window.location.origin}/workspace/${r.data.task_id || r.data.id})`);
+      return { ok: true, ...r.data, note: "the workspace link was posted to the chat panel" };
+    }
     if (name === "search_archive") { const r = await api.post(`/conversations/${cid}/archive-search`, { query: args.query }); return { ok: true, ...r.data, note: "results were posted to the chat panel; ask before restoring" }; }
     if (name === "restore_archive") { const r = await api.post(`/conversations/${cid}/archive-restore`, { archive_id: args.archive_id, confirmed: !!args.confirmed }); return r.data; }
-    if (name === "drive_save") { const r = await api.post("/integrations/google/save", { title: args.title, content: args.content || undefined, kind: args.kind || "doc", conversation_id: cid }); return { ok: true, name: r.data.name, link: r.data.link, note: "saved to the user's Google Drive; the link is in the Gallery" }; }
-    if (name === "drive_update") { const r = await api.post("/integrations/google/update", { file: args.file, text: args.text, mode: args.mode || "append" }); return { ok: true, name: r.data.name, link: r.data.webViewLink }; }
-    if (name === "drive_link") { const r = await api.post("/integrations/google/link", { file: args.file, share: !!args.share }); return { ok: true, name: r.data.name, link: r.data.webViewLink, shared: r.data.shared }; }
+    if (name === "drive_save") {
+      const r = await api.post("/integrations/google/save", { title: args.title, content: args.content || undefined, kind: args.kind || "doc", conversation_id: cid });
+      await postCard(callId, `Tersimpan di Google Drive: **${r.data.name}** — [buka di Drive](${r.data.link})`);
+      return { ok: true, name: r.data.name, link: r.data.link, note: "saved to the user's Google Drive; the clickable link was posted to the chat panel (no need to read the URL aloud)" };
+    }
+    if (name === "drive_update") {
+      const r = await api.post("/integrations/google/update", { file: args.file, text: args.text, mode: args.mode || "append" });
+      await postCard(callId, `Dokumen diperbarui: **${r.data.name}** — [buka di Drive](${r.data.webViewLink})`);
+      return { ok: true, name: r.data.name, link: r.data.webViewLink, note: "the link was posted to the chat panel" };
+    }
+    if (name === "drive_link") {
+      const r = await api.post("/integrations/google/link", { file: args.file, share: !!args.share });
+      await postCard(callId, `Tautan Drive: **${r.data.name}** — [buka di Drive](${r.data.webViewLink})${r.data.shared ? " · dapat dibuka siapa pun yang punya tautan" : ""}`);
+      return { ok: true, name: r.data.name, link: r.data.webViewLink, shared: r.data.shared, note: "the clickable link was posted to the chat panel (no need to read the URL aloud)" };
+    }
     if (name === "search_workspace") { const r = await api.post(`/conversations/${cid}/workspace-search`, { query: args.query }); return { ok: true, ...r.data, note: "links were posted to the chat panel" }; }
     if (name === "update_task") {
       const c = await api.get(`/conversations/${cid}/messages?limit=1`);
       const tid = c.data?.conversation?.task_id;
       if (!tid) return { ok: false, error: "no task linked to this conversation" };
       const r = await api.post(`/tasks/${tid}/revise`, { instruction: args.instruction });
+      await postCard(callId, `Dokumen direvisi (versi ${r.data.version}) — [buka di Ruang Kerja](${window.location.origin}/workspace/${tid})`);
       return { ok: true, version: r.data.version, summary: r.data.summary };
     }
     return { ok: false, error: `unknown tool ${name}` };

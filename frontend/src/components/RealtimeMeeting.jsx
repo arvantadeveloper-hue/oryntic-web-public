@@ -188,6 +188,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         if (out.ok && t.name === "update_task") { toast.success(`Revisi v${out.version} tersimpan`); setTaskTick((x) => x + 1); onRefresh && onRefresh(); }
         if (out.ok && t.name === "assign_task") toast.success(`Tugas dicatat ke Ruang Kerja (${out.when})`);
         if (out.ok && t.name === "search_workspace") { toast.success(`${out.count} hasil Ruang Kerja dikirim ke panel chat`); onRefresh && onRefresh(); }
+        if (out.ok && ["drive_save", "drive_update", "drive_link", "assign_task", "update_task"].includes(t.name)) onRefresh && onRefresh();
         s.toolOutput(t.call_id, out);
         enqueue(s, "In one casual spoken sentence, tell the user what you just did (from the tool result). No follow-up question unless needed.");
         startNext();
@@ -270,7 +271,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         let a = {}; try { a = JSON.parse(ev.arguments || "{}"); } catch (e) {}
         if (s === mod() && ev.name === "delegate") { delegationRef.current = { call_id: ev.call_id, ...a }; break; }
         if (["assign_task", "update_task", "search_workspace"].includes(ev.name)) {
-          toolRef.current = { callId: s.callId, call_id: ev.call_id, name: ev.name, promise: runVoiceTool(ev.name, { ...a, persona_id: s.persona.id }, cid) };
+          toolRef.current = { callId: s.callId, call_id: ev.call_id, name: ev.name, promise: runVoiceTool(ev.name, { ...a, persona_id: s.persona.id }, cid, s.callId) };
         }
         break;
       }

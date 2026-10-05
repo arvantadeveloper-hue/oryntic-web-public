@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Download, Share2, Copy, Loader2, ExternalLink, Clock, Ban } from "lucide-react";
+import { X, Download, Share2, Copy, Loader2, ExternalLink, Clock, Ban, HardDrive } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { fileUrl, downloadUrl } from "./MessageExtras";
@@ -78,10 +78,19 @@ export function PreviewDrawer({ item, onClose }) {
             <a href={exportUrl(item.task_id, "docx")} download className={`${btn} bg-slate-100 text-slate-700`} data-testid="preview-dl-docx"><Download size={13} /> Word</a>
             <a href={exportUrl(item.task_id, "pdf")} download className={`${btn} bg-slate-100 text-slate-700`} data-testid="preview-dl-pdf"><Download size={13} /> PDF</a>
             <a href={`${window.location.origin}/workspace/${item.task_id}`} target="_blank" rel="noreferrer" className={`${btn} bg-[#EEF3FF] text-[#2F6BFF]`}><ExternalLink size={13} /> Ruang Kerja</a>
-          </>) : <a href={downloadUrl(item.path)} download={item.name} className={`${btn} bg-slate-100 text-slate-700`} data-testid="preview-dl-file"><Download size={13} /> Unduh</a>}
-          <button onClick={() => setShare(true)} className={`${btn} bg-[#0B132B] text-white`} data-testid="preview-share"><Share2 size={13} /> Bagikan</button>
+          </>) : item.kind === "drive" ? (
+            <a href={item.link} target="_blank" rel="noreferrer" className={`${btn} bg-[#EEF3FF] text-[#2F6BFF]`} data-testid="preview-open-drive"><HardDrive size={13} /> Buka di Google Drive <ExternalLink size={12} /></a>
+          ) : <a href={downloadUrl(item.path)} download={item.name} className={`${btn} bg-slate-100 text-slate-700`} data-testid="preview-dl-file"><Download size={13} /> Unduh</a>}
+          {item.kind !== "drive" && <button onClick={() => setShare(true)} className={`${btn} bg-[#0B132B] text-white`} data-testid="preview-share"><Share2 size={13} /> Bagikan</button>}
         </div>
         <div className="flex-1 overflow-y-auto p-5" data-testid="preview-body">
+          {item.kind === "drive" && (
+            <div className="aivora-card p-5 text-sm text-slate-600" data-testid="preview-drive-info">
+              <p className="flex items-center gap-2 font-semibold text-slate-900"><HardDrive size={16} className="text-[#2F6BFF]" /> Tersimpan di Google Drive Anda</p>
+              <p className="mt-2">Berkas ini disimpan langsung ke Drive, bukan di penyimpanan Oryntix — jadi tidak memakai kuota 50 MB. Buka, bagikan, atau unduh lewat Google Drive.</p>
+              {item.mime && <p className="mt-2 text-xs text-slate-400">{item.mime}</p>}
+            </div>
+          )}
           {item.kind === "image" && <img src={fileUrl(item.path)} alt={item.name} className="mx-auto max-h-full rounded-2xl" />}
           {item.kind === "video" && <video src={fileUrl(item.path)} controls className="w-full rounded-2xl" />}
           {item.kind === "document" && (doc ? <div className="aivora-card p-5"><Markdown content={doc.final_output || "_Dokumen kosong._"} /></div> : <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 size={15} className="animate-spin" /> Memuat dokumen…</p>)}

@@ -407,6 +407,7 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
 class TranscriptIn(BaseModel):
     role: str = Field(pattern="^(user|assistant)$")
     content: str = Field(min_length=1, max_length=8000)
+    via: str = Field(default="realtime", pattern="^(realtime|meeting_chat)$")  # meeting_chat = text card (links, tool results) posted into the call chat panel
 
 
 @router.post("/realtime/calls/{call_id}/transcript")
@@ -415,12 +416,12 @@ async def transcript(call_id: str, x: TranscriptIn, u: dict = Depends(current_us
     cid = call["conversation_id"]
     if x.role == "user":
         msg = {"id": new_id(), "conversation_id": cid, "role": "user", "content": x.content, "attachments": [],
-               "sender_user_id": u["id"], "sender_name": u.get("name") or "User", "via": "realtime", "created_at": now_iso()}
+               "sender_user_id": u["id"], "sender_name": u.get("name") or "User", "via": x.via, "created_at": now_iso()}
     else:
         persona = await db.personas.find_one({"id": call["persona_id"]}, {"_id": 0}) or {}
         msg = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": x.content,
                "persona_id": call["persona_id"], "persona_name": persona.get("name") or "Asisten",
-               "portrait": persona.get("portrait"), "credits": 0, "via": "realtime", "created_at": now_iso()}
+               "portrait": persona.get("portrait"), "credits": 0, "via": x.via, "created_at": now_iso()}
     await db.messages.insert_one(dict(msg))
     await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso(), "last_message": x.content[:120]}})
     await notify(cid, {"type": "message", "role": x.role})

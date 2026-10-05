@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { X, Send, Paperclip, Loader2, MessageSquare, FileText, Image as ImageIcon } from "lucide-react";
+import { X, Send, Paperclip, Loader2, MessageSquare, FileText, Image as ImageIcon, Mic, HardDrive, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { streamChatWithAtt } from "../lib/api";
 import { Markdown } from "./Markdown";
@@ -9,6 +9,7 @@ const VIDEO_RE = /https?:\/\/[^\s)>"']+\.(?:mp4|webm)(?:\?[^\s)>"']*)?/gi;
 const IMAGE_RE = /https?:\/\/[^\s)>"']+\.(?:png|jpe?g|gif|webp)(?:\?[^\s)>"']*)?/gi;
 const OPEN_KEY = "aivora_meeting_chat_open";
 const isChat = (m) => m.via === "meeting_chat";
+const isVoice = (m) => m.via === "realtime";
 
 const fileToData = (file) => new Promise((res) => {
   const r = new FileReader();
@@ -54,9 +55,11 @@ function Bubble({ m, me, cid, onRefresh }) {
   return (
     <div data-testid={me ? "mc-msg-user" : "mc-msg-assistant"} className={`rounded-2xl px-3.5 py-2.5 text-sm ${me ? "ml-8 bg-[#2F6BFF] text-white" : "mr-3 bg-white/[0.07] text-white/90"}`}>
       <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-wider opacity-60">
-        <span className="truncate">{me ? (m.sender_name || "Anda") : (m.persona_name || "Asisten")}</span><span className="font-mono normal-case tracking-normal">{time}</span>
+        <span className="flex min-w-0 items-center gap-1 truncate">{isVoice(m) && <Mic size={10} className="shrink-0" data-testid="mc-voice-badge" />}{me ? (m.sender_name || "Anda") : (m.persona_name || "Asisten")}</span><span className="font-mono normal-case tracking-normal">{time}</span>
       </div>
-      {(m.attachments || []).length > 0 && <div className="mb-1.5 flex flex-wrap gap-1">{m.attachments.map((a, k) => <span key={k} className="flex items-center gap-1 rounded-md bg-white/20 px-1.5 py-0.5 text-[11px]">{a.type === "image" ? <ImageIcon size={10} /> : <FileText size={10} />}{a.name}</span>)}</div>}
+      {(m.attachments || []).length > 0 && <div className="mb-1.5 flex flex-wrap gap-1">{m.attachments.map((a, k) => a.link
+        ? <a key={k} href={a.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-md bg-white/20 px-1.5 py-0.5 text-[11px] hover:underline"><HardDrive size={10} />{a.name}<ExternalLink size={9} /></a>
+        : <span key={k} className="flex items-center gap-1 rounded-md bg-white/20 px-1.5 py-0.5 text-[11px]">{a.type === "image" ? <ImageIcon size={10} /> : <FileText size={10} />}{a.name}</span>)}</div>}
       {me ? <p className="whitespace-pre-wrap break-words">{m.content}</p> : <div className={MD_DARK}><Markdown content={m.content} /></div>}
       {!me && <MediaList media={mediaOf(m)} dark />}
       {!me && <ToolRequestCard m={m} cid={cid} onDone={onRefresh} dark />}
@@ -67,8 +70,9 @@ function Bubble({ m, me, cid, onRefresh }) {
 
 // Text/data side channel of a live meeting: assistant replies in text only (tables, code, links, embedded media).
 // variant "side" = right panel / mobile bottom sheet; "main" = fills the stage (chat-first layout).
+// Same conversation as the regular chat: history, live voice transcripts (mic badge) and text replies/link cards all appear here.
 export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExchange, variant = "side" }) {
-  const items = messages.filter(isChat);
+  const items = messages;
   const [input, setInput] = useState("");
   const [atts, setAtts] = useState([]);
   const [pending, setPending] = useState(null);
@@ -119,14 +123,14 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
       <div className={`${side ? "-mt-3" : "pt-3"} flex items-center gap-2 px-4 pb-3`}>
         <MessageSquare size={16} className="text-[#8FB0FF]" />
         <span className="text-sm font-bold text-white">Chat Panggilan</span>
-        <span className="hidden text-[11px] text-white/40 sm:inline">teks, data, gambar & dokumen dari asisten</span>
+        <span className="hidden text-[11px] text-white/40 sm:inline">transkrip, tautan, data & dokumen</span>
         {side && <button onClick={onClose} data-testid="meeting-chat-close" className="ml-auto rounded-lg p-1.5 text-white/60 transition hover:bg-white/10 hover:text-white"><X size={16} /></button>}
       </div>
 
       <div className={`flex-1 space-y-3 overflow-y-auto px-4 pb-3 ${side ? "" : "mx-auto w-full max-w-3xl"}`} data-testid="meeting-chat-list">
         {items.length === 0 && !pending && (
           <div className="mt-10 px-4 text-center text-xs leading-relaxed text-white/40" data-testid="meeting-chat-empty">
-            Belum ada pesan. Ketik pertanyaan di sini — asisten menjawab dalam teks (tabel, kode, tautan), bisa membuat gambar & dokumen, dan membaca lampiran 📎 Anda.
+            Belum ada pesan. Transkrip panggilan akan muncul di sini. Ketik pertanyaan — asisten menjawab dalam teks (tabel, kode, tautan), bisa membuat gambar & dokumen, dan membaca lampiran Anda.
           </div>
         )}
         {items.map((m) => <Bubble key={m.id} m={m} me={m.role === "user"} cid={cid} onRefresh={onRefresh} />)}
