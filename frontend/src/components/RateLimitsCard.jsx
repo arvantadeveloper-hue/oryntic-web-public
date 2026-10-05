@@ -9,6 +9,7 @@ const FIELDS = [
   ["calls_per_hour", "Panggilan realtime / jam"],
   ["max_call_minutes", "Durasi maksimal panggilan (menit)"],
   ["generation_per_hour", "Pembuatan profil/gambar / jam"],
+  ["storage_quota_mb", "Kuota penyimpanan file per pengguna (MB)"],
 ];
 
 export function RateLimitsCard() {

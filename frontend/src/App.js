@@ -27,6 +27,7 @@ import Friends from "./pages/Friends";
 import ResetPassword from "./pages/ResetPassword";
 import Calendar from "./pages/Calendar";
 import PlatformApp, { PLATFORM_MODE } from "./pages/platform/PlatformApp";
+import Integrations from "./pages/Integrations";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -85,6 +86,7 @@ function App() {
                 <Route path="/reminders" element={<Reminders />} />
                 <Route path="/calendar" element={<Calendar />} />
                 <Route path="/gallery" element={<Gallery />} />
+                <Route path="/integrations" element={<Integrations />} />
                 <Route path="/archives" element={<Archives />} />
                 <Route path="/friends" element={<Friends />} />
                 <Route path="/wallet" element={<AdminOnly><WalletPage /></AdminOnly>} />

@@ -125,6 +125,9 @@ export async function runVoiceTool(name, args, cid) {
     if (name === "assign_task") { const r = await api.post(`/conversations/${cid}/tasks`, { title: args.title, brief: args.brief, scheduled_at: args.scheduled_at || null, persona_id: args.persona_id || null, team: !!args.team, assignments: Array.isArray(args.assignments) ? args.assignments : null }); return { ok: true, ...r.data }; }
     if (name === "search_archive") { const r = await api.post(`/conversations/${cid}/archive-search`, { query: args.query }); return { ok: true, ...r.data, note: "results were posted to the chat panel; ask before restoring" }; }
     if (name === "restore_archive") { const r = await api.post(`/conversations/${cid}/archive-restore`, { archive_id: args.archive_id, confirmed: !!args.confirmed }); return r.data; }
+    if (name === "drive_save") { const r = await api.post("/integrations/google/save", { title: args.title, content: args.content || undefined, kind: args.kind || "doc", conversation_id: cid }); return { ok: true, name: r.data.name, link: r.data.link, note: "saved to the user's Google Drive; the link is in the Gallery" }; }
+    if (name === "drive_update") { const r = await api.post("/integrations/google/update", { file: args.file, text: args.text, mode: args.mode || "append" }); return { ok: true, name: r.data.name, link: r.data.webViewLink }; }
+    if (name === "drive_link") { const r = await api.post("/integrations/google/link", { file: args.file, share: !!args.share }); return { ok: true, name: r.data.name, link: r.data.webViewLink, shared: r.data.shared }; }
     if (name === "search_workspace") { const r = await api.post(`/conversations/${cid}/workspace-search`, { query: args.query }); return { ok: true, ...r.data, note: "links were posted to the chat panel" }; }
     if (name === "update_task") {
       const c = await api.get(`/conversations/${cid}/messages?limit=1`);

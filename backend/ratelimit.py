@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from db import db, now_iso
 
 # Per-user sliding-window rate limits (in-process). Keys: chat_per_min, voice_per_min, calls_per_hour, max_call_minutes.
-DEFAULT_LIMITS = {"chat_per_min": 20, "voice_per_min": 30, "calls_per_hour": 20, "max_call_minutes": 60, "generation_per_hour": 30}
+DEFAULT_LIMITS = {"chat_per_min": 20, "voice_per_min": 30, "calls_per_hour": 20, "max_call_minutes": 60, "generation_per_hour": 30, "storage_quota_mb": 50}
 _cache = {"at": 0.0, "limits": dict(DEFAULT_LIMITS)}
 _hits: dict = {}
 

@@ -61,6 +61,13 @@ async def list_gallery(type: str = Query("all", pattern="^(all|image|video|docum
         items += await _document_items(u, before, limit + 1, with_video=type in ("all", "video"), q_text=q_text)
         if type == "video":
             items = [i for i in items if i["kind"] == "video"]
+    if type in ("all", "document"):
+        dq = {"user_id": u["id"]}
+        if q_text:
+            dq["name"] = {"$regex": re.escape(q_text), "$options": "i"}
+        if before:
+            dq["created_at"] = {"$lt": before}
+        items += await db.drive_items.find(dq, {"_id": 0, "user_id": 0}).sort("created_at", -1).limit(limit + 1).to_list(limit + 1)
     items.sort(key=lambda i: i["created_at"], reverse=True)
     has_more = len(items) > limit
     items = items[:limit]

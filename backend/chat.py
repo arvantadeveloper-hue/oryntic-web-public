@@ -572,10 +572,41 @@ async def _document_turn(ctx, plan: dict):
         yield ev
 
 
+async def _drive_turn(ctx, plan: dict):
+    """Google Drive tools from chat: save (doc/sheet), update a Doc, or fetch a link. Needs the user's Drive connection."""
+    from integrations import drive_save, drive_update, drive_link
+    tool = plan["tool"]
+    yield ctx.sse(start=True)
+    yield ctx.sse(status="Menghubungi Google Drive...")
+    try:
+        if tool == "drive_save":
+            md = (plan.get("text") or "").strip()
+            if ctx.task and len(md) < 40:
+                md = ctx.task.get("final_output") or md
+            if len(md) < 2:
+                raise HTTPException(400, "Belum ada isi yang bisa disimpan — sebutkan dokumen atau isinya.")
+            title = (plan.get("title") or (ctx.task or {}).get("goal") or "Dokumen Oryntix")[:200]
+            item = await drive_save(ctx.user["id"], title, md, plan.get("kind") or "doc", source={"task_id": (ctx.task or {}).get("id"), "conversation_id": ctx.cid})
+            text, extra = f"Tersimpan di Google Drive sebagai **{item['name']}** — [buka di Drive]({item['link']}). Di Galeri hanya tautannya yang disimpan, jadi tidak memakai penyimpanan platform.", {"tool": "drive_save", "drive": item}
+        elif tool == "drive_update":
+            f = await drive_update(ctx.user["id"], plan.get("file") or plan.get("title") or "", plan.get("text") or "", plan.get("mode") or "append")
+            text, extra = f"Dokumen **{f['name']}** sudah diperbarui — [buka di Drive]({f.get('webViewLink')}).", {"tool": "drive_update", "drive": f}
+        else:
+            f = await drive_link(ctx.user["id"], plan.get("file") or plan.get("title") or "")
+            text, extra = f"Ini tautannya: [{f['name']}]({f.get('webViewLink')})", {"tool": "drive_link", "drive": f}
+    except HTTPException as e:
+        text, extra = f"{e.detail}", {"tool": tool, "error": True}
+    async for ev in _emit_final(ctx, text, 0, extra):
+        yield ev
+
+
 async def _tool_turn(ctx, plan: dict):
-    """Create an image/document from chat. Expensive tools (≥ threshold) ask for confirmation first."""
-    cfg = await get_routing()
-    gen = _image_turn(ctx, plan, cfg["confirm_threshold"]) if plan["tool"] == "image" else _document_turn(ctx, plan)
+    """Create an image/document from chat, or run a Google Drive action. Expensive tools (≥ threshold) ask for confirmation first."""
+    if plan["tool"].startswith("drive_"):
+        gen = _drive_turn(ctx, plan)
+    else:
+        cfg = await get_routing()
+        gen = _image_turn(ctx, plan, cfg["confirm_threshold"]) if plan["tool"] == "image" else _document_turn(ctx, plan)
     async for ev in gen:
         yield ev
 

@@ -79,6 +79,7 @@ class LimitsIn(BaseModel):
     calls_per_hour: int = Field(ge=1, le=1000)
     max_call_minutes: int = Field(ge=1, le=600)
     generation_per_hour: int = Field(ge=1, le=1000)
+    storage_quota_mb: int = Field(default=50, ge=1, le=100_000)
 
 
 @router.get("/admin/rate-limits")
@@ -136,6 +137,14 @@ ARCHIVE_RESTORE_TOOL = {"type": "function", "name": "restore_archive",
 SEARCH_TOOL = {"type": "function", "name": "search_workspace",
                "description": "Search the user's Workspace (saved task results, documents, meeting minutes) by keywords and drop clickable links into the chat panel. Use when the user asks to find or look up existing material.",
                "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Keywords to search for"}}, "required": ["query"]}}
+DRIVE_TOOLS = [
+    {"type": "function", "name": "drive_save", "description": "Save content to the user's Google Drive as a Google Doc (or Sheet for tables). Use when the user asks to save/store a document, result or table to Drive.",
+     "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "content": {"type": "string", "description": "markdown content to save; omit to save the task under discussion"}, "kind": {"type": "string", "enum": ["doc", "sheet"]}}, "required": ["title"]}},
+    {"type": "function", "name": "drive_update", "description": "Append or replace text in an existing Google Doc on the user's Drive.",
+     "parameters": {"type": "object", "properties": {"file": {"type": "string", "description": "document name"}, "text": {"type": "string"}, "mode": {"type": "string", "enum": ["append", "replace"]}}, "required": ["file", "text"]}},
+    {"type": "function", "name": "drive_link", "description": "Get the Google Drive link of a document by name (optionally make it viewable by anyone with the link).",
+     "parameters": {"type": "object", "properties": {"file": {"type": "string"}, "share": {"type": "boolean"}}, "required": ["file"]}},
+]
 UPDATE_TOOL = {"type": "function", "name": "update_task",
                "description": "Apply a revision the user asked for to the Workspace result currently being presented/discussed. Pass the full revision instruction. The result is saved as a new version.",
                "parameters": {"type": "object", "properties": {"instruction": {"type": "string", "description": "What to change, in detail"}}, "required": ["instruction"]}}
@@ -322,7 +331,8 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
     }
     if role in ("moderator", "solo"):
         conv = await db.conversations.find_one({"id": call["conversation_id"]}, {"_id": 0, "task_id": 1}) or {}
-        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL] + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        drive_on = bool(await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
+        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL] + (DRIVE_TOOLS if drive_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:

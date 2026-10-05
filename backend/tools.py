@@ -70,23 +70,31 @@ async def route_model(persona_model: Optional[str], text: str, extra_len: int, o
     return persona_model, None
 
 
+DRIVE_RE = re.compile(r"\b(google ?drive|drive|gdrive|google ?docs?|spreadsheet|google ?sheets?)\b", re.I)
+
+
 def wants_tool(text: str) -> bool:
-    return bool(text) and bool(TOOL_RE.search(text)) and bool(CREATE_RE.search(text))
+    return bool(text) and ((bool(TOOL_RE.search(text)) and bool(CREATE_RE.search(text))) or bool(DRIVE_RE.search(text)))
 
 
 async def plan_tool(text: str, history: str) -> dict:
     sys = ('Decide if the user\'s LAST message explicitly asks the assistant to CREATE a deliverable. Reply JSON only: '
-           '{"tool":"image"|"document"|"none","image_prompt":str,"title":str,"instructions":str}. '
+           '{"tool":"image"|"document"|"drive_save"|"drive_update"|"drive_link"|"none","image_prompt":str,"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet"}. '
            '"image" = the user wants a picture/illustration/logo/poster generated. "document" = the user wants a written file '
            '(report, proposal, letter, article, notulen, template) they can download. Otherwise "none" (questions, explanations, '
            'tables shown inline, code snippets are NOT documents). image_prompt: detailed English prompt for an image model. '
-           'title: short document title in the user\'s language. instructions: what the document must contain.')
+           'title: short document title in the user\'s language. instructions: what the document must contain. '
+           '"drive_save" = user asks to save/store something (the current document, a table, the discussed content) to Google Drive/Docs/Sheets '
+           '(kind "sheet" when they want a spreadsheet, else "doc"; text = the content to save if they described it). '
+           '"drive_update" = user asks to update/edit/append to an existing Google Doc on Drive (file = document name or id as the user said it; '
+           'text = the exact content to add/write; mode "replace" only if they want to overwrite). '
+           '"drive_link" = user asks for the Drive link of a document (file = name).')
     plan: dict = {}
     try:
         plan = await llm_json(sys, f"Recent conversation:\n{history[-2500:]}\n\nLAST MESSAGE: {text}")
     except Exception:
         plan = {}
-    if plan.get("tool") not in ("image", "document"):
+    if plan.get("tool") not in ("image", "document", "drive_save", "drive_update", "drive_link"):
         return {"tool": "none"}
     return plan
 
@@ -224,7 +232,11 @@ async def run_image_tool(uid: str, prompt: str) -> dict:
     mime = header.split(":")[1].split(";")[0]
     ext = "png" if "png" in mime else "jpg"
     path = f"aivora/images/{uid}/{new_id()}.{ext}"
-    await asyncio.to_thread(put_object, path, base64.b64decode(b64), mime)
+    from integrations import assert_quota, add_storage
+    raw = base64.b64decode(b64)
+    await assert_quota(uid, len(raw))
+    await asyncio.to_thread(put_object, path, raw, mime)
+    await add_storage(uid, len(raw))
     return {"media": [{"type": "image", "path": path, "name": f"gambar.{ext}"}], "credits": rate("image")}
 
 
@@ -239,9 +251,12 @@ async def run_document_tool(uid: str, system: str, title: str, instructions: str
     files = [("docx", docx_b, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
              ("pdf", pdf_b, "application/pdf"), ("md", md.encode("utf-8"), "text/markdown")]
     media = []
+    from integrations import assert_quota, add_storage
+    await assert_quota(uid, sum(len(d) for _, d, _ in files))
     for ext, data, ctype in files:
         path = f"aivora/docs/{uid}/{did}/{base}.{ext}"
         await asyncio.to_thread(put_object, path, data, ctype)
+        await add_storage(uid, len(data))
         media.append({"type": "file", "path": path, "name": f"{base}.{ext}", "format": ext})
     return {"media": media, "credits": text_credits(prompt, md), "markdown": md, "model_label": model_label(model_key)}
 

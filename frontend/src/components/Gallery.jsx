@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Image as ImageIcon, Video, Download, ExternalLink, Loader2, Check, Users, Share2, Search } from "lucide-react";
+import { HardDrive, FileText, Image as ImageIcon, Video, Download, ExternalLink, Loader2, Check, Users, Share2, Search } from "lucide-react";
 import { api, API_BASE, getToken } from "../lib/api";
 import { fileUrl, downloadUrl } from "./MessageExtras";
 
@@ -46,7 +46,7 @@ export function Sentinel({ onVisible, root }) {
 }
 
 const exportUrl = (taskId, fmt) => `${API_BASE}/tasks/${taskId}/export/${fmt}?auth=${getToken()}`;
-const KIND_ICON = { document: FileText, image: ImageIcon, video: Video };
+const KIND_ICON = { document: FileText, image: ImageIcon, video: Video, drive: HardDrive };
 
 export function GalleryCard({ item, selectable = false, selected = false, onSelect, onOpen, onShare }) {
   const Icon = KIND_ICON[item.kind] || FileText;
@@ -65,7 +65,9 @@ export function GalleryCard({ item, selectable = false, selected = false, onSele
         <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-400">{item.team && <Users size={11} />}{item.persona_name || "Asisten"} · {date}{item.version > 1 ? ` · v${item.version}` : ""}</p>
         {!selectable && (
           <div className="mt-2 flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
-            {item.kind === "document" ? (<>
+            {item.kind === "drive" ? (
+              <a href={item.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-[#EEF3FF] px-2 py-1 text-[11px] font-semibold text-[#2F6BFF] hover:bg-[#E0E8FF]" data-testid="gallery-open-drive"><ExternalLink size={11} /> Buka di Google Drive</a>
+            ) : item.kind === "document" ? (<>
               <a href={`${window.location.origin}/workspace/${item.task_id}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-[#EEF3FF] px-2 py-1 text-[11px] font-semibold text-[#2F6BFF] hover:bg-[#E0E9FF]" data-testid="gallery-open"><ExternalLink size={11} /> Buka</a>
               <a href={exportUrl(item.task_id, "docx")} download className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-dl-docx"><Download size={11} /> Word</a>
               <a href={exportUrl(item.task_id, "pdf")} download className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-dl-pdf"><Download size={11} /> PDF</a>
@@ -73,7 +75,7 @@ export function GalleryCard({ item, selectable = false, selected = false, onSele
               <a href={fileUrl(item.path)} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-[#EEF3FF] px-2 py-1 text-[11px] font-semibold text-[#2F6BFF] hover:bg-[#E0E9FF]" data-testid="gallery-open"><ExternalLink size={11} /> Buka</a>
               <a href={downloadUrl(item.path)} download={item.name} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-dl-file"><Download size={11} /> Unduh</a>
             </>)}
-            {onShare && <button onClick={() => onShare(item)} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-share"><Share2 size={11} /> Bagikan</button>}
+            {onShare && item.kind !== "drive" && <button onClick={() => onShare(item)} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-share"><Share2 size={11} /> Bagikan</button>}
           </div>
         )}
       </div>
