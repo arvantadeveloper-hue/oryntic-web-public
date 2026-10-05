@@ -17,6 +17,7 @@ from admin import router as admin_router
 from platform_admin import router as platform_router
 from platform_finance import router as finance_router
 from integrations import router as integrations_router
+from google_auth import router as google_auth_router
 from gallery import router as gallery_router
 from archives import router as archives_router, archive_tick
 from shares import router as shares_router
@@ -52,6 +53,7 @@ app.include_router(admin_router)
 app.include_router(platform_router)
 app.include_router(finance_router)
 app.include_router(integrations_router)
+app.include_router(google_auth_router)
 app.include_router(gallery_router)
 app.include_router(archives_router)
 app.include_router(shares_router)

@@ -16,9 +16,11 @@ from db import db, now_iso, new_id
 from auth import current_user, JWT_SECRET, app_url
 from ratelimit import get_limits
 
-# Integrations hub. Stage 1: Google Drive / Docs / Sheets (user's own OAuth client; full Drive scope per owner's choice).
+# Integrations hub. Stage 1: Google Drive / Docs / Sheets with the least-privilege `drive.file` scope:
+# Oryntix only sees files it created itself or files the user explicitly picked via the Google Picker.
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
-SCOPES = "https://www.googleapis.com/auth/drive openid https://www.googleapis.com/auth/userinfo.email"
+DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+SCOPES = f"{DRIVE_SCOPE} openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
 GAUTH, GTOKEN, GREVOKE = "https://accounts.google.com/o/oauth2/v2/auth", "https://oauth2.googleapis.com/token", "https://oauth2.googleapis.com/revoke"
 DRIVE, UPLOAD, DOCS = "https://www.googleapis.com/drive/v3", "https://www.googleapis.com/upload/drive/v3", "https://docs.googleapis.com/v1"
 GDOC, GSHEET = "application/vnd.google-apps.document", "application/vnd.google-apps.spreadsheet"
@@ -53,10 +55,10 @@ async def assert_quota(uid: str, incoming: int) -> None:
 # ---------- OAuth ----------
 @router.get("")
 async def list_integrations(u: dict = Depends(current_user)):
-    g = await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 0, "email": 1, "connected_at": 1})
+    g = await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 0, "email": 1, "name": 1, "picture": 1, "connected_at": 1})
     return {"items": [{"id": "google_drive", "name": "Google Drive & Docs", "configured": configured(), "connected": bool(g),
-                       "account_email": (g or {}).get("email"), "connected_at": (g or {}).get("connected_at"),
-                       "capabilities": ["Simpan dokumen/gambar ke Drive", "Update Google Docs & Sheets", "Kirim tautan Drive", "Baca isi dokumen"]}],
+                       "account_email": (g or {}).get("email"), "account_name": (g or {}).get("name"), "account_picture": (g or {}).get("picture"), "connected_at": (g or {}).get("connected_at"), "scope": "drive.file", "picker": bool(os.environ.get("GOOGLE_API_KEY")),
+                       "capabilities": ["Simpan dokumen/gambar ke Drive", "Update Google Docs & Sheets buatan Oryntix", "Kirim tautan Drive", "Lampirkan file Drive pilihan Anda di chat", "Pengetahuan asisten dari file Drive pilihan Anda"]}],
             "coming_soon": ["Notion", "Slack", "GitHub", "WhatsApp Business"], "storage": await storage_usage(u["id"])}
 
 
@@ -65,8 +67,12 @@ async def google_connect(request: Request, u: dict = Depends(current_user)):
     if not configured():
         raise HTTPException(503, "Integrasi Google belum dikonfigurasi oleh admin platform (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).")
     state = jwt.encode({"sub": u["id"], "exp": int(time.time()) + 600, "purpose": "gdrive"}, JWT_SECRET, algorithm="HS256")
-    q = httpx.QueryParams({"client_id": os.environ["GOOGLE_CLIENT_ID"], "redirect_uri": _redirect_uri(request), "response_type": "code", "scope": SCOPES,
-                           "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true", "state": state})
+    row = await db.users.find_one({"id": u["id"]}, {"_id": 0, "google_email": 1}) or {}
+    params = {"client_id": os.environ["GOOGLE_CLIENT_ID"], "redirect_uri": _redirect_uri(request), "response_type": "code", "scope": SCOPES,
+              "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true", "state": state}
+    if row.get("google_email"):  # already signed in with Google → incremental auth: Google only asks for the Drive permission
+        params["login_hint"] = row["google_email"]
+    q = httpx.QueryParams(params)
     return {"authorization_url": f"{GAUTH}?{q}", "redirect_uri": _redirect_uri(request)}
 
 
@@ -85,14 +91,14 @@ async def google_callback(request: Request, code: Optional[str] = None, state: O
             return RedirectResponse(f"{base}/integrations?error=token")
         tok = r.json()
         granted = set((tok.get("scope") or "").split())
-        if "https://www.googleapis.com/auth/drive" not in granted:  # extra scopes are fine, the Drive scope is required
+        if not granted & {DRIVE_SCOPE, "https://www.googleapis.com/auth/drive"}:  # the Drive (file) scope is required
             return RedirectResponse(f"{base}/integrations?error=scope")
         me = (await c.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {tok['access_token']}"})).json()
     old = await db.drive_credentials.find_one({"user_id": uid}, {"_id": 0, "refresh_token": 1})
     refresh = tok.get("refresh_token") or (old or {}).get("refresh_token")
     if not refresh:
         return RedirectResponse(f"{base}/integrations?error=refresh")
-    await db.drive_credentials.update_one({"user_id": uid}, {"$set": {"user_id": uid, "email": me.get("email"), "access_token": _fernet.encrypt(tok["access_token"].encode()).decode(),
+    await db.drive_credentials.update_one({"user_id": uid}, {"$set": {"user_id": uid, "email": me.get("email"), "name": me.get("name"), "picture": me.get("picture"), "access_token": _fernet.encrypt(tok["access_token"].encode()).decode(),
                                           "refresh_token": refresh if refresh.startswith("gAAAA") else _fernet.encrypt(refresh.encode()).decode(), "expires_at": time.time() + int(tok.get("expires_in") or 3600) - 60,
                                           "scopes": sorted(granted), "connected_at": now_iso(), "updated_at": now_iso()}}, upsert=True)
     return RedirectResponse(f"{base}/integrations?connected=google")
@@ -242,6 +248,54 @@ async def drive_read(uid: str, name_or_id: str) -> dict:
     return {**f, "text": txt[:60000]}
 
 
+MAX_DRIVE_BYTES = 8 * 1024 * 1024
+GSLIDES = "application/vnd.google-apps.presentation"
+FILE_FIELDS = "id,name,mimeType,webViewLink,modifiedTime,size,iconLink"
+
+
+async def _g_bytes(uid: str, url: str, params: dict) -> bytes:
+    tk = await access_token(uid)
+    async with httpx.AsyncClient(timeout=120) as c:
+        r = await c.get(url, headers={"Authorization": f"Bearer {tk}"}, params=params)
+    if r.status_code >= 400:
+        raise HTTPException(400, f"Google API error {r.status_code}: {r.text[:200]}")
+    if len(r.content) > MAX_DRIVE_BYTES:
+        raise HTTPException(400, "Berkas Drive lebih dari 8 MB")
+    return r.content
+
+
+def _bytes_text(data: bytes, mime: str, name: str) -> str:
+    ext = (name or "").rsplit(".", 1)[-1].lower()
+    if "pdf" in mime or ext == "pdf":
+        from pypdf import PdfReader
+        return "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(data)).pages[:40])
+    if "wordprocessingml" in mime or ext == "docx":
+        from docx import Document
+        return "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs)
+    if mime.startswith("text/") or "json" in mime or ext in ("txt", "md", "markdown", "csv", "json", "html", "htm"):
+        return data.decode("utf-8", "ignore")
+    raise HTTPException(400, f"Format Drive tidak didukung ({mime or ext}). Gunakan Google Docs/Sheets/Slides, PDF, Word, teks, atau gambar.")
+
+
+async def drive_content(uid: str, file_id: str) -> dict:
+    """Read a Drive file by id for the assistant: Google Docs/Sheets/Slides are exported, PDF/Word/text parsed, images returned as base64."""
+    f = await _g(uid, "GET", f"{DRIVE}/files/{file_id}", params={"fields": FILE_FIELDS})
+    mime = f.get("mimeType") or ""
+    if int(f.get("size") or 0) > MAX_DRIVE_BYTES:
+        raise HTTPException(400, "Berkas Drive lebih dari 8 MB")
+    if mime in (GDOC, GSHEET, GSLIDES):
+        exp = "text/csv" if mime == GSHEET else "text/plain"
+        return {**f, "text": (await _g_bytes(uid, f"{DRIVE}/files/{file_id}/export", {"mimeType": exp})).decode("utf-8", "ignore")}
+    data = await _g_bytes(uid, f"{DRIVE}/files/{file_id}", {"alt": "media"})
+    if mime.startswith("image/"):
+        return {**f, "image_b64": base64.b64encode(data).decode()}
+    return {**f, "text": _bytes_text(data, mime, f.get("name") or "")}
+
+
+async def drive_connected(uid: str) -> bool:
+    return bool(await db.drive_credentials.find_one({"user_id": uid}, {"_id": 1}))
+
+
 async def drive_update(uid: str, name_or_id: str, text: str, mode: str = "append") -> dict:
     f = await drive_find(uid, name_or_id)
     if f.get("mimeType") != GDOC:
@@ -284,9 +338,33 @@ class LinkIn(BaseModel):
     share: bool = False
 
 
+@router.get("/google/status")
+async def google_status(u: dict = Depends(current_user)):
+    return {"configured": configured(), "connected": await drive_connected(u["id"]), "picker": bool(os.environ.get("GOOGLE_API_KEY"))}
+
+
+@router.get("/google/picker-token")
+async def picker_token(u: dict = Depends(current_user)):
+    """Short-lived access token for the Google Picker in the browser (drive.file: only files the user picks become visible to Oryntix)."""
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise HTTPException(503, "Google Picker belum dikonfigurasi (GOOGLE_API_KEY).")
+    return {"access_token": await access_token(u["id"]), "api_key": api_key, "app_id": os.environ["GOOGLE_CLIENT_ID"].split("-")[0]}
+
+
 @router.get("/google/files")
-async def files(q: str = "", u: dict = Depends(current_user)):
-    return {"files": await drive_search(u["id"], q) if q else (await _g(u["id"], "GET", f"{DRIVE}/files", params={"pageSize": 12, "q": "trashed = false", "orderBy": "modifiedTime desc", "fields": "files(id,name,mimeType,webViewLink,modifiedTime)"})).get("files", [])}
+async def files(q: str = "", limit: int = 20, u: dict = Depends(current_user)):
+    safe = q.replace("\\", "").replace("'", "\\'")
+    query = f"name contains '{safe}' and trashed = false" if q else "trashed = false and mimeType != 'application/vnd.google-apps.folder'"
+    r = await _g(u["id"], "GET", f"{DRIVE}/files", params={"pageSize": max(1, min(limit, 50)), "q": query, "orderBy": "modifiedTime desc", "fields": f"files({FILE_FIELDS})"})
+    return {"files": r.get("files", [])}
+
+
+@router.get("/google/content")
+async def content(file_id: str, u: dict = Depends(current_user)):
+    out = await drive_content(u["id"], file_id)
+    out.pop("image_b64", None)
+    return {**out, "text": (out.get("text") or "")[:20000]}
 
 
 @router.post("/google/save")

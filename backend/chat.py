@@ -74,11 +74,27 @@ async def _gallery_context(a: dict, user_id: str) -> Optional[str]:
     return f"[Gambar Galeri '{name}']: {desc}"
 
 
+async def _drive_context(a: dict, user_id: str) -> Optional[str]:
+    """Attachment picked from the user's Google Drive: read it via the Drive API (only works when Drive is connected) — nothing is uploaded to the platform."""
+    from integrations import drive_content
+    f = await drive_content(user_id, a.get("drive_id") or "")
+    name = f.get("name") or a.get("name", "berkas")
+    if f.get("image_b64"):
+        desc = await describe_image(f["image_b64"])
+        if not desc:
+            return None
+        await record_usage(user_id, "vision", VISION_CREDITS, {"name": name, "drive_id": f.get("id")})
+        return f"[Gambar Google Drive '{name}']: {desc}"
+    return f"[Berkas Google Drive '{name}' ({f.get('webViewLink', '')})]:\n{(f.get('text') or '')[:6000]}"
+
+
 async def _attachment_context(a: dict, user_id: str) -> Optional[str]:
     """Text the model should see for one attachment (vision description, PDF text, or raw text)."""
     atype, name, data = a.get("type", "text"), a.get("name", "file"), a.get("data", "")
     if atype == "gallery":
         return await _gallery_context(a, user_id)
+    if atype == "drive":
+        return await _drive_context(a, user_id)
     if atype == "image":
         desc = await describe_image(data.split(",")[-1])
         if not desc:
@@ -94,7 +110,7 @@ async def _process_attachments(attachments, user_id):
     """Return (context_text, light_meta_list). Extracts text from pdf/text, vision-describes images."""
     ctx, meta = [], []
     for a in (attachments or [])[:5]:
-        meta.append({"type": a.get("type", "text"), "name": a.get("name", "file"), **{k: a[k] for k in ("path", "task_id", "kind") if a.get(k)}})
+        meta.append({"type": a.get("type", "text"), "name": a.get("name", "file"), **{k: a[k] for k in ("path", "task_id", "kind", "drive_id", "link", "mime") if a.get(k)}})
         try:
             text = await _attachment_context(a, user_id)
         except Exception:

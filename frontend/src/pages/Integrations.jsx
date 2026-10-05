@@ -21,13 +21,29 @@ export function StorageMeter({ storage, compact = false }) {
 export default function Integrations() {
   const [data, setData] = useState(null); const [busy, setBusy] = useState(false);
   const [params, setParams] = useSearchParams();
-  const load = () => api.get("/integrations").then((r) => setData(r.data)).catch(() => setData({ items: [], storage: null }));
+  const [linked, setLinked] = useState(null);
+  const load = () => { api.get("/integrations").then((r) => setData(r.data)).catch(() => setData({ items: [], storage: null })); api.get("/auth/google/linked").then((r) => setLinked(r.data.linked ? r.data : null)).catch(() => {}); };
   useEffect(() => { load(); }, []);
   useEffect(() => {
     if (params.get("connected")) { toast.success("Google Drive terhubung"); setParams({}, { replace: true }); }
     if (params.get("error")) { toast.error(`Gagal menghubungkan Google Drive (${params.get("error")})`); setParams({}, { replace: true }); }
   }, [params, setParams]);
-  const connect = async () => { setBusy(true); try { const r = await api.get("/integrations/google/connect"); window.location.href = r.data.authorization_url; } catch (e) { toast.error(e?.response?.data?.detail || "Gagal"); setBusy(false); } };
+  const connect = async () => {
+    setBusy(true);
+    try {
+      const r = await api.get("/integrations/google/connect");
+      // Google refuses OAuth inside iframes → open a top-level tab. (No "noopener": it makes window.open return null, which looked like a blocked popup.)
+      const win = window.open(r.data.authorization_url, "_blank");
+      if (!win) { window.top.location.href = r.data.authorization_url; return; }
+      toast.info(linked ? "Tinggal setujui akses Drive di tab yang baru terbuka." : "Selesaikan izin Google di tab yang baru terbuka. Halaman ini akan ikut terbarui.");
+      let n = 0;
+      const timer = setInterval(async () => {
+        n += 1;
+        try { const s = await api.get("/integrations/google/status"); if (s.data.connected) { clearInterval(timer); setBusy(false); toast.success("Google Drive terhubung"); load(); } } catch (e) {}
+        if (n > 60) { clearInterval(timer); setBusy(false); }
+      }, 3000);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Gagal"); setBusy(false); }
+  };
   const disconnect = async () => { if (!window.confirm("Putuskan Google Drive? Tautan di Galeri tetap ada, tapi asisten tidak bisa lagi mengakses Drive.")) return; await api.delete("/integrations/google"); toast.success("Google Drive diputus"); load(); };
   const g = data?.items?.[0];
   return (
@@ -42,14 +58,15 @@ export default function Integrations() {
               <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#EEF3FF] text-[#2F6BFF]"><HardDrive size={22} /></span>
               <div className="min-w-0 flex-1">
                 <p className="text-base font-bold text-slate-900">{g.name}</p>
-                {g.connected ? <p className="mt-0.5 flex items-center gap-1 text-xs text-emerald-700" data-testid="gdrive-status"><CheckCircle2 size={13} /> Terhubung sebagai {g.account_email}</p>
+                {g.connected ? <p className="mt-0.5 flex items-center gap-1.5 text-xs text-emerald-700" data-testid="gdrive-status"><CheckCircle2 size={13} /> Terhubung sebagai {g.account_picture && <img src={g.account_picture} alt="" className="h-4 w-4 rounded-full" referrerPolicy="no-referrer" />}{g.account_name ? `${g.account_name} (${g.account_email})` : g.account_email}</p>
                   : g.configured ? <p className="mt-0.5 text-xs text-slate-500" data-testid="gdrive-status">Belum terhubung</p>
                     : <p className="mt-0.5 flex items-center gap-1 text-xs text-amber-700" data-testid="gdrive-status"><AlertTriangle size={13} /> Belum dikonfigurasi admin platform (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)</p>}
                 <ul className="mt-3 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">{g.capabilities.map((c) => <li key={c} className="flex items-center gap-1.5"><Link2 size={11} className="text-[#2F6BFF]" /> {c}</li>)}</ul>
-                <p className="mt-3 text-[11px] text-slate-400">Contoh perintah ke asisten: "simpan dokumen ini ke Google Drive", "update dokumen Proposal di Drive, tambahkan bagian anggaran", "kirim link drive laporan Q3".</p>
+                <p className="mt-3 text-[11px] text-slate-400">Izin minimal (<code>drive.file</code>): Oryntix hanya bisa mengakses file yang dibuatnya sendiri atau yang Anda pilih lewat Google Picker — bukan seluruh isi Drive Anda.{g.connected && !g.picker && " Google Picker belum dikonfigurasi admin (GOOGLE_API_KEY), jadi untuk saat ini hanya file buatan Oryntix yang bisa dilampirkan."}</p>
+                <p className="mt-2 text-[11px] text-slate-400">Contoh perintah ke asisten: "simpan dokumen ini ke Google Drive", "update dokumen Proposal di Drive, tambahkan bagian anggaran", "kirim link drive laporan Q3".</p>
               </div>
               {g.connected ? <button onClick={disconnect} className="flex items-center gap-1.5 rounded-xl border border-rose-200 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50" data-testid="gdrive-disconnect"><Unplug size={14} /> Putuskan</button>
-                : <button onClick={connect} disabled={!g.configured || busy} className="btn-grad flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold disabled:opacity-50" data-testid="gdrive-connect">{busy ? <Loader2 size={14} className="animate-spin" /> : <Plug size={14} />} Hubungkan Google Drive</button>}
+                : <button onClick={connect} disabled={!g.configured || busy} className="btn-grad flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold disabled:opacity-50" data-testid="gdrive-connect">{busy ? <Loader2 size={14} className="animate-spin" /> : <Plug size={14} />} {linked ? "Izinkan akses Drive" : "Hubungkan Google Drive"}</button>}
             </div>
           </div>
           <p className="mt-8 text-xs font-semibold uppercase tracking-wider text-slate-400">Segera hadir</p>

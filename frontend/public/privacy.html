@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kebijakan Privasi — Oryntix</title>
+<meta name="description" content="Kebijakan Privasi Oryntix: data yang kami kumpulkan, cara kami memakainya, integrasi Google Drive, keamanan, retensi, dan hak Anda." />
+<link rel="icon" href="/brand/mark-512.png" />
+<style>
+body{margin:0;font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;background:#F8FAFC;color:#334155;line-height:1.65}
+header{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;background:#fff;border-bottom:1px solid #E7ECF3}
+header img{height:32px}
+header nav a{margin-left:16px;color:#2F6BFF;font-weight:600;font-size:12px;text-decoration:none}
+main{max-width:800px;margin:0 auto;padding:32px 20px}
+h1{font-size:34px;color:#0f172a;margin:0}
+.sub{color:#64748b;font-size:14px;margin:4px 0 24px}
+article{background:#fff;border:1px solid #E7ECF3;border-radius:24px;padding:32px;font-size:14px}
+h2{font-size:17px;color:#0f172a;margin:28px 0 8px}
+h3{font-size:15px;color:#0f172a;margin:20px 0 6px}
+ul{padding-left:20px}
+li{margin:4px 0}
+code{background:#EEF3FF;padding:1px 5px;border-radius:4px;font-size:13px}
+a{color:#2F6BFF}
+footer{color:#94a3b8;font-size:12px;margin-top:24px}
+</style>
+</head>
+<body>
+<header><a href="/"><img src="/brand/logo-dark.webp" alt="Oryntix" /></a><nav><a href="/privacy.html">Kebijakan Privasi</a><a href="/terms.html">Ketentuan Layanan</a><a href="/">Masuk</a></nav></header>
+<main>
+<h1>Kebijakan Privasi</h1>
+<p class="sub">Bagaimana Oryntix mengumpulkan, memakai, dan melindungi data Anda · Terakhir diperbarui 6 Oktober 2026 · <a href="#english">English version below</a></p>
+<article>
+<p>Oryntix ("kami") adalah platform asisten AI pribadi dan ruang kerja multi-agen yang diakses melalui situs web <strong>oryntix.com</strong>. Kebijakan ini menjelaskan data apa yang kami kumpulkan, mengapa, bagaimana kami memakainya, dengan siapa kami membagikannya, dan hak-hak Anda — termasuk saat Anda menghubungkan layanan pihak ketiga seperti Google Drive.</p>
+
+<h2>1. Data yang kami kumpulkan</h2>
+<ul>
+<li><strong>Data akun</strong>: nama, alamat email, kata sandi (disimpan hanya sebagai hash bcrypt), bahasa, zona waktu, dan preferensi aplikasi.</li>
+<li><strong>Konten yang Anda buat</strong>: pesan chat, transkrip panggilan suara, dokumen dan gambar yang dihasilkan, pengetahuan asisten (dokumen referensi yang Anda unggah), memori asisten, pengingat, kalender, dan tugas Ruang Kerja.</li>
+<li><strong>Berkas yang Anda unggah atau lampirkan</strong>: PDF, Word, teks, gambar — dari perangkat Anda, dari Galeri, atau dari Google Drive yang Anda pilih.</li>
+<li><strong>Data pemakaian & penagihan</strong>: riwayat kredit, fitur yang dipakai, model AI yang dipakai, durasi panggilan, volume data panggilan, dan riwayat top-up.</li>
+<li><strong>Data teknis</strong>: alamat IP, jenis peramban/perangkat, dan log server yang dipakai untuk keamanan, pencegahan penyalahgunaan, dan pembatasan laju (rate limiting).</li>
+<li><strong>Data teman</strong>: alamat email yang Anda undang sebagai teman dan status permintaan pertemanan.</li>
+</ul>
+
+<h2>2. Integrasi Google Drive &amp; Google Docs (Google API)</h2>
+<p>Integrasi Google bersifat <strong>opsional dan tidak aktif</strong> sampai Anda menghubungkannya sendiri melalui menu <strong>Integrasi</strong> dan menyetujui layar izin Google (OAuth 2.0). Oryntix meminta <strong>tepat empat cakupan</strong> berikut — tidak lebih — dan tidak pernah meminta akses ke seluruh Drive (<code>auth/drive</code>) maupun folder data aplikasi (<code>auth/drive.appdata</code>):</p>
+<ul>
+<li><code>https://www.googleapis.com/auth/drive.file</code> — "Melihat, mengedit, membuat, dan menghapus hanya file Google Drive tertentu yang Anda gunakan dengan aplikasi ini". Ini izin <strong>minimal</strong>: Oryntix hanya dapat mengakses file yang dibuatnya sendiri atau file yang Anda pilih secara eksplisit melalui Google Picker. Oryntix <strong>tidak</strong> dapat melihat, mencari, atau membaca file lain di Drive Anda.</li>
+<li><code>openid</code> dan <code>https://www.googleapis.com/auth/userinfo.email</code> — mengetahui alamat email akun Google yang terhubung agar ditampilkan di menu Integrasi ("Terhubung sebagai …"). Tidak dipakai untuk login ke Oryntix.</li>
+<li><code>https://www.googleapis.com/auth/userinfo.profile</code> — "Melihat info pribadi Anda, termasuk info pribadi yang telah Anda publikasikan" (nama tampilan dan foto profil Google). Dipakai hanya untuk menampilkan nama/foto akun Google yang terhubung di menu Integrasi agar Anda mudah mengenali akun mana yang terpasang. Kami tidak menyalin data profil ini ke profil Oryntix Anda, tidak membagikannya, dan menghapusnya saat Anda memutus integrasi.</li>
+</ul>
+<h3>Google Picker</h3>
+<p>Untuk memilih file Drive yang bukan buatan Oryntix, kami menampilkan <strong>Google Picker</strong> (antarmuka resmi Google) di dalam aplikasi. Picker berjalan di peramban Anda dengan token akses sementara; daftar file yang terlihat di Picker <strong>tidak</strong> pernah dikirim ke server Oryntix. Hanya file yang Anda klik "Pilih" yang menjadi dapat diakses oleh Oryntix, sesuai aturan cakupan drive.file.</p>
+<h3>Untuk apa data Google dipakai</h3>
+<ul>
+<li>Menyimpan dokumen, tabel, atau gambar yang dibuat asisten ke Drive Anda sebagai Google Docs/Sheets atau berkas, <em>atas perintah Anda</em>.</li>
+<li>Memperbarui isi Google Docs yang Anda sebutkan (menambah atau mengganti teks), <em>atas perintah Anda</em>.</li>
+<li>Mengambil tautan berbagi file Drive yang Anda minta.</li>
+<li>Menampilkan daftar file yang dibuat Oryntix saat Anda membuka pemilih "Lampirkan dari Google Drive" atau "Pengetahuan dari Google Drive"; file lain hanya dapat dipilih melalui Google Picker resmi, dan hanya file yang Anda pilih yang menjadi dapat diakses.</li>
+<li>Membaca isi <strong>hanya file yang Anda pilih</strong> sebagai lampiran chat atau sebagai pengetahuan asisten, agar asisten dapat menjawab berdasarkan isinya.</li>
+</ul>
+<h3>Apa yang TIDAK kami lakukan</h3>
+<ul>
+<li>Kami tidak memindai, mengindeks, mengunduh massal, atau menyalin seluruh isi Drive Anda — secara teknis pun tidak mungkin dengan cakupan drive.file.</li>
+<li>Kami tidak menjual data Google Anda dan tidak memakainya untuk iklan.</li>
+<li>Kami tidak memakai data Google Anda untuk melatih model AI. Isi file yang Anda pilih dikirim ke penyedia model (OpenAI, Anthropic, Google) hanya untuk menghasilkan jawaban, berdasarkan ketentuan API yang melarang pelatihan model dari data tersebut.</li>
+<li>Manusia di Oryntix tidak membaca data Google Anda, kecuali dengan persetujuan Anda untuk dukungan teknis, untuk keamanan, atau bila diwajibkan hukum.</li>
+</ul>
+<h3>Penyimpanan dan pencabutan</h3>
+<ul>
+<li>Token akses dan refresh token Google disimpan <strong>terenkripsi</strong> di server kami dan hanya dipakai server Oryntix untuk tindakan di atas.</li>
+<li>Untuk file yang disimpan ke Drive, Galeri Oryntix hanya menyimpan <strong>tautan dan nama</strong> file, bukan salinan isinya.</li>
+<li>Isi file Drive yang Anda jadikan pengetahuan asisten disimpan sebagai potongan teks di Oryntix agar dapat dicari; Anda dapat menyegarkan atau menghapusnya kapan saja.</li>
+<li>Anda dapat memutus koneksi kapan saja lewat tombol <strong>Putuskan</strong> di menu Integrasi — token dicabut di Google dan dihapus dari server kami. Anda juga dapat mencabut akses dari <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</li>
+</ul>
+<p>Penggunaan dan pengalihan informasi yang diterima Oryntix dari Google API mematuhi <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, termasuk persyaratan <strong>Limited Use</strong>.</p>
+
+<h2>3. Bagaimana kami memakai data</h2>
+<ul>
+<li>Menyediakan layanan: menjalankan asisten AI, menyimpan riwayat percakapan, membuat dokumen, mengirim pengingat dan ringkasan harian, panggilan suara.</li>
+<li>Penagihan kredit, pelaporan pemakaian, dan pencegahan penyalahgunaan.</li>
+<li>Komunikasi akun: verifikasi email, reset kata sandi, undangan teman. Kami tidak mengirim email pemasaran tanpa persetujuan Anda.</li>
+<li>Keamanan: mendeteksi akses tidak sah, membatasi percobaan login, dan menjaga stabilitas layanan.</li>
+</ul>
+
+<h2>4. Dasar hukum</h2>
+<p>Kami memproses data berdasarkan pelaksanaan kontrak (menyediakan layanan yang Anda minta), persetujuan Anda (mis. menghubungkan Google Drive, mikrofon untuk panggilan suara), kepentingan sah (keamanan dan pencegahan penipuan), dan kewajiban hukum, sesuai UU No. 27 Tahun 2022 tentang Pelindungan Data Pribadi dan peraturan terkait.</p>
+
+<h2>5. Pembagian data kepada pihak ketiga (subprosesor)</h2>
+<p>Kami tidak menjual data pribadi. Untuk menjalankan fitur, kami memakai penyedia berikut yang hanya menerima data yang diperlukan untuk memproses permintaan Anda:</p>
+<ul>
+<li><strong>OpenAI</strong> — model bahasa, transkripsi suara, text-to-speech, dan panggilan suara Realtime.</li>
+<li><strong>Anthropic</strong> dan <strong>Google</strong> — model bahasa dan pembuatan gambar.</li>
+<li><strong>fal.ai</strong> — pembuatan video.</li>
+<li><strong>Metered</strong> — relay WebRTC (TURN) untuk panggilan antar-pengguna; hanya meneruskan aliran media terenkripsi.</li>
+<li><strong>Penyedia email (SMTP)</strong> — mengirim email verifikasi, reset kata sandi, dan undangan.</li>
+<li><strong>Google (Drive/Docs API)</strong> — hanya bila Anda menghubungkan integrasi Google Drive.</li>
+</ul>
+<p>Kami juga dapat mengungkapkan data bila diwajibkan hukum atau untuk melindungi hak, keselamatan, dan keamanan pengguna serta layanan.</p>
+
+<h2>6. Keamanan</h2>
+<ul>
+<li>Semua lalu lintas dienkripsi dengan TLS (HTTPS).</li>
+<li>Kata sandi di-hash dengan bcrypt; token integrasi dienkripsi saat disimpan; sesi memakai JWT yang otomatis tidak berlaku saat kata sandi diganti.</li>
+<li>Akses data dibatasi per pengguna/workspace; tautan berbagi publik memiliki masa berlaku dan dapat dicabut.</li>
+<li>Penyimpanan platform per pengguna dibatasi 50 MB; dokumen besar disarankan disimpan di Google Drive Anda sendiri.</li>
+</ul>
+
+<h2>7. Retensi data</h2>
+<ul>
+<li>Data akun dan konten disimpan selama akun Anda aktif.</li>
+<li>Percakapan lama dapat diarsipkan otomatis menjadi ringkasan; Anda dapat memulihkan atau menghapusnya.</li>
+<li>Token Google dihapus segera saat Anda memutus integrasi.</li>
+<li>Setelah permintaan penghapusan akun, data pribadi dihapus dalam 30 hari, kecuali catatan transaksi yang wajib disimpan menurut hukum.</li>
+</ul>
+
+<h2>8. Hak Anda</h2>
+<ul>
+<li>Mengakses, mengekspor (Word/PDF/Markdown), memperbaiki, mengarsipkan, dan menghapus percakapan, dokumen, memori, serta pengetahuan asisten langsung dari aplikasi.</li>
+<li>Memutus integrasi pihak ketiga kapan saja.</li>
+<li>Meminta salinan data, pembatasan pemrosesan, atau penghapusan akun melalui <a href="mailto:no-reply@oryntix.com">no-reply@oryntix.com</a>.</li>
+</ul>
+
+<h2>9. Cookie dan penyimpanan lokal</h2>
+<p>Kami memakai penyimpanan lokal peramban (localStorage) untuk token sesi dan preferensi tampilan (bahasa, tata letak, pengaturan mikrofon). Kami tidak memakai cookie pelacakan iklan pihak ketiga.</p>
+
+<h2>10. Anak-anak</h2>
+<p>Oryntix tidak ditujukan untuk pengguna di bawah 13 tahun (atau usia minimum di yurisdiksi Anda). Kami tidak sengaja mengumpulkan data anak; hubungi kami bila Anda menduga hal itu terjadi.</p>
+
+<h2>11. Perubahan kebijakan</h2>
+<p>Perubahan akan diumumkan di halaman ini dengan tanggal pembaruan baru. Perubahan material akan diberitahukan melalui email atau pemberitahuan dalam aplikasi.</p>
+
+<h2>12. Kontak</h2>
+<p>Pertanyaan tentang privasi: <a href="mailto:no-reply@oryntix.com">no-reply@oryntix.com</a>.</p>
+
+<hr style="border:0;border-top:1px solid #E7ECF3;margin:36px 0" />
+<h2 id="english">Privacy Policy (English summary)</h2>
+<p>Oryntix (oryntix.com) is a personal AI assistant and multi-agent workspace. We collect account data (name, email, hashed password, preferences), the content you create (chats, voice transcripts, documents, images, assistant knowledge, memories, reminders, tasks), files you upload or attach, usage and billing records, and technical logs (IP address, browser) for security and rate limiting.</p>
+<h3>Google Drive &amp; Docs integration</h3>
+<p>The Google integration is optional and inactive until you connect it in the <strong>Integrations</strong> menu and approve Google's OAuth consent screen. We request exactly four scopes and nothing more — never full Drive access (<code>auth/drive</code>) nor the app-data folder (<code>auth/drive.appdata</code>): the least-privilege scope <code>https://www.googleapis.com/auth/drive.file</code> (see, edit, create and delete only the specific Google Drive files you use with this app — i.e. files created by Oryntix or explicitly selected by you through the Google Picker; Oryntix cannot see, search or read any other file in your Drive), plus <code>openid</code>, <code>userinfo.email</code> and <code>userinfo.profile</code> (your Google account email, display name and profile picture, shown only in the Integrations menu so you can recognize the connected account; never used for Oryntix login, never copied to your Oryntix profile, deleted when you disconnect), <code>openid</code> and <code>userinfo.email</code> (to display the connected account). We use Google user data only to: (a) save assistant-generated documents, tables or images to your Drive when you ask; (b) update a Google Doc you name when you ask; (c) fetch sharing links you request; (d) list files created by Oryntix when you open the Drive picker (other files can only be chosen through the official Google Picker, which grants access to the selected files only); and (e) read the content of <strong>only the files you explicitly select</strong> as chat attachments or assistant knowledge. We do not scan, index or bulk-copy your Drive, do not sell Google user data, do not use it for advertising, and do not use it to train AI models; selected file content is sent to AI model providers (OpenAI, Anthropic, Google) solely to generate your answer under API terms that prohibit training. The Google Picker runs in your browser with a short-lived access token; the file list shown in the Picker is never sent to Oryntix servers, and only the files you click "Select" become accessible to Oryntix. Tokens are stored encrypted and used only by Oryntix servers. You can disconnect at any time via "Putuskan" in Integrations (tokens are revoked and deleted) or at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>. Oryntix's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+<h3>Sharing, security, retention and your rights</h3>
+<p>We share data only with sub-processors needed to run the service (OpenAI, Anthropic, Google, fal.ai, Metered TURN relay, our SMTP email provider) and when required by law. All traffic uses TLS; passwords are bcrypt-hashed; integration tokens are encrypted at rest. Data is kept while your account is active; Google tokens are deleted when you disconnect; account data is deleted within 30 days of a deletion request except records we must keep by law. You can access, export, correct and delete your content in the app, and request a data copy or account deletion at <a href="mailto:no-reply@oryntix.com">no-reply@oryntix.com</a>. Oryntix is not intended for children under 13.</p>
+</article>
+<footer>© 2026 Oryntix · Intelligence, Orchestrated. · <a href="/terms.html">Ketentuan Layanan</a></footer>
+</main>
+</body>
+</html>

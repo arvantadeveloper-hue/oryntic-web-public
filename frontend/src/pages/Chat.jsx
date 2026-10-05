@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink } from "lucide-react";
+import { Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink, HardDrive } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -11,6 +11,7 @@ import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
 import { MediaList, ToolRequestCard, ModelBadge, downloadUrl } from "../components/MessageExtras";
 import { GalleryPicker } from "../components/GalleryPicker";
+import { DrivePicker } from "../components/DrivePicker";
 import { SummaryPrompt } from "../components/ConversationTools";
 import { ChatArchivesModal } from "../components/ChatArchives";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
@@ -63,6 +64,9 @@ export default function Chat() {
   const [videoOpen, setVideoOpen] = useState(false);
   const [showConvList, setShowConvList] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
+  const [showDrive, setShowDrive] = useState(false);
+  const [driveOn, setDriveOn] = useState(false);
+  useEffect(() => { api.get("/integrations/google/status").then((r) => setDriveOn(!!r.data.connected)).catch(() => setDriveOn(false)); }, []);
   const [convsLoading, setConvsLoading] = useState(true);
   const [msgsLoading, setMsgsLoading] = useState(false);
   const streamingRef = useRef(false);
@@ -348,6 +352,8 @@ export default function Chat() {
                 <div className="max-w-[78%] rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }} data-testid="msg-user">
                   {(m.attachments || []).length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">{m.attachments.map((a, k) => a.task_id
                     ? <a key={k} href={`${window.location.origin}/workspace/${a.task_id}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs underline-offset-2 hover:underline" data-testid="att-link-task"><FileText size={11} />{a.name}<ExternalLink size={10} /></a>
+                    : a.link
+                    ? <a key={k} href={a.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs underline-offset-2 hover:underline" data-testid="att-link-drive"><HardDrive size={11} />{a.name}<ExternalLink size={10} /></a>
                     : a.path
                     ? <a key={k} href={downloadUrl(a.path)} target="_blank" rel="noreferrer" download={a.name} className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs underline-offset-2 hover:underline" data-testid="att-link-file">{a.kind === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}<ExternalLink size={10} /></a>
                     : <span key={k} className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs">{a.type === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}</span>)}</div>}
@@ -402,7 +408,7 @@ export default function Chat() {
               <div className="mb-2 flex flex-wrap gap-2">
                 {attachments.map((a, k) => (
                   <span key={k} className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs text-slate-600" data-testid={`att-${k}`}>
-                    {a.type === "gallery" ? <Images size={12} className="text-[#2F6BFF]" /> : a.type === "image" ? <ImageIcon size={12} /> : <FileText size={12} />}{a.name}
+                    {a.type === "drive" ? <HardDrive size={12} className="text-[#2F6BFF]" /> : a.type === "gallery" ? <Images size={12} className="text-[#2F6BFF]" /> : a.type === "image" ? <ImageIcon size={12} /> : <FileText size={12} />}{a.name}
                     <button onClick={() => setAttachments((p) => p.filter((_, j) => j !== k))}><X size={12} /></button>
                   </span>
                 ))}
@@ -413,6 +419,7 @@ export default function Chat() {
               <input ref={fileRef} type="file" multiple accept="image/*,application/pdf,.txt,.md,.csv" className="hidden" onChange={onFiles} />
               <button onClick={() => fileRef.current?.click()} data-testid="attach-btn" title="Unggah berkas" className="flex h-12 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E7ECF3] text-slate-500 hover:bg-slate-50"><Paperclip size={18} /></button>
               <button onClick={() => setShowGallery(true)} data-testid="attach-gallery-btn" title="Lampirkan dari Galeri" className="hidden h-12 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E7ECF3] text-slate-500 hover:bg-slate-50 sm:flex"><Images size={18} /></button>
+              {driveOn && <button onClick={() => setShowDrive(true)} data-testid="attach-drive-btn" title="Lampirkan dari Google Drive" className="hidden h-12 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E7ECF3] text-slate-500 hover:bg-slate-50 sm:flex"><HardDrive size={18} /></button>}
               <button onClick={toggleRecord} data-testid="mic-btn" className={`flex h-12 w-11 shrink-0 items-center justify-center rounded-xl border ${recording ? "animate-pulse border-[#EF4444] bg-[#EF4444] text-white" : "border-[#E7ECF3] text-slate-500 hover:bg-slate-50"}`}>{recording ? <Square size={16} /> : <Mic size={18} />}</button>
               <textarea className="input-dark max-h-32 min-h-[48px] resize-none" rows={1} placeholder={t("chat.placeholder")} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} data-testid="chat-input" />
               <button onClick={send} disabled={streaming || (!input.trim() && attachments.length === 0)} className="btn-grad flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" data-testid="chat-send-btn"><Send size={18} /></button>
@@ -429,6 +436,7 @@ export default function Chat() {
         : <VideoRoom conv={conv} cid={id} messages={messages} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />)}
 
       {showGallery && conv && <GalleryPicker onClose={() => setShowGallery(false)} onPick={(items) => setAttachments((a) => [...a, ...items].slice(0, 5))} max={5 - attachments.length} />}
+      {showDrive && conv && <DrivePicker onClose={() => setShowDrive(false)} onPick={(items) => setAttachments((a) => [...a, ...items].slice(0, 5))} max={5 - attachments.length} />}
 
       {showModal && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">

@@ -335,7 +335,7 @@ async def login(x: LoginIn, request: Request):
     if not login_allowed(ip, email):
         raise HTTPException(429, "Terlalu banyak percobaan login. Coba lagi dalam 5 menit.")
     u = await db.users.find_one({"email": email})
-    if not u or not pw_ok(x.password, u["password_hash"]):
+    if not u or not u.get("password_hash") or not pw_ok(x.password, u["password_hash"]):
         raise HTTPException(401, "Incorrect email or password")
     if u.get("disabled"):
         raise HTTPException(403, "Akun ini dinonaktifkan. Hubungi dukungan Oryntix.")

@@ -28,6 +28,8 @@ import ResetPassword from "./pages/ResetPassword";
 import Calendar from "./pages/Calendar";
 import PlatformApp, { PLATFORM_MODE } from "./pages/platform/PlatformApp";
 import Integrations from "./pages/Integrations";
+import { PrivacyPolicy, TermsOfService } from "./pages/Legal";
+import GoogleCallback from "./pages/GoogleCallback";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -56,7 +58,7 @@ function App() {
   if (PLATFORM_MODE) { // standalone admin site build (admin.oryntix.com): only the back-office, mounted at "/"
     return (
       <div className="App"><I18nProvider><AuthProvider><BrowserRouter><Toaster position="top-center" theme="dark" richColors /><ErrorBoundary>
-        <Routes><Route path="/reset-password" element={<ResetPassword />} /><Route path="/*" element={<PlatformApp />} /></Routes>
+        <Routes><Route path="/reset-password" element={<ResetPassword />} /><Route path="/privacy" element={<PrivacyPolicy />} /><Route path="/terms" element={<TermsOfService />} /><Route path="/*" element={<PlatformApp />} /></Routes>
       </ErrorBoundary></BrowserRouter></AuthProvider></I18nProvider></div>
     );
   }
@@ -73,6 +75,9 @@ function App() {
               <Route path="/verify-email" element={<VerifyEmail />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/s/:code" element={<SharePage />} />
+              <Route path="/auth/google" element={<GoogleCallback />} />
+              <Route path="/privacy" element={<PrivacyPolicy />} />
+              <Route path="/terms" element={<TermsOfService />} />
               <Route path="/platform/*" element={<PlatformApp />} />
               <Route element={<Protected><AppLayout /></Protected>}>
                 <Route path="/home" element={<Home />} />

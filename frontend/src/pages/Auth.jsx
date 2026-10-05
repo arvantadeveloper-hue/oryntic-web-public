@@ -1,11 +1,12 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Mail, Lock, Eye, EyeOff, ArrowRight, Globe, BarChart3, FileText, Users, Sparkles, MessageSquare, Video, MailCheck, KeyRound } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Globe, BarChart3, FileText, Users, Sparkles, MessageSquare, Video, MailCheck, KeyRound, Loader2 } from "lucide-react";
 import { Logo, BRAND_HERO, TAGLINE } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { useI18n } from "../i18n";
 import { useNavigate } from "react-router-dom";
+import { startGoogleLogin } from "./GoogleCallback";
 
 const CHIPS = [
   { icon: BarChart3, label: "Analisis data" },
@@ -52,6 +53,10 @@ export default function Auth() {
   const [name, setName] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [googleOn, setGoogleOn] = useState(false);
+  const [gBusy, setGBusy] = useState(false);
+  useEffect(() => { api.get("/auth/google/status").then((r) => setGoogleOn(!!r.data.enabled)).catch(() => setGoogleOn(false)); }, []);
+  const googleLogin = async () => { setGBusy(true); try { await startGoogleLogin(); } catch (e) { toast.error(e?.response?.data?.detail || "Login Google gagal dimulai"); } finally { if (window.self !== window.top) setGBusy(false); } };
   const [pending, setPending] = useState(null); // {email, mail_sent, kind: verify|reset}
   const [unverified, setUnverified] = useState(false);
   const mismatch = mode === "register" && confirm.length > 0 && confirm !== password;
@@ -152,7 +157,15 @@ export default function Auth() {
           <h2 className="text-3xl font-bold tracking-tight text-slate-900" data-testid="auth-title">{TITLES[mode]}</h2>
           <p className="mt-1.5 text-sm text-slate-500">{SUBTITLES[mode]}</p>
 
-          <form onSubmit={submit} className="mt-7 space-y-4">
+          {mode !== "forgot" && googleOn && (<>
+            <button type="button" onClick={googleLogin} disabled={gBusy} className="mt-6 flex w-full items-center justify-center gap-3 rounded-xl border border-[#E7ECF3] bg-white py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60" data-testid="auth-google-btn">
+              {gBusy ? <Loader2 size={18} className="animate-spin" /> : <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.7 1.2 9.2 3.6l6.9-6.9C35.9 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l8 6.2C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.6 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.1.8-4.6l-8-6.2A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.8l8-6.2z"/><path fill="#34A853" d="M24 48c6.3 0 11.7-2.1 15.6-5.7l-7.5-5.8c-2.1 1.4-4.8 2.3-8.1 2.3-6.2 0-11.5-4.1-13.4-9.8l-8 6.2C6.5 42.6 14.6 48 24 48z"/></svg>}
+              {mode === "login" ? "Masuk dengan Google" : "Daftar dengan Google"}
+            </button>
+            <div className="mt-5 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400"><span className="h-px flex-1 bg-[#E7ECF3]" />atau dengan email<span className="h-px flex-1 bg-[#E7ECF3]" /></div>
+          </>)}
+
+          <form onSubmit={submit} className={`${mode !== "forgot" && googleOn ? "mt-5" : "mt-7"} space-y-4`}>
             {mode === "register" && (
               <div className="relative">
                 <Users size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -209,6 +222,7 @@ export default function Auth() {
               </button>
             </>)}
           </p>
+          <p className="mt-4 text-center text-[11px] text-slate-400" data-testid="auth-legal-links">Dengan masuk atau mendaftar, Anda menyetujui <a href="/terms.html" target="_blank" rel="noreferrer" className="font-semibold text-[#2F6BFF] hover:underline">Ketentuan Layanan</a> dan <a href="/privacy.html" target="_blank" rel="noreferrer" className="font-semibold text-[#2F6BFF] hover:underline">Kebijakan Privasi</a>.</p>
         </div>
       </div>
     </div>

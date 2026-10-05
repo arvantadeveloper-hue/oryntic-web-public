@@ -69,6 +69,16 @@ class KnowledgeIn(BaseModel):
     file_name: Optional[str] = None
     file_data: Optional[str] = None  # base64
     url: Optional[str] = Field(default=None, max_length=2000)
+    drive_id: Optional[str] = Field(default=None, max_length=200)
+
+
+async def _drive_text(uid: str, drive_id: str) -> tuple:
+    """(file meta, text) from the user's Google Drive — requires the Drive integration to be connected."""
+    from integrations import drive_content
+    f = await drive_content(uid, drive_id)
+    if f.get("image_b64"):
+        raise HTTPException(400, "Gambar tidak bisa dijadikan pengetahuan; pilih dokumen/teks")
+    return f, f.get("text") or ""
 
 
 def _host_is_public(host: str) -> bool:
@@ -166,8 +176,11 @@ async def list_knowledge(pid: str, u: dict = Depends(current_user)):
 async def add_knowledge(pid: str, x: KnowledgeIn, u: dict = Depends(current_user)):
     """Reference knowledge for an assistant (upload or editor). Never 'priority': only the few chunks relevant to a message are injected."""
     p = await _persona_of(pid, u)
-    url, page_title = None, ""
-    if x.url:
+    url, page_title, drive = None, "", {}
+    if x.drive_id:
+        drive, text = await _drive_text(u["id"], x.drive_id)
+        page_title, source, html = drive.get("name") or "", "drive", None
+    elif x.url:
         url = x.url.strip()
         page_title, text = await _fetch_url(url)
         source, html = "url", None
@@ -183,6 +196,7 @@ async def add_knowledge(pid: str, x: KnowledgeIn, u: dict = Depends(current_user
     if len(text.strip()) < 20:
         raise HTTPException(400, "Isi dokumen terlalu pendek atau tidak terbaca")
     doc = {"id": new_id(), "user_id": p["user_id"], "persona_id": pid, "title": title, "source": source, "file_name": x.file_name, "url": url, "html": html,
+           "drive_id": drive.get("id"), "drive_link": drive.get("webViewLink"), "drive_mime": drive.get("mimeType"), "drive_user_id": u["id"] if drive else None,
            "chars": len(text), "chunks": _chunks(text), "enabled": True, "created_at": now_iso(), "updated_at": now_iso()}
     await db.knowledge_docs.insert_one(dict(doc))
     return _pub(doc)
@@ -190,12 +204,15 @@ async def add_knowledge(pid: str, x: KnowledgeIn, u: dict = Depends(current_user
 
 @router.post("/personas/{pid}/knowledge/{kid}/refresh")
 async def refresh_knowledge(pid: str, kid: str, u: dict = Depends(current_user)):
-    """Re-download a URL-sourced document so the assistant sees the latest page content."""
+    """Re-download a URL- or Drive-sourced document so the assistant sees the latest content."""
     await _persona_of(pid, u)
-    d = await db.knowledge_docs.find_one({"id": kid, "persona_id": pid}, {"_id": 0, "url": 1})
-    if not d or not d.get("url"):
-        raise HTTPException(404, "Dokumen dari tautan tidak ditemukan")
-    _, text = await _fetch_url(d["url"])
+    d = await db.knowledge_docs.find_one({"id": kid, "persona_id": pid}, {"_id": 0, "url": 1, "drive_id": 1, "drive_user_id": 1})
+    if not d or not (d.get("url") or d.get("drive_id")):
+        raise HTTPException(404, "Dokumen dari tautan/Drive tidak ditemukan")
+    if d.get("drive_id"):
+        _, text = await _drive_text(d.get("drive_user_id") or u["id"], d["drive_id"])
+    else:
+        _, text = await _fetch_url(d["url"])
     if len(text.strip()) < 20:
         raise HTTPException(400, "Isi halaman terlalu pendek atau tidak terbaca")
     r = await db.knowledge_docs.find_one_and_update({"id": kid}, {"$set": {"chars": len(text), "chunks": _chunks(text), "updated_at": now_iso()}}, projection={"_id": 0}, return_document=True)
