@@ -1,4 +1,3 @@
-import time
 import logging
 import math
 import os
@@ -11,7 +10,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field, field_validator
 
 from db import db, now_iso, new_id
-from auth import current_user, require_platform_admin, workspace_id, _lang_name
+from auth import current_user, require_platform_admin, workspace_id
 from llm import record_usage, quota_exceeded, quota_message
 from chat import _can_access, _persona_system, _history_text
 from realtime import notify
@@ -24,10 +23,7 @@ router = APIRouter(prefix="/api", tags=["realtime-voice"])
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
-# Optional stored prompt from the OpenAI dashboard (pmpt_...): when set, sessions use it instead of Oryntix's built-in instructions;
-# Oryntix passes persona/user/context as prompt variables (see _prompt_variables for the {{names}} the template can use).
-REALTIME_PROMPT_ID = os.environ.get("OPENAI_REALTIME_PROMPT_ID", "").strip()
-REALTIME_PROMPT_VERSION = os.environ.get("OPENAI_REALTIME_PROMPT_VERSION", "").strip()
+# Session instructions are always Oryntix's own (assistant_persona.py) — dashboard-stored prompts are not used.
 
 # TTS voice (persona.voice) -> Realtime voice
 VOICE_MAP = {"alloy": "alloy", "echo": "echo", "shimmer": "shimmer", "nova": "coral", "onyx": "ash", "fable": "ballad",
@@ -56,7 +52,7 @@ def enabled() -> bool:
 @router.get("/realtime/status")
 async def status(u: dict = Depends(current_user)):
     p = await get_pricing()
-    return {"enabled": enabled(), "model": REALTIME_MODEL, "credits_per_min": credits_per_min(p), "prompt_id": REALTIME_PROMPT_ID or None, "prompt_version": REALTIME_PROMPT_VERSION or None}
+    return {"enabled": enabled(), "model": REALTIME_MODEL, "credits_per_min": credits_per_min(p), "prompt_id": None, "prompt_version": None}
 
 
 class PricingIn(BaseModel):
@@ -239,49 +235,6 @@ async def _session_instructions(persona: dict, u: dict, roster: list, history: s
     return text
 
 
-_PROMPT_MODEL = {"model": "", "at": 0.0}
-
-
-async def _prompt_model() -> str:
-    """Model bound to the dashboard prompt (e.g. gpt-realtime-2); /realtime/calls rejects a session whose model differs from it."""
-    if _PROMPT_MODEL["model"] and time.time() - _PROMPT_MODEL["at"] < 600:
-        return _PROMPT_MODEL["model"]
-    prompt = {"id": REALTIME_PROMPT_ID, **({"version": REALTIME_PROMPT_VERSION} if REALTIME_PROMPT_VERSION else {})}
-    async with httpx.AsyncClient(timeout=20) as c:
-        r = await c.post("https://api.openai.com/v1/realtime/client_secrets", headers={"Authorization": f"Bearer {OPENAI_API_KEY}"}, json={"session": {"type": "realtime", "prompt": prompt}})
-    model = (r.json().get("session") or {}).get("model") if r.status_code == 200 else None
-    if not model:
-        logging.getLogger("realtime").error("Could not resolve prompt model %s: %s", r.status_code, r.text[:300])
-        return REALTIME_MODEL
-    _PROMPT_MODEL.update(model=model, at=time.time())
-    return model
-
-
-PROMPT_VARIABLES = ["persona_name", "persona_summary", "persona_instructions", "personality", "language", "user_name", "memories", "role", "roster", "panel", "role_rules", "conversation_context", "opening", "conversation_title"]
-
-
-async def _prompt_variables(persona: dict, u: dict, roster: list, history: str, opening, role: str, title: str = "", panel: str = "") -> dict:
-    """Raw building blocks for a dashboard-stored Realtime prompt ({{persona_name}} etc.). No Oryntix style rules here — the template owns the voice persona."""
-    prof = persona.get("profile") or {}
-    pers = prof.get("personality") or {}
-    uname = u.get("name") or "the user"
-    mems = await db.memory_items.find({"user_id": u["id"], "persona_id": persona["id"], "enabled": True}, {"_id": 0, "content": 1}).sort("pinned", -1).to_list(10)
-    rules = ""
-    if role == "moderator":
-        rules = MODERATOR_STYLE.format(panel=panel) + "\n" + NO_REPEAT + "\n" + MODERATOR_OPENING.format(uname=uname, roster=", ".join(roster), title=title or "meeting")
-    elif role == "panelist":
-        others = [n for n in roster if n not in (persona["name"], roster[0])]
-        rules = PANELIST_STYLE.format(moderator=roster[0], others=", ".join(others) or "none") + "\n" + NO_REPEAT
-    elif opening:
-        rules = f"YOU ARE CALLING THE USER. Open the call immediately by delivering this reminder warmly in 2-3 short spoken sentences, greeting {uname} by name, then ask if they need anything: {opening}"
-    else:
-        rules = f"{uname} opens the conversation. Do NOT greet or speak first — wait for them, then respond to what they actually say."
-    return {"persona_name": persona["name"], "persona_summary": persona.get("summary") or "", "persona_instructions": prof.get("system_instructions") or "",
-            "personality": f"communication style {pers.get('communication_style', '')}; formality {pers.get('formality', '')}; attitude {pers.get('attitude', '')}",
-            "language": _lang_name(u), "user_name": uname, "memories": "; ".join(m["content"] for m in mems) or "-", "role": role, "roster": ", ".join(roster), "panel": panel or "-",
-            "role_rules": rules, "conversation_context": history.strip() or "-", "opening": opening or "-", "conversation_title": title or "-"}
-
-
 def _order_personas(personas: list, conv: dict) -> list:
     mod_id = conv.get("moderator_persona_id")
     idx = next((i for i, p in enumerate(personas) if p["id"] == mod_id), 0)
@@ -314,7 +267,6 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
                 "persona_name": persona["name"], "call_session_id": x.call_session_id or group_id,
                 "voice": VOICE_MAP.get(persona.get("voice", "alloy"), "marin"), "role": role, "roster": roster,
                 "instructions": await _session_instructions(persona, u, roster, history, x.opening, role, conv.get("title", ""), panel),
-                "prompt_variables": (await _prompt_variables(persona, u, roster, history, x.opening, role, conv.get("title", ""), panel)) if REALTIME_PROMPT_ID else None,
                 "multi": multi, "primary": i == 0, "status": "created", "billed_minutes": 0, "credits": 0, "credits_per_min": cpm,
                 "created_at": now_iso(), "started_at": None, "ended_at": None, "seconds": 0}
         await db.realtime_calls.insert_one(dict(call))
@@ -377,15 +329,8 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         "model": REALTIME_MODEL,
         "output_modalities": ["audio"],
         "audio": {"input": audio_in, "output": {"voice": call["voice"]}},
+        "instructions": call["instructions"],
     }
-    if REALTIME_PROMPT_ID and call.get("prompt_variables"):
-        # Dashboard-stored prompt owns the instructions ("instructions" here would override it); /realtime/calls still requires `model`,
-        # and it must match the prompt's model → resolve it from OpenAI (cached).
-        session["model"] = await _prompt_model()
-        session["prompt"] = {"id": REALTIME_PROMPT_ID, **({"version": REALTIME_PROMPT_VERSION} if REALTIME_PROMPT_VERSION else {}),
-                             "variables": {k: {"type": "input_text", "text": str(v)} for k, v in call["prompt_variables"].items()}}
-    else:
-        session["instructions"] = call["instructions"]
     if role in ("moderator", "solo"):
         conv = await db.conversations.find_one({"id": call["conversation_id"]}, {"_id": 0, "task_id": 1}) or {}
         drive_on = bool(await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))

@@ -45,7 +45,7 @@ class TestStatus:
         assert r.status_code == 200, r.text
         d = r.json()
         assert d["enabled"]
-        assert d["model"] == "gpt-realtime"
+        assert d["model"] == "gpt-realtime-2.1"
         assert isinstance(d["credits_per_min"], int) and d["credits_per_min"] > 0
 
 
@@ -113,7 +113,7 @@ class TestCreateCall:
             assert k in d
         assert d["persona"]["id"] == pid
         assert d["persona"]["name"]
-        assert d["model"] == "gpt-realtime"
+        assert d["model"] == "gpt-realtime-2.1"
 
     def test_inaccessible_conversation_404(self, admin_tok, user_tok):
         # Create a convo as user that admin cannot access? Admin owns workspace, so instead,
