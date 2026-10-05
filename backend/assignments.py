@@ -80,6 +80,10 @@ async def execute_assigned_task(tid: str):
                                                          "completed_at": now_iso(), "updated_at": now_iso(), "summary": f"Dikerjakan oleh {persona.get('name')}"}})
         if t.get("parent_id"):
             await _maybe_assemble(t["parent_id"])
+        from realtime import notify_user
+        from push import send_push
+        await notify_user(t["user_id"], {"type": "task_update", "task_id": tid, "status": "completed", "goal": t.get("goal")})
+        await send_push(t["user_id"], f"Tugas selesai: {(t.get('goal') or '')[:60]}", f"{persona.get('name')} sudah menyelesaikan tugas ini di Ruang Kerja.", {"link": f"/workspace/{tid}", "tag": f"task-{tid}"}, kind="tasks")
         for cid in t.get("conversation_ids") or []:
             await _save_ai_msg(cid, persona, f"Tugas **{t.get('goal')}** sudah selesai ✅ dan tersimpan di Ruang Kerja — [buka hasilnya](/workspace/{tid}).\n\n"
                                f"Kalau mau, buat panggilan dari Ruang Kerja dan saya paparkan hasilnya, atau minta revisi langsung di sini.", 0, "text",

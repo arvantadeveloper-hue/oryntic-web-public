@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from db import db, now_iso, new_id, clean
 from auth import current_user, _lang_name
 from llm import llm_text, record_usage, text_credits
+from realtime import notify_user
 
 router = APIRouter(prefix="/api/reminders", tags=["reminders"])
 
@@ -177,3 +178,6 @@ async def scheduler_tick():
             await db.reminders.update_one({"id": r["id"]}, {"$set": {"status": "missed"}})
             continue
         await db.reminders.update_one({"id": r["id"]}, {"$set": {"status": "ringing", "ringing_at": now.isoformat()}})
+        await notify_user(r["user_id"], {"type": "reminder_due", "reminder_id": r["id"], "title": r.get("title")})
+        from push import send_push
+        await send_push(r["user_id"], f"Pengingat: {r.get('title') or 'Agenda'}", "Asisten Anda siap menelepon untuk mengingatkan.", {"link": "/reminders", "tag": f"reminder-{r['id']}"}, kind="reminders")

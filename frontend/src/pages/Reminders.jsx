@@ -1,4 +1,5 @@
 import { LoadMore } from "../components/ConversationTools";
+import { onUserEvent } from "../lib/userEvents";
 import React, { useEffect, useState } from "react";
 import { Bell, Plus, Trash2, Clock } from "lucide-react";
 import { toast } from "sonner";
@@ -21,7 +22,7 @@ export default function Reminders() {
 
   const load = () => api.get("/reminders").then((r) => setItems(r.data)).catch(() => {});
   useEffect(() => { load(); api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {}); }, []);
-  useEffect(() => { const iv = setInterval(load, 8000); return () => clearInterval(iv); }, []);
+  useEffect(() => { const iv = setInterval(load, 60000); const off = onUserEvent(["reminder_due", "push"], load); return () => { clearInterval(iv); off(); }; }, []);
 
   const create = async () => {
     if (!title.trim() || !start) { toast.error("Isi judul & waktu"); return; }

@@ -38,6 +38,50 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+class UserManager:
+    """One channel per signed-in user (any tab): in-app realtime events (reminder_due, incoming_call, task_update, message_new) replace polling."""
+
+    def __init__(self):
+        self.users: Dict[str, Set[WebSocket]] = {}
+
+    async def connect(self, uid: str, ws: WebSocket):
+        await ws.accept()
+        self.users.setdefault(uid, set()).add(ws)
+
+    def disconnect(self, uid: str, ws: WebSocket):
+        conns = self.users.get(uid)
+        if conns:
+            conns.discard(ws)
+            if not conns:
+                self.users.pop(uid, None)
+
+    def online(self, uid: str) -> bool:
+        return bool(self.users.get(uid))
+
+    async def send(self, uid: str, payload: dict):
+        text = json.dumps(payload)
+        for ws in list(self.users.get(uid, set())):
+            try:
+                await ws.send_text(text)
+            except Exception:
+                self.disconnect(uid, ws)
+
+
+user_manager = UserManager()
+
+
+async def notify_user(uid: str, payload: dict):
+    try:
+        await user_manager.send(uid, payload)
+    except Exception:
+        pass
+
+
+async def notify_users(uids, payload: dict):
+    for uid in set(u for u in uids if u):
+        await notify_user(uid, payload)
+
+
 async def notify(cid: str, payload: dict):
     try:
         await manager.broadcast(cid, payload)

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { onUserEvent } from "../lib/userEvents";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Phone, PhoneOff, Users } from "lucide-react";
 import { api } from "../lib/api";
@@ -41,8 +42,8 @@ export function FriendCallRing() {
       } catch (e) {}
     };
     poll();
-    const iv = setInterval(poll, 5000);
-    return () => { alive = false; clearInterval(iv); };
+    const iv = setInterval(poll, 30000); const off = onUserEvent(["incoming_call", "push"], poll);
+    return () => { alive = false; clearInterval(iv); off(); };
   }, [user?.id, loc.pathname]); // eslint-disable-line
 
   useEffect(() => {

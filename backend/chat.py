@@ -524,6 +524,8 @@ async def _save_ai_msg(cid: str, persona: dict, content: str, used: int, via, ex
     if via:
         ai_msg["via"] = via
     await db.messages.insert_one(dict(ai_msg))
+    if via != "realtime":  # assistant replies: tell the user (and other members) something new landed; push only when nobody is live
+        await _fanout_message(cid, "__assistant__", persona["name"], content)
     return ai_msg
 
 
@@ -861,7 +863,21 @@ async def _store_user_message(cid: str, x: MsgIn, u: dict, attach_text: str, att
         user_msg["attachment_text"] = attach_text[:4000]
     await db.messages.insert_one(dict(user_msg))
     await notify(cid, {"type": "message", "role": "user", "sender_name": user_msg["sender_name"]})
+    await _fanout_message(cid, u["id"], user_msg["sender_name"], x.content)
     return user_msg
+
+
+async def _fanout_message(cid: str, sender_id: str, sender_name: str, content: str):
+    """Per-user event (sidebar refresh) + push for human participants of a group/friend chat who are not the sender."""
+    from realtime import notify_users
+    from push import send_push
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0, "participants": 1, "user_id": 1, "title": 1, "type": 1})
+    if not conv:
+        return
+    others = [p for p in set((conv.get("participants") or []) + [conv.get("user_id")]) if p and p != sender_id]
+    await notify_users(others, {"type": "message_new", "conversation_id": cid, "sender_name": sender_name, "preview": content[:80]})
+    for o in others:
+        await send_push(o, f"{sender_name} · {conv.get('title') or 'Oryntix'}", content[:120], {"link": f"/chat/{cid}", "tag": f"conv-{cid}"}, kind="messages")
 
 
 def _pick_responders(x: MsgIn, personas: list) -> list:

@@ -18,6 +18,7 @@ from platform_admin import router as platform_router
 from platform_finance import router as finance_router
 from integrations import router as integrations_router
 from google_auth import router as google_auth_router
+from push import router as push_router
 from gallery import router as gallery_router
 from archives import router as archives_router, archive_tick
 from shares import router as shares_router
@@ -30,7 +31,7 @@ from models import router as models_router
 from voice import router as voice_router
 from files import router as files_router
 from storage import init_storage
-from realtime import manager
+from realtime import manager, user_manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("aivora")
@@ -54,6 +55,7 @@ app.include_router(platform_router)
 app.include_router(finance_router)
 app.include_router(integrations_router)
 app.include_router(google_auth_router)
+app.include_router(push_router)
 app.include_router(gallery_router)
 app.include_router(archives_router)
 app.include_router(shares_router)
@@ -69,6 +71,24 @@ from realtime_voice import router as realtime_voice_router  # noqa: E402
 from tools import router as tools_router  # noqa: E402
 app.include_router(realtime_voice_router)
 app.include_router(tools_router)
+
+
+@app.websocket("/api/ws/user")
+async def ws_user(ws: WebSocket, token: str = ""):
+    """Per-user event channel: reminder_due, incoming_call, task_update, message_new (replaces GET polling in the app)."""
+    u = await user_from_token(token)
+    if not u:
+        await ws.close(code=4401)
+        return
+    await user_manager.connect(u["id"], ws)
+    try:
+        while True:
+            await ws.receive_text()  # pings only; server → client
+    except WebSocketDisconnect:
+        user_manager.disconnect(u["id"], ws)
+    except Exception:
+        user_manager.disconnect(u["id"], ws)
+
 
 
 @app.websocket("/api/ws/{cid}")

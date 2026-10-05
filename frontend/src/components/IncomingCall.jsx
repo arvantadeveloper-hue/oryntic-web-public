@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import { onUserEvent } from "../lib/userEvents";
 import { Phone, PhoneOff, X, Volume2 } from "lucide-react";
 import { api, API_BASE, getToken } from "../lib/api";
 import { Mark } from "./Logo";
@@ -29,8 +30,8 @@ export function IncomingCall() {
       } catch (e) {}
     };
     poll();
-    const iv = setInterval(poll, 12000);
-    return () => { active = false; clearInterval(iv); };
+    const iv = setInterval(poll, 60000); const off = onUserEvent(["reminder_due", "incoming_call", "push"], poll);
+    return () => { active = false; clearInterval(iv); off(); };
   }, [user, answered, inCall]);
 
   if (inCall) {
