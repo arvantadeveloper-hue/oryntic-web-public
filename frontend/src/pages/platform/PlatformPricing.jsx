@@ -38,8 +38,8 @@ export default function PlatformPricing({ readOnly }) {
         </table>
       </div>
       <div className="mt-6 aivora-card p-5" data-testid="pp-realtime">
-        <p className="text-sm font-bold text-slate-900">Harga token OpenAI Realtime (USD / 1M token)</p>
-        <p className="text-xs text-slate-500">Ditagih per respons dari laporan pemakaian OpenAI, memakai margin fitur "Koneksi Realtime".</p>
+        <p className="text-sm font-bold text-slate-900">Harga token OpenAI Realtime — gpt-realtime-2 (USD / 1M token)</p>
+        <p className="text-xs text-slate-500">Ditagih per respons dari laporan pemakaian OpenAI, memakai margin fitur "Koneksi Realtime". Harga resmi gpt-realtime-2: audio masuk $32, audio keluar $64, teks masuk $4, teks keluar $24, cache $0,40.</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-5">{RT.map(([k, l]) => <NumField key={k} label={l} value={draft[k]} onChange={(v) => update({ [k]: v })} step={0.1} testid={`pp-${k}`} disabled={readOnly} />)}</div>
       </div>
     </div>

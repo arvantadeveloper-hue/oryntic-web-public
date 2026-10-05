@@ -16,8 +16,8 @@ DEFAULT_PRICING = {
     "stt_usd": 0.0165, "tts_usd": 0.013, "provider_usd_per_min": 0.02,
     "vision_usd": 0.006,            # one screen snapshot shown to the assistant (~1.1k image tokens)
     "bandwidth_usd_per_gb": 0.5,    # TURN relay cost for friend calls; +50% margin → $0.75/GB
-    # OpenAI gpt-realtime list prices (USD per 1M tokens): billed per response from the usage report
-    "rt_audio_in_usd_1m": 32.0, "rt_audio_out_usd_1m": 64.0, "rt_text_in_usd_1m": 4.0, "rt_text_out_usd_1m": 16.0, "rt_cached_in_usd_1m": 0.4,
+    # OpenAI gpt-realtime-2 list prices (USD per 1M tokens): audio in 32 / out 64, text in 4 / out 24, cached 0.40 — billed per response from the usage report
+    "rt_audio_in_usd_1m": 32.0, "rt_audio_out_usd_1m": 64.0, "rt_text_in_usd_1m": 4.0, "rt_text_out_usd_1m": 24.0, "rt_cached_in_usd_1m": 0.4,
     "video_usd_per_sec": 0.062,
     # credit packages: price_idr = usd × (1 + package_margin − discount) × (1 + tax) × fx, rounded to package_round_idr
     "package_margin_pct": 15.0, "package_round_idr": 1000,
@@ -117,6 +117,9 @@ async def refresh(force: bool = False):
     if not force and time.time() - _cache["at"] < 30:
         return
     cfg = await db.config.find_one({"id": "platform_pricing"}, {"_id": 0, "id": 0, "updated_at": 0})
+    if cfg and cfg.get("rt_text_out_usd_1m") == 16.0:  # one-off migration: gpt-realtime → gpt-realtime-2 text-output list price
+        cfg["rt_text_out_usd_1m"] = 24.0
+        await db.config.update_one({"id": "platform_pricing"}, {"$set": {"rt_text_out_usd_1m": 24.0}})
     tr = await db.config.find_one({"id": "trial_config"}, {"_id": 0, "id": 0, "updated_at": 0})
     _cache["pricing"] = {**DEFAULT_PRICING, **(cfg or {})}
     _cache["trial"] = {**DEFAULT_TRIAL, **(tr or {})}

@@ -371,3 +371,4 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Template siap tempel (aturan persona natural + variabel): `/app/memory/REALTIME_PROMPT_TEMPLATE.md`. **Prompt versi 2 user saat ini generik bahasa Inggris tanpa variabel** → persona/bahasa/konteks tidak terpakai sampai template diperbarui.
 - Uji: `backend/tests/realtime_prompt_live.py` (validasi konfigurasi sesi via `/v1/realtime/client_secrets`) → 200 OK.
 - Catatan tarif: model prompt `gpt-realtime-2` mungkin berbeda harga dari `gpt-realtime` → sesuaikan rt_*_usd_1m di Admin Pricing bila perlu.
+- Tarif Realtime disesuaikan ke **gpt-realtime-2** (audio in $32 / out $64, teks in $4 / **out $24** (sebelumnya 16), cache $0,40): default `pricing.py` + `admin.py`, label katalog & panel Admin Pricing; migrasi otomatis di `pricing.refresh()` bila nilai tersimpan masih 16.0.

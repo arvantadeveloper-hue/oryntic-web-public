@@ -123,7 +123,7 @@ class PlatformPricingIn(BaseModel):
     rt_audio_in_usd_1m: float = Field(default=32.0, ge=0)
     rt_audio_out_usd_1m: float = Field(default=64.0, ge=0)
     rt_text_in_usd_1m: float = Field(default=4.0, ge=0)
-    rt_text_out_usd_1m: float = Field(default=16.0, ge=0)
+    rt_text_out_usd_1m: float = Field(default=24.0, ge=0)
     rt_cached_in_usd_1m: float = Field(default=0.4, ge=0)
     video_usd_per_sec: float = Field(default=0.062, ge=0)
     vision_usd: float = Field(default=0.006, ge=0)
@@ -169,7 +169,7 @@ async def pricing(_: dict = Depends(require_platform_staff)):
         "providers": [
             {"provider": "OpenAI", "model": GPT_MODEL, "capability": "text", "unit": "1k chars", "rate_credits_per_1k_chars": RATES["text_per_1k"], "status": "active"},
             {"provider": "Gemini (Nano Banana)", "model": IMAGE_MODEL, "capability": "image", "unit": "image", "rate_credits": RATES["image"], "status": "active"},
-            {"provider": "OpenAI", "model": "gpt-realtime", "capability": "realtime voice", "unit": "minute", "rate_credits": RATES["realtime_per_min"], "status": "active"},
+            {"provider": "OpenAI", "model": "gpt-realtime-2", "capability": "realtime voice", "unit": "minute", "rate_credits": RATES["realtime_per_min"], "status": "active"},
         ],
         "tariff": {
             "profile_generation_credits": RATES["profile"], "image_generation_credits": RATES["image"],
