@@ -1,3 +1,4 @@
+import time
 import logging
 import math
 import os
@@ -238,6 +239,24 @@ async def _session_instructions(persona: dict, u: dict, roster: list, history: s
     return text
 
 
+_PROMPT_MODEL = {"model": "", "at": 0.0}
+
+
+async def _prompt_model() -> str:
+    """Model bound to the dashboard prompt (e.g. gpt-realtime-2); /realtime/calls rejects a session whose model differs from it."""
+    if _PROMPT_MODEL["model"] and time.time() - _PROMPT_MODEL["at"] < 600:
+        return _PROMPT_MODEL["model"]
+    prompt = {"id": REALTIME_PROMPT_ID, **({"version": REALTIME_PROMPT_VERSION} if REALTIME_PROMPT_VERSION else {})}
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.post("https://api.openai.com/v1/realtime/client_secrets", headers={"Authorization": f"Bearer {OPENAI_API_KEY}"}, json={"session": {"type": "realtime", "prompt": prompt}})
+    model = (r.json().get("session") or {}).get("model") if r.status_code == 200 else None
+    if not model:
+        logging.getLogger("realtime").error("Could not resolve prompt model %s: %s", r.status_code, r.text[:300])
+        return REALTIME_MODEL
+    _PROMPT_MODEL.update(model=model, at=time.time())
+    return model
+
+
 PROMPT_VARIABLES = ["persona_name", "persona_summary", "persona_instructions", "personality", "language", "user_name", "memories", "role", "roster", "panel", "role_rules", "conversation_context", "opening", "conversation_title"]
 
 
@@ -360,8 +379,9 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         "audio": {"input": audio_in, "output": {"voice": call["voice"]}},
     }
     if REALTIME_PROMPT_ID and call.get("prompt_variables"):
-        # Dashboard-stored prompt owns the instructions AND the model ("instructions"/"model" here would override/conflict, so both are omitted).
-        session.pop("model", None)
+        # Dashboard-stored prompt owns the instructions ("instructions" here would override it); /realtime/calls still requires `model`,
+        # and it must match the prompt's model → resolve it from OpenAI (cached).
+        session["model"] = await _prompt_model()
         session["prompt"] = {"id": REALTIME_PROMPT_ID, **({"version": REALTIME_PROMPT_VERSION} if REALTIME_PROMPT_VERSION else {}),
                              "variables": {k: {"type": "input_text", "text": str(v)} for k, v in call["prompt_variables"].items()}}
     else:

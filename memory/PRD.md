@@ -374,3 +374,4 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Tarif Realtime disesuaikan ke **gpt-realtime-2** (audio in $32 / out $64, teks in $4 / **out $24** (sebelumnya 16), cache $0,40): default `pricing.py` + `admin.py`, label katalog & panel Admin Pricing; migrasi otomatis di `pricing.refresh()` bila nilai tersimpan masih 16.0.
 
 ## ATURAN DEPLOY (user, 2026-10): JANGAN auto-deploy/redeploy ke produksi. Hanya publish bila user meminta eksplisit.
+- FIX "Negosiasi gagal": `/v1/realtime/calls` (WebRTC) WAJIB `model` dan harus sama dengan model prompt → `_prompt_model()` me-resolve model prompt via `client_secrets` (cache 10 mnt), fallback `REALTIME_MODEL`. Uji e2e WebRTC nyata: `backend/tests/realtime_negotiate_live.py` (aiortc, dipasang hanya di preview, TIDAK di requirements.txt) → SDP answer 200, ICE connected.
