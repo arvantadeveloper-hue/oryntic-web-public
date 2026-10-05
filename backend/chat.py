@@ -954,6 +954,8 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
 
     async def stream():
         totals = [0]
+        if attach_text and x.channel == "meeting_chat":  # let the voice agents hear what was attached in the call chat panel
+            yield f"data: {json.dumps({'attachments_context': attach_text[:2000], 'attachment_names': [a.get('name') for a in attach_meta]})}\n\n"
         for persona in responders:
             prompt = (await _history_text(cid, query=x.content)) + extra + f"\n{persona['name']}:"
             ctx = ReplyCtx(cid=cid, user=await _bill_user(persona), persona=persona, roster=roster, prompt=prompt, voice_mode=x.voice_mode,

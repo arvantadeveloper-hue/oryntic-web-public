@@ -74,7 +74,7 @@ function Bubble({ m, me, cid, onRefresh }) {
 // Text/data side channel of a live meeting: assistant replies in text only (tables, code, links, embedded media).
 // variant "side" = right panel / mobile bottom sheet; "main" = fills the stage (chat-first layout).
 // Same conversation as the regular chat: history, live voice transcripts (mic badge) and text replies/link cards all appear here.
-export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExchange, variant = "side" }) {
+export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExchange, onAttach, variant = "side" }) {
   const items = messages;
   const [input, setInput] = useState("");
   const [atts, setAtts] = useState([]);
@@ -113,6 +113,7 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
         if (ev.persona_id && ev.start) { reply.name = ev.persona_name; reply.text = ""; setLive({ ...reply }); }
         if (ev.persona_id && ev.status) { reply.status = ev.status; setLive({ ...reply }); }
         if (ev.persona_id && ev.delta !== undefined) { reply.text += ev.delta; reply.status = ""; setLive({ ...reply }); }
+        if (ev.attachments_context) onAttach?.(ev.attachment_names || a.map((x) => x.name), ev.attachments_context);
         if (ev.persona_id && ev.final && ev.content) onExchange?.(text, ev.content, ev.persona_name);
       }, { channel: "meeting_chat" });
       await onRefresh?.();

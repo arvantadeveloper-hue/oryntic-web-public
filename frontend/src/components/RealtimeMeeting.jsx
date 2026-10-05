@@ -25,7 +25,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   const [statusMap, setStatusMap] = useState({});
   const [levels, setLevels] = useState({});
   const [caption, setCaption] = useState(null);
-  const [showCaption, setShowCaption] = useState(true);
+  const [showCaption, setShowCaption] = useState(false);  // transcripts live in the chat panel; stage captions are opt-in
   const [muted, setMuted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [cpmTotal, setCpmTotal] = useState(null);
@@ -242,6 +242,14 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
   // typed Q&A in the chat panel is shared with every voice agent as context
   const onChatExchange = (q, a, name) => {
     sessionsRef.current.forEach((o) => o.inject(`[Chat panel] ${user?.name || "User"} typed: ${q}\n[Chat panel] ${name} replied in text: ${a.slice(0, 600)}`));
+  };
+  // a file attached in the chat panel becomes shared context, and the speaking assistant briefly brings it up
+  const onChatAttach = (names, context) => {
+    const who = user?.name || "User";
+    sessionsRef.current.forEach((o) => o.inject(`[Chat panel] ${who} attached: ${(names || []).join(", ")}\n[Attachment content]\n${(context || "").slice(0, 2000)}`));
+    const s = mod() || sessionsRef.current[0];
+    toast.info(`Lampiran dibagikan ke ${s?.persona?.name || "asisten"} di panggilan`);
+    if (s) { enqueue(s, "The user just attached a file in the chat panel (see [Attachment content]). In one or two casual spoken sentences, mention that you have seen it and say what it is about, so you can discuss it together. No list, no reading it out loud."); if (!activeRef.current) startNext(); }
   };
 
   const handleEvent = (s, ev) => {
@@ -514,7 +522,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         {cpmTotal && <span className="hidden text-xs text-white/50 sm:block">{cpmTotal} kredit/mnt</span>}
       </div>
       <MeetingShell layout={layout} chatOpen={chat.open} stage={stage} caption={captionEl} controls={controls} participants={participants}
-        chat={(variant) => <MeetingChatPanel variant={variant} cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} />} />
+        chat={(variant) => <MeetingChatPanel variant={variant} cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} onAttach={onChatAttach} />} />
       {notulen.dialog}
     </div>
   );
