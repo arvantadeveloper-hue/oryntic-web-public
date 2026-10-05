@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { X, Send, Paperclip, Loader2, MessageSquare, FileText, Image as ImageIcon, Mic, HardDrive, ExternalLink } from "lucide-react";
+import { createPortal } from "react-dom";
+import { X, Send, Paperclip, Loader2, MessageSquare, FileText, Image as ImageIcon, Mic, HardDrive, ExternalLink, Images } from "lucide-react";
 import { toast } from "sonner";
-import { streamChatWithAtt } from "../lib/api";
+import { api, streamChatWithAtt } from "../lib/api";
+import { GalleryPicker } from "./GalleryPicker";
+import { DrivePicker } from "./DrivePicker";
 import { Markdown } from "./Markdown";
 import { MediaList, ToolRequestCard, ModelBadge } from "./MessageExtras";
 
@@ -80,6 +83,11 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
   const [busy, setBusy] = useState(false);
   const endRef = useRef(null);
   const fileRef = useRef(null);
+  const [showGallery, setShowGallery] = useState(false);
+  const [showDrive, setShowDrive] = useState(false);
+  const [driveOn, setDriveOn] = useState(false);
+  useEffect(() => { api.get("/integrations/google/status").then((r) => setDriveOn(!!r.data.connected)).catch(() => setDriveOn(false)); }, []);
+  const addAtts = (items) => setAtts((a) => [...a, ...items].slice(0, 5));
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [items.length, live?.text, live?.status, pending]);
 
@@ -146,9 +154,11 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
       </div>
 
       <div className={`border-t border-white/10 p-3 ${side ? "" : "mx-auto w-full max-w-3xl"}`}>
-        {atts.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">{atts.map((a, k) => <span key={k} className="flex items-center gap-1 rounded-lg bg-white/10 px-2 py-1 text-[11px] text-white/80">{a.type === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}<button onClick={() => setAtts((x) => x.filter((_, i) => i !== k))} className="ml-1 text-white/50 hover:text-white"><X size={11} /></button></span>)}</div>}
+        {atts.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">{atts.map((a, k) => <span key={k} data-testid={`mc-att-${k}`} className="flex items-center gap-1 rounded-lg bg-white/10 px-2 py-1 text-[11px] text-white/80">{a.type === "drive" ? <HardDrive size={11} className="text-[#8FB0FF]" /> : a.type === "gallery" ? <Images size={11} className="text-[#8FB0FF]" /> : a.type === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}<button onClick={() => setAtts((x) => x.filter((_, i) => i !== k))} className="ml-1 text-white/50 hover:text-white"><X size={11} /></button></span>)}</div>}
         <div className="flex items-end gap-2">
-          <button onClick={() => fileRef.current?.click()} data-testid="meeting-chat-attach" title="Lampirkan" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white/70 transition hover:bg-white/15 hover:text-white"><Paperclip size={16} /></button>
+          <button onClick={() => fileRef.current?.click()} data-testid="meeting-chat-attach" title="Lampirkan dari perangkat" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white/70 transition hover:bg-white/15 hover:text-white"><Paperclip size={16} /></button>
+          <button onClick={() => setShowGallery(true)} data-testid="meeting-chat-attach-gallery" title="Lampirkan dari Galeri" className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white/70 transition hover:bg-white/15 hover:text-white sm:flex"><Images size={16} /></button>
+          {driveOn && <button onClick={() => setShowDrive(true)} data-testid="meeting-chat-attach-drive" title="Lampirkan dari Google Drive" className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white/70 transition hover:bg-white/15 hover:text-white sm:flex"><HardDrive size={16} /></button>}
           <input ref={fileRef} type="file" hidden multiple accept="image/*,.pdf,.txt,.md,.csv" onChange={pick} />
           <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1} data-testid="meeting-chat-input" placeholder="Ketik pesan… (Enter kirim)"
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
@@ -156,6 +166,8 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
           <button onClick={send} disabled={busy || (!input.trim() && atts.length === 0)} data-testid="meeting-chat-send" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#2F6BFF] text-white transition hover:brightness-110 disabled:opacity-40">{busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}</button>
         </div>
       </div>
+      {showGallery && createPortal(<div className="relative z-[120]"><GalleryPicker onClose={() => setShowGallery(false)} onPick={addAtts} max={5 - atts.length} /></div>, document.body)}
+      {showDrive && createPortal(<div className="relative z-[120]"><DrivePicker onClose={() => setShowDrive(false)} onPick={addAtts} max={5 - atts.length} /></div>, document.body)}
     </aside>
   );
 }
