@@ -26,8 +26,9 @@ REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
 # TTS voice (persona.voice) -> Realtime voice
 VOICE_MAP = {"alloy": "alloy", "echo": "echo", "shimmer": "shimmer", "nova": "coral", "onyx": "ash", "fable": "ballad",
              "ash": "ash", "coral": "coral", "sage": "sage", "verse": "verse", "marin": "marin", "cedar": "cedar", "ballad": "ballad"}
-MODERATOR_OPENING = ("YOU OPEN THE MEETING as the Moderator: greet {uname} warmly by name, name the participants ({roster}), state the "
-                     "meeting's purpose in one sentence (title: \"{title}\"), then invite {uname} to start. 3-4 short spoken sentences.")
+MODERATOR_OPENING = ("You are the Moderator of this meeting with participants {roster} (topic: {title}). The user opens the conversation — "
+                     "do NOT greet or introduce the meeting on your own; wait for the user to speak, then answer or route the question to the right "
+                     "participant. Hand the floor to another assistant only when their role fits better.")
 SPEAKING_STYLE = ("CALL CONTEXT: this is a live phone-style call. The user's name is known to you; address them naturally, not in every sentence. "
                   "Keep greetings to one short sentence. Everything else about HOW you talk is defined by the conversation style above.")
 NO_REPEAT = ("Listen to what the other participants already said. NEVER repeat or paraphrase a point someone else has made; "
@@ -219,7 +220,7 @@ async def _session_instructions(persona: dict, u: dict, roster: list, history: s
     elif role == "moderator":
         text += "\n\n" + MODERATOR_OPENING.format(uname=uname, roster=", ".join(roster), title=title or "meeting")
     elif role == "solo":
-        text += f"\n\nThe user just joined. Greet {uname} in ONE short, casual sentence (no questions like 'how can I help'), then let them talk."
+        text += f"\n\n{uname} opens the conversation. Do NOT greet or speak first — wait for them, then respond to what they actually say."
     return text
 
 

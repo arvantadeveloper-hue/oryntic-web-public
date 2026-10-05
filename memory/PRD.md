@@ -337,6 +337,9 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Turn-taking tidak diubah: `semantic_vad` eagerness low/medium, `interrupt_response:false` + konfirmasi barge-in ≥300 ms di browser lalu `response.cancel` + truncate (sudah ada).
 - **Uji**: `backend/tests/convo_eval.py` (WebSocket ke gpt-realtime dengan instruksi sesi asli, teks→teks, 10 skenario). Hasil akhir: casual "Lagi ngobrol sama kamu nih." · "Oke, ngerti." → "Iya." · "Capek banget" → "Wah, berat banget hari ini?" · "Hmm..." → "Iya. Kenapa?" · "yang tadi" → dirujuk ke avatar 2.5D · pindah topik langsung diikuti · "bukan itu maksudku" → "Oh, maksudnya … ya?" · teknis → penjelasan panjang tertata tanpa bullet · "Aku sebenarnya mau..." → "Iya, santai aja. Lanjut." Sisa variasi LLM: sesekali "Tentu" (1/15) dan nama pengguna (2/15). Interupsi/jeda/bicara lambat adalah perilaku audio — hanya bisa diuji dengan mikrofon nyata (user).
 
+## Update 2026-06 (aq) — Asisten tidak menyapa lebih dulu
+- Panggilan solo & grup: tidak ada `response.create` otomatis saat sesi terbuka (`RealtimeCall.jsx` hanya saat `opening`/pengingat keluar; `RealtimeMeeting.jsx` tanpa pembukaan moderator). Instruksi sesi: solo "user opens — do NOT greet"; `MODERATOR_OPENING` diganti jadi menunggu pengguna lalu merutekan. Pengecualian: pengingat yang menelepon pengguna tetap dibuka asisten.
+
 ## Next tasks
 - User: buat project admin + domain `admin.oryntix.com` sesuai `/app/memory/PLATFORM_DEPLOY.md`; set `CORS_ORIGINS` di backend utama.
 - Uji nyata bagikan layar + cuplikan ke asisten dengan 2 browser/mic (user).

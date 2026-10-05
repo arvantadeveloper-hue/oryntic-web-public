@@ -371,8 +371,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
       await Promise.all(sessions.map((s) => s.connect()));
       if (stale()) return;
       startedAtRef.current = Date.now();
-      // the moderator opens the meeting
-      enqueue(sessions[0], undefined); startNext();
+      // the user opens the conversation — no automatic greeting from the moderator
       tickRef.current = setInterval(async () => {
         try { await Promise.all(sessionsRef.current.map((s) => api.post(`/realtime/calls/${s.callId}/tick`, { elapsed_seconds: secs() }))); onRefresh && onRefresh(); }
         catch (e) { toast.error(e?.response?.data?.detail || "Kredit habis"); hangupAll(false); }

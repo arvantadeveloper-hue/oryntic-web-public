@@ -143,8 +143,8 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
       dc.onmessage = (e) => { try { handleEvent(JSON.parse(e.data)); } catch (err) {} };
       dc.onopen = () => {
         startedAtRef.current = Date.now(); setPhase("listening");
-        // the assistant speaks first (reminder delivery or a short greeting), like a real phone call
-        send({ type: "response.create" });
+        // the user opens the conversation; the assistant only speaks first when IT is calling (reminder delivery)
+        if (opening) send({ type: "response.create" });
         tickRef.current = setInterval(async () => {
           try { await api.post(`/realtime/calls/${callIdRef.current}/tick`, { elapsed_seconds: secs() }); onRefresh && onRefresh(); }
           catch (e) { if (e?.response?.status === 402) { toast.error(e.response.data?.detail || "Kredit habis"); hangup(); } }
