@@ -28,10 +28,8 @@ VOICE_MAP = {"alloy": "alloy", "echo": "echo", "shimmer": "shimmer", "nova": "co
              "ash": "ash", "coral": "coral", "sage": "sage", "verse": "verse", "marin": "marin", "cedar": "cedar", "ballad": "ballad"}
 MODERATOR_OPENING = ("YOU OPEN THE MEETING as the Moderator: greet {uname} warmly by name, name the participants ({roster}), state the "
                      "meeting's purpose in one sentence (title: \"{title}\"), then invite {uname} to start. 3-4 short spoken sentences.")
-SPEAKING_STYLE = ("VOICE STYLE: speak clearly, calmly and naturally like a warm, friendly human — unhurried pace, natural pauses, no rushing. "
-                  "Prioritize understanding what the user means over answering fast: if the user pauses mid-thought, wait; if something is "
-                  "ambiguous, ask one short clarifying question. If the user starts talking while you speak, yield the turn gracefully "
-                  "(finish the word, stop, listen) and continue naturally afterwards without restarting your whole answer.")
+SPEAKING_STYLE = ("CALL CONTEXT: this is a live phone-style call. The user's name is known to you; address them naturally, not in every sentence. "
+                  "Keep greetings to one short sentence. Everything else about HOW you talk is defined by the conversation style above.")
 NO_REPEAT = ("Listen to what the other participants already said. NEVER repeat or paraphrase a point someone else has made; "
              "if you agree, say so in a few words and ADD something new (a different angle, risk, example, or decision). "
              "If you have nothing new, say briefly that you have nothing to add.")
@@ -221,7 +219,7 @@ async def _session_instructions(persona: dict, u: dict, roster: list, history: s
     elif role == "moderator":
         text += "\n\n" + MODERATOR_OPENING.format(uname=uname, roster=", ".join(roster), title=title or "meeting")
     elif role == "solo":
-        text += f"\n\nThe user just joined. Greet {uname} briefly and warmly, then let them talk."
+        text += f"\n\nThe user just joined. Greet {uname} in ONE short, casual sentence (no questions like 'how can I help'), then let them talk."
     return text
 
 

@@ -156,7 +156,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
 
   const planTurn = (userText) => {
     const asked = panelists().filter((s) => nameIn(userText, s.persona.name));
-    if (asked.length) asked.forEach((s) => enqueue(s, `${user?.name || "The user"} asked you directly. Answer the question in 2-5 short spoken sentences.`));
+    if (asked.length) asked.forEach((s) => enqueue(s, `${user?.name || "The user"} addressed you directly. Respond naturally — as short as the moment calls for (one word is fine), longer only if they asked something that needs it.`));
     else enqueue(mod(), undefined);
     startNext();
   };
@@ -189,7 +189,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
         if (out.ok && t.name === "assign_task") toast.success(`Tugas dicatat ke Ruang Kerja (${out.when})`);
         if (out.ok && t.name === "search_workspace") { toast.success(`${out.count} hasil Ruang Kerja dikirim ke panel chat`); onRefresh && onRefresh(); }
         s.toolOutput(t.call_id, out);
-        enqueue(s, "Confirm briefly (1-2 sentences) what you just did based on the tool result, then hand back to the user.");
+        enqueue(s, "In one casual spoken sentence, tell the user what you just did (from the tool result). No follow-up question unless needed.");
         startNext();
       });
       return;
@@ -199,7 +199,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
       const target = panelists().find((p) => p.persona.name === d.assistant) || panelists().find((p) => nameIn(d.assistant || "", p.persona.name));
       if (target) {
         returnRef.current = { call_id: d.call_id, name: target.persona.name, callId: target.callId };
-        enqueue(target, `The moderator handed you the floor: ${d.brief || "please answer the user's question"}. Answer in 2-5 short spoken sentences.`);
+        enqueue(target, `The moderator handed you the floor: ${d.brief || "please answer the user's question"}. Answer naturally in spoken sentences; keep it as short as the question allows.`);
       } else mod().toolOutput(d.call_id, { error: "assistant not found" });
     } else if (returnRef.current?.callId === callId) {
       const r = returnRef.current; returnRef.current = null;

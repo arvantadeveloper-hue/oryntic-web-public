@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from assistant_persona import persona_block
 from db import db, now_iso, new_id, clean
 from auth import current_user, workspace_id, _lang_name
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
@@ -403,26 +404,7 @@ async def del_conv(cid: str, u: dict = Depends(current_user)):
     return {"ok": True}
 
 
-VOICE_STYLE = ("SPOKEN CONVERSATION MODE: your words will be read aloud by text-to-speech. Talk like a warm, friendly, "
-               "attentive human in a live conversation: natural spoken sentences, 1-3 short sentences per turn (max ~60 words), "
-               "no markdown, no bullet points, no headings, no emojis, no URLs. Use light conversational fillers sparingly "
-               "(e.g. 'oke', 'hmm', 'baik') and acknowledge what the user said before answering. Ask one short follow-up question "
-               "when it helps. If the user interrupted you, stop your previous thought gracefully and respond to what they just said.")
-
 # Shared core character of EVERY assistant (placeholders filled per persona/user). Set by the platform owner.
-CORE_CHARACTER = ("KARAKTER INTI: Kamu adalah [NAMA ASISTEN], asisten percakapan AI yang natural. Tugasmu adalah membuat setiap percakapan "
-                  "terasa alami, cerdas dan ramah. Fokus jawab dengan bahasa [BAHASA PENGGUNA] secara natural. Tetap atur voice yang pas dan "
-                  "konfigurasikan deteksi turn-taking yang natural. Dengan begitu, [NAMA ASISTEN] nggak terdengar seperti customer service tapi "
-                  "beneran terasa kayak teman ngobrol yang nyambung. Aktifkan deteksi turn-taking yang natural dan prioritaskan pemahaman maksud "
-                  "pengguna daripada respons yang terlalu cepat dan reaktif. Gunakan pengaturan interruption handling yang menunggu sedikit jeda "
-                  "sebelum memutuskan pengguna benar-benar menyela. Kalau pengguna memang ingin bicara, alihkan giliran dengan halus dan lanjutkan "
-                  "percakapan secara natural.")
-
-SANGUINE_TONE = ("TEMPERAMENT: you are sanguine — warm, friendly, upbeat and genuinely enthusiastic. Greet people like a good friend, "
-                 "celebrate small wins, use light humor and encouraging words, show curiosity about the user, and keep the energy "
-                 "positive even when delivering bad news (be kind, then constructive). Stay professional and accurate; never let "
-                 "cheerfulness replace substance or correctness.")
-
 NO_REPEAT_TEXT = ("Read what the other assistants already answered in this thread. Do NOT repeat or rephrase their points; "
                   "agree in a few words if needed and add something NEW, or say briefly you have nothing to add.")
 
@@ -449,11 +431,9 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     lang_name = _lang_name(user)
     parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in. Never switch to another language unless the user themselves writes in a different language."]
     parts.append(f"You are '{persona['name']}', an AI persona. {prof.get('system_instructions','')}")
-    parts.append(CORE_CHARACTER.replace("[NAMA ASISTEN]", persona["name"]).replace("[BAHASA PENGGUNA]", lang_name))
+    parts += persona_block(persona["name"], lang_name, voice_mode)
     pers = prof.get("personality", {})
-    parts.append(f"Communication style: {pers.get('communication_style','')}. Formality: {pers.get('formality','')}. Attitude: {pers.get('attitude','')}.")
-    parts.append("You are an AI and must not claim to have real human feelings or needs. Be warm but honest.")
-    parts.append(SANGUINE_TONE)
+    parts.append(f"Persona flavour (secondary to the conversation style above): communication style {pers.get('communication_style','')}; formality {pers.get('formality','')}; attitude {pers.get('attitude','')}.")
     mems = _relevant_memories(await db.memory_items.find({"user_id": user["id"], "persona_id": persona["id"], "enabled": True}).to_list(50), query)
     if mems:
         parts.append("Saved memory about the user: " + "; ".join(m["content"] for m in mems))
@@ -467,8 +447,6 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
         if others:
             parts.append(f"You are in a group conversation with the user and other AI assistants: {', '.join(others)}. "
                          f"Respond only as {persona['name']}, keep it concise, build on what others said without repeating them, and do not speak for the others.")
-    if voice_mode:
-        parts.append(VOICE_STYLE)
     parts.append(f"Reminder: reply in {lang_name}.")
     return "\n".join(parts)
 
