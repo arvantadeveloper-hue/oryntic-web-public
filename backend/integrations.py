@@ -55,9 +55,9 @@ async def assert_quota(uid: str, incoming: int) -> None:
 # ---------- OAuth ----------
 @router.get("")
 async def list_integrations(u: dict = Depends(current_user)):
-    g = await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 0, "email": 1, "name": 1, "picture": 1, "connected_at": 1})
+    g = await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 0, "email": 1, "name": 1, "picture": 1, "connected_at": 1, "folder_id": 1})
     return {"items": [{"id": "google_drive", "name": "Google Drive & Docs", "configured": configured(), "connected": bool(g),
-                       "account_email": (g or {}).get("email"), "account_name": (g or {}).get("name"), "account_picture": (g or {}).get("picture"), "connected_at": (g or {}).get("connected_at"), "scope": "drive.file", "picker": bool(os.environ.get("GOOGLE_API_KEY")),
+                       "account_email": (g or {}).get("email"), "account_name": (g or {}).get("name"), "account_picture": (g or {}).get("picture"), "folder_link": f"https://drive.google.com/drive/folders/{g['folder_id']}" if (g or {}).get("folder_id") else None, "connected_at": (g or {}).get("connected_at"), "scope": "drive.file", "picker": bool(os.environ.get("GOOGLE_API_KEY")),
                        "capabilities": ["Simpan dokumen/gambar ke Drive", "Update Google Docs & Sheets buatan Oryntix", "Kirim tautan Drive", "Lampirkan file Drive pilihan Anda di chat", "Pengetahuan asisten dari file Drive pilihan Anda"]}],
             "coming_soon": ["Notion", "Slack", "GitHub", "WhatsApp Business"], "storage": await storage_usage(u["id"])}
 
@@ -192,8 +192,33 @@ def _md_to_html(md: str) -> str:
     return "<html><body>" + "".join(out) + "</body></html>"
 
 
+GFOLDER = "application/vnd.google-apps.folder"
+APP_FOLDER = "Oryntix"
+
+
+async def _app_folder(uid: str) -> Optional[str]:
+    """Id of the user's "Oryntix" Drive folder (created once, cached on the credentials row, re-created if the user deleted it)."""
+    cred = await db.drive_credentials.find_one({"user_id": uid}, {"_id": 0, "folder_id": 1})
+    fid = (cred or {}).get("folder_id")
+    if fid:
+        try:
+            f = await _g(uid, "GET", f"{DRIVE}/files/{fid}", params={"fields": "id,trashed"})
+            if not f.get("trashed"):
+                return fid
+        except HTTPException:
+            pass
+    try:
+        found = (await _g(uid, "GET", f"{DRIVE}/files", params={"q": f"name = '{APP_FOLDER}' and mimeType = '{GFOLDER}' and trashed = false", "fields": "files(id)", "pageSize": 1})).get("files", [])
+        fid = found[0]["id"] if found else (await _g(uid, "POST", f"{DRIVE}/files", json={"name": APP_FOLDER, "mimeType": GFOLDER}, params={"fields": "id"}))["id"]
+    except HTTPException:
+        return None  # folder is a nicety: never block the save itself
+    await db.drive_credentials.update_one({"user_id": uid}, {"$set": {"folder_id": fid}})
+    return fid
+
+
 async def _multipart_upload(uid: str, name: str, data: bytes, src_mime: str, target_mime: Optional[str]) -> dict:
-    meta = {"name": name, **({"mimeType": target_mime} if target_mime else {})}
+    folder = await _app_folder(uid)
+    meta = {"name": name, **({"mimeType": target_mime} if target_mime else {}), **({"parents": [folder]} if folder else {})}
     files = {"metadata": ("metadata", io.BytesIO(__import__("json").dumps(meta).encode()), "application/json; charset=UTF-8"), "file": (name, io.BytesIO(data), src_mime)}
     tk = await access_token(uid)
     async with httpx.AsyncClient(timeout=120) as c:

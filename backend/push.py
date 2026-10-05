@@ -93,7 +93,9 @@ async def send_push(uid: str, title: str, body: str, data: Optional[dict] = None
         return 0
     if not force and user_manager.online(uid):
         return 0
-    tokens = [r["token"] async for r in db.push_tokens.find({"user_id": uid}, {"_id": 0, "token": 1})]
+    rows = [r async for r in db.push_tokens.find({"user_id": uid}, {"_id": 0, "token": 1, "platform": 1})]
+    tokens = [r["token"] for r in rows]
+    any_native = any((r.get("platform") or "web") != "web" for r in rows)
     if not tokens:
         return 0
     from firebase_admin import messaging
@@ -101,6 +103,9 @@ async def send_push(uid: str, title: str, body: str, data: Optional[dict] = None
     msg = messaging.MulticastMessage(
         tokens=tokens,
         data={k: str(v) for k, v in {**(data or {}), "title": title, "body": body, "kind": kind or "system"}.items()},
+        notification=messaging.Notification(title=title, body=body[:300]) if any_native else None,  # Android/iOS system tray; web uses webpush below
+        android=messaging.AndroidConfig(priority="high", notification=messaging.AndroidNotification(tag=(data or {}).get("tag"), click_action="FLUTTER_NOTIFICATION_CLICK")) if any_native else None,
+        apns=messaging.APNSConfig(payload=messaging.APNSPayload(aps=messaging.Aps(sound="default", thread_id=(data or {}).get("tag")))) if any_native else None,
         webpush=messaging.WebpushConfig(
             notification=messaging.WebpushNotification(title=title, body=body[:300], icon="/brand/mark-512.png", badge="/brand/mark-512.png", tag=(data or {}).get("tag"), renotify=bool((data or {}).get("tag"))),
             fcm_options=messaging.WebpushFCMOptions(link=link if link.startswith("http") else f"{os.environ.get('APP_URL', '').rstrip('/')}{link}" if os.environ.get("APP_URL") else link)),

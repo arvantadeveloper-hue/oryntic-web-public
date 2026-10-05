@@ -99,6 +99,14 @@ async def exchange(x: ExchangeIn, request: Request, response: Response):
         raise HTTPException(400, "Sesi login Google tidak valid (mulai login dari browser yang sama). Coba lagi.")
     response.delete_cookie(COOKIE, path="/api/auth/google")
     me = await _google_identity(x.code, x.redirect_uri)
+    return await _upsert_from_google(me)
+
+
+class MobileIn(BaseModel):
+    id_token: str = Field(min_length=20, max_length=4096)
+
+
+async def _upsert_from_google(me: dict) -> dict:
     email = me["email"].lower()
     u = await db.users.find_one({"google_sub": me["sub"]}) or await db.users.find_one({"email": email})
     created = False
@@ -107,13 +115,31 @@ async def exchange(x: ExchangeIn, request: Request, response: Response):
             raise HTTPException(403, "Akun ini dinonaktifkan. Hubungi dukungan Oryntix.")
         upd = {"google_sub": me["sub"], "google_email": email, "google_picture": me.get("picture"), "last_login_at": now_iso()}
         if not u.get("verified", True):
-            upd.update(verified=True, verified_at=now_iso())  # Google already verified this email
+            upd.update(verified=True, verified_at=now_iso())
         await db.users.update_one({"id": u["id"]}, {"$set": upd})
         u = await db.users.find_one({"id": u["id"]})
     else:
         u, created = await _new_google_user(me), True
     u["role"] = role_for(u)
     return {"access_token": make_token(u["id"], u["role"]), "user": public_user(u), "created": created}
+
+
+@router.post("/mobile")
+async def mobile(x: MobileIn, request: Request):
+    """Native apps (Expo/React Native): verify a Google ID token (audience = one of our client IDs) and sign the user in."""
+    if not login_allowed(_ip(request), "google-mobile"):
+        raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi dalam 5 menit.")
+    allowed = {c.strip() for c in (os.environ.get("GOOGLE_MOBILE_CLIENT_IDS", "") + "," + os.environ.get("GOOGLE_CLIENT_ID", "")).split(",") if c.strip()}
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.get("https://oauth2.googleapis.com/tokeninfo", params={"id_token": x.id_token})
+    if r.status_code != 200:
+        raise HTTPException(400, "ID token Google tidak valid")
+    me = r.json()
+    if me.get("aud") not in allowed or me.get("iss") not in ("https://accounts.google.com", "accounts.google.com"):
+        raise HTTPException(400, "ID token bukan untuk aplikasi Oryntix")
+    if str(me.get("email_verified", "false")).lower() != "true" or not me.get("sub") or not me.get("email"):
+        raise HTTPException(403, "Email akun Google ini belum diverifikasi oleh Google")
+    return await _upsert_from_google(me)
 
 
 @router.get("/linked")
