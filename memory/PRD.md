@@ -372,3 +372,5 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Uji: `backend/tests/realtime_prompt_live.py` (validasi konfigurasi sesi via `/v1/realtime/client_secrets`) → 200 OK.
 - Catatan tarif: model prompt `gpt-realtime-2` mungkin berbeda harga dari `gpt-realtime` → sesuaikan rt_*_usd_1m di Admin Pricing bila perlu.
 - Tarif Realtime disesuaikan ke **gpt-realtime-2** (audio in $32 / out $64, teks in $4 / **out $24** (sebelumnya 16), cache $0,40): default `pricing.py` + `admin.py`, label katalog & panel Admin Pricing; migrasi otomatis di `pricing.refresh()` bila nilai tersimpan masih 16.0.
+
+## ATURAN DEPLOY (user, 2026-10): JANGAN auto-deploy/redeploy ke produksi. Hanya publish bila user meminta eksplisit.
