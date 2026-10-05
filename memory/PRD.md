@@ -375,3 +375,9 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 
 ## ATURAN DEPLOY (user, 2026-10): JANGAN auto-deploy/redeploy ke produksi. Hanya publish bila user meminta eksplisit.
 - FIX "Negosiasi gagal": `/v1/realtime/calls` (WebRTC) WAJIB `model` dan harus sama dengan model prompt → `_prompt_model()` me-resolve model prompt via `client_secrets` (cache 10 mnt), fallback `REALTIME_MODEL`. Uji e2e WebRTC nyata: `backend/tests/realtime_negotiate_live.py` (aiortc, dipasang hanya di preview, TIDAK di requirements.txt) → SDP answer 200, ICE connected.
+
+## Update 2026-10 (c) — Chat panel panggilan = chat biasa; tautan dari tool suara; fix link Galeri Drive
+- FIX Galeri: item `kind:"drive"` di PreviewDrawer kini tombol "Buka di Google Drive" (`preview-open-drive`) + kartu info; tidak lagi `/api/files/undefined` (tanpa Unduh/Bagikan).
+- `MeetingChatPanel` menampilkan SELURUH percakapan (riwayat + transkrip suara `via:"realtime"` dengan badge mic `mc-voice-badge` + balasan teks/kartu tautan `via:"meeting_chat"`); unread tetap hanya meeting_chat. Lampiran dengan `link` dirender sebagai tautan.
+- `POST /realtime/calls/{id}/transcript` menerima `via` (`realtime`|`meeting_chat`). `runVoiceTool(name,args,cid,callId)` memposting kartu markdown (tautan Drive/Ruang Kerja) ke chat setelah drive_save/update/link, assign_task, update_task; hasil tool diberi catatan agar model tidak membacakan URL.
+- Uji: iteration_33.json (backend 6/6; UI Galeri PASS; panel chat dalam panggilan diverifikasi via API & kode — belum di-drive headless karena butuh mic/WebRTC). Catatan: kredit user Google diset 50000 untuk uji.
