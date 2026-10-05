@@ -524,7 +524,7 @@ async def _save_ai_msg(cid: str, persona: dict, content: str, used: int, via, ex
     if via:
         ai_msg["via"] = via
     await db.messages.insert_one(dict(ai_msg))
-    if via != "realtime":  # assistant replies: tell the user (and other members) something new landed; push only when nobody is live
+    if via != "realtime" and not (extra or {}).get("tool"):  # tool/system cards (task done, search results) already notify on their own channel
         await _fanout_message(cid, "__assistant__", persona["name"], content)
     return ai_msg
 

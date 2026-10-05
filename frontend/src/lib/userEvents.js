@@ -23,7 +23,7 @@ export function useUserEvents(active) {
       ws = new WebSocket(`${WS_BASE}/ws/user?token=${getToken()}`);
       ws.onopen = () => { delay = 1000; };
       ws.onmessage = (ev) => { try { emitUserEvent(JSON.parse(ev.data)); } catch (e) {} };
-      ws.onclose = () => { if (!stopped) { timer = setTimeout(open, delay); delay = Math.min(delay * 2, 30000); } };
+      ws.onclose = (ev) => { if (ev.code === 4401) return;  /* invalid token: wait for a new sign-in */ if (!stopped) { timer = setTimeout(open, delay); delay = Math.min(delay * 2, 30000); } };
     };
     open();
     let unsubPush = () => {};

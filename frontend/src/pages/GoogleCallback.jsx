@@ -10,7 +10,7 @@ import { Logo } from "../components/Logo";
 export const googleRedirectUri = () => window.location.origin + "/auth/google";
 
 export async function startGoogleLogin() {
-  const r = await api.post("/auth/google/start", { redirect_uri: googleRedirectUri() });
+  const r = await api.post("/auth/google/start", { redirect_uri: googleRedirectUri() }, { withCredentials: true });
   if (window.self !== window.top) { window.open(r.data.authorization_url, "_blank"); return; }  // Google blocks its login page inside iframes (e.g. preview panel)
   window.location.href = r.data.authorization_url;
 }
@@ -25,7 +25,7 @@ export default function GoogleCallback() {
     if (ran.current) return; ran.current = true;
     const p = new URLSearchParams(window.location.search);
     if (p.get("error") || !p.get("code") || !p.get("state")) { setError(p.get("error") === "access_denied" ? "Anda membatalkan login Google." : "Respons Google tidak lengkap."); return; }
-    api.post("/auth/google/exchange", { code: p.get("code"), state: p.get("state"), redirect_uri: googleRedirectUri() })
+    api.post("/auth/google/exchange", { code: p.get("code"), state: p.get("state"), redirect_uri: googleRedirectUri() }, { withCredentials: true })
       .then((r) => { const u = applyAuth(r.data); toast.success(r.data.created ? "Akun Oryntix dibuat dengan Google — selamat datang!" : "Masuk dengan Google berhasil"); nav(u.onboarded ? "/home" : "/onboarding", { replace: true }); })
       .catch((e) => setError(e?.response?.data?.detail || "Login Google gagal"));
   }, [applyAuth, nav]);

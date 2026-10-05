@@ -1,13 +1,13 @@
 import os
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, Response
 from pydantic import BaseModel, Field
 import httpx
 import jwt
 from db import db, now_iso, new_id
 from auth import JWT_SECRET, make_token, public_user, role_for, current_user, get_trial, convert_email_invites
+from ratelimit import login_allowed
 
 # "Masuk dengan Google" via the owner's own OAuth client (authorization-code flow, backend exchanges the code).
 # REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
@@ -36,11 +36,23 @@ async def status():
     return {"enabled": configured()}
 
 
+COOKIE = "oryntix_gl"
+
+
+def _ip(request: Request) -> str:
+    return (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "?") or "?").split(",")[0].strip()
+
+
 @router.post("/start")
-async def start(x: StartIn):
+async def start(x: StartIn, request: Request, response: Response):
     if not configured():
         raise HTTPException(503, "Login Google belum dikonfigurasi (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).")
-    state = jwt.encode({"purpose": "glogin", "exp": int(time.time()) + 600, "nonce": new_id()}, JWT_SECRET, algorithm="HS256")
+    if not login_allowed(_ip(request), "google-start"):
+        raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi dalam 5 menit.")
+    # Login-CSRF guard: the state carries a nonce that must also come back from the same browser via an httpOnly cookie.
+    nonce = new_id()
+    state = jwt.encode({"purpose": "glogin", "exp": int(time.time()) + 600, "nonce": nonce}, JWT_SECRET, algorithm="HS256")
+    response.set_cookie(COOKIE, nonce, max_age=600, httponly=True, secure=x.redirect_uri.startswith("https"), samesite="lax", path="/api/auth/google")
     q = httpx.QueryParams({"client_id": os.environ["GOOGLE_CLIENT_ID"], "redirect_uri": x.redirect_uri, "response_type": "code", "scope": LOGIN_SCOPES,
                            "state": state, "prompt": "select_account", "include_granted_scopes": "true"})
     return {"authorization_url": f"{GAUTH}?{q}"}
@@ -75,13 +87,17 @@ async def _new_google_user(me: dict) -> dict:
 
 
 @router.post("/exchange")
-async def exchange(x: ExchangeIn):
-    """Browser lands on /auth/google?code&state → sends both here → we verify, upsert the user and return our JWT."""
+async def exchange(x: ExchangeIn, request: Request, response: Response):
+    """Browser lands on /auth/google?code&state → sends both here → we verify (state + browser cookie), upsert the user and return our JWT."""
+    if not login_allowed(_ip(request), "google-exchange"):
+        raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi dalam 5 menit.")
     try:
-        if jwt.decode(x.state, JWT_SECRET, algorithms=["HS256"]).get("purpose") != "glogin":
+        claims = jwt.decode(x.state, JWT_SECRET, algorithms=["HS256"])
+        if claims.get("purpose") != "glogin" or not claims.get("nonce") or claims["nonce"] != request.cookies.get(COOKIE):
             raise jwt.InvalidTokenError()
     except jwt.InvalidTokenError:
-        raise HTTPException(400, "Sesi login Google tidak valid. Coba lagi.")
+        raise HTTPException(400, "Sesi login Google tidak valid (mulai login dari browser yang sama). Coba lagi.")
+    response.delete_cookie(COOKIE, path="/api/auth/google")
     me = await _google_identity(x.code, x.redirect_uri)
     email = me["email"].lower()
     u = await db.users.find_one({"google_sub": me["sub"]}) or await db.users.find_one({"email": email})

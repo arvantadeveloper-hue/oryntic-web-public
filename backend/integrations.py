@@ -82,7 +82,10 @@ async def google_callback(request: Request, code: Optional[str] = None, state: O
     if error or not code or not state:
         return RedirectResponse(f"{base}/integrations?error={error or 'cancelled'}")
     try:
-        uid = jwt.decode(state, JWT_SECRET, algorithms=["HS256"])["sub"]
+        claims = jwt.decode(state, JWT_SECRET, algorithms=["HS256"])
+        if claims.get("purpose") != "gdrive" or not claims.get("sub"):
+            raise jwt.InvalidTokenError()
+        uid = claims["sub"]
     except jwt.InvalidTokenError:
         return RedirectResponse(f"{base}/integrations?error=state")
     async with httpx.AsyncClient(timeout=20) as c:
