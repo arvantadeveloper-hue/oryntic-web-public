@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Search, Loader2, Coins, Ban, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
-import { LoadMore } from "../../components/ConversationTools";
+import { LoadMore } from "../../components/LoadMore";
 import { num } from "./PlatformDashboard";
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-");

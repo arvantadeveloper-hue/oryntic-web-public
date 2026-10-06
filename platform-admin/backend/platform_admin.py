@@ -7,7 +7,7 @@ from db import db, now_iso, new_id
 from auth import (require_platform_admin, require_platform_staff, platform_role, PLATFORM_ROLES, public_user,
                   issue_reset_link, app_url, pw_hash)
 from mailer import send_email, debug_links
-from admin import FEATURE_LABELS
+from labels import FEATURE_LABELS
 
 # Platform back-office API (separate admin website). Roles: super_admin (everything) · finance (read-only reports).
 router = APIRouter(prefix="/api/platform", tags=["platform"])

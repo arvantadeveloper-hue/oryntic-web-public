@@ -13,8 +13,8 @@ import PlatformTrial from "./PlatformTrial";
 import PlatformFinance from "./PlatformFinance";
 
 // Separate back-office site. PLATFORM_MODE (env REACT_APP_PLATFORM_MODE=1 or host "admin.*"/"platform.*") serves it at "/" for admin.oryntix.com.
-export const PLATFORM_MODE = process.env.REACT_APP_PLATFORM_MODE === "1" || /^(admin|platform)\./i.test(window.location.hostname);
-export const BASE = PLATFORM_MODE ? "" : "/platform";
+export const PLATFORM_MODE = true; // standalone back-office project: always mounted at "/"
+export const BASE = "";
 // Menu depends on the staff role: super_admin = everything, finance = reports only.
 const NAV = [
   { to: BASE || "/", end: true, icon: LayoutDashboard, label: "Dasbor", roles: ["super_admin", "finance"] },

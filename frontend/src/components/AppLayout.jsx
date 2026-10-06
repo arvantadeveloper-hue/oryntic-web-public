@@ -52,7 +52,7 @@ export function AppLayout() {
     { to: "/profile", icon: Settings, label: "Settings", id: "profile" },
   ];
   const items = allItems.filter((it) => !it.adminOnly || isAdmin);
-  if (user?.platform_role) items.push({ to: "/platform", icon: Shield, label: "Oryntix Platform", id: "platform" });
+  if (user?.platform_role && process.env.REACT_APP_PLATFORM_URL) items.push({ to: process.env.REACT_APP_PLATFORM_URL, external: true, icon: Shield, label: "Oryntix Platform", id: "platform" });
   if (user?.is_platform_admin) items.push({ to: "/admin", icon: Shield, label: t("nav.admin"), id: "admin" });
 
   const handleLogout = () => { logout(); nav("/"); };
@@ -65,7 +65,11 @@ export function AppLayout() {
     <div className="flex h-full flex-col sidebar-dark text-white">
       <div className="px-5 pb-3 pt-6"><Logo light size={32} /></div>
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3">
-        {items.map((it) => (
+        {items.map((it) => it.external ? (
+          <a key={it.id} href={it.to} target="_blank" rel="noreferrer" data-testid={`nav-${it.id}`} className="nav-item flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium md:text-sm">
+            <it.icon size={18} className="nav-ico" /><span className="flex-1">{it.label}</span>
+          </a>
+        ) : (
           <NavLink key={it.id} to={it.to} data-testid={`nav-${it.id}`} onClick={() => setOpen(false)}
             className={({ isActive }) => `nav-item flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium md:text-sm ${isActive ? "active" : ""}`}>
             <it.icon size={18} className="nav-ico" />
