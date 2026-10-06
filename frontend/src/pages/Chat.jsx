@@ -503,9 +503,9 @@ export default function Chat() {
       {forwardMsg && <ForwardDialog msg={forwardMsg} convs={convs} currentId={id} onClose={() => setForwardMsg(null)} />}
       {showArchive && conv && <ChatArchivesModal cid={id} onClose={() => setShowArchive(false)} onRestored={() => refreshMsgs()} />}
       {videoOpen && conv && (conv.type === "private" && rt.enabled
-        ? <RealtimeCall conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />
+        ? <RealtimeCall conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} onConvChange={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />
         : conv.type !== "private" && (rt.enabled || (conv.humans || []).length > 1)
-        ? <RealtimeMeeting conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />
+        ? <RealtimeMeeting conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} onConvChange={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />
         : <VideoRoom conv={conv} cid={id} messages={messages} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />)}
 
       {showGallery && conv && <GalleryPicker onClose={() => setShowGallery(false)} onPick={(items) => setAttachments((a) => [...a, ...items].slice(0, 5))} max={5 - attachments.length} />}

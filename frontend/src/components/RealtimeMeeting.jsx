@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { RealtimeSession, runVoiceTool } from "../lib/realtimeSession";
 import { PeerMesh, createMixer, captureFrame } from "../lib/peerAudio";
 import { PresentationPanel } from "./PresentationPanel";
+import { InviteButton, InviteDialog } from "./InviteToCall";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
@@ -17,9 +18,10 @@ const ME = "__me__";
 const nameIn = (text, name) => !!name && new RegExp(`(^|[^\\p{L}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "iu").test(text);
 
 // Moderator-led meeting: one assistant (the moderator) hears the user and talks; panelists only receive text and speak when asked or delegated to.
-export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }) {
+export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, onConvChange }) {
   const { user } = useAuth();
   const members = conv.members || [];
+  const [invite, setInvite] = useState(false);
   const [modId, setModId] = useState(conv.moderator_persona_id || members[0]?.id);
   const [phase, setPhase] = useState("connecting"); // connecting|listening|user_speaking|responding|ending
   const [statusMap, setStatusMap] = useState({});
@@ -414,16 +416,31 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
     sessionsRef.current.forEach((x) => api.post(`/realtime/calls/${x.callId}/end`, { elapsed_seconds: s }).catch(() => {}));
   };
 
-  const changeModerator = async (pid) => {
-    if (!pid || pid === modId) return;
-    try { await api.patch(`/conversations/${cid}/moderator`, { persona_id: pid }); } catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengganti moderator"); return; }
-    setModId(pid);
-    toast.message(`Moderator: ${members.find((m) => m.id === pid)?.name || "asisten"} — menyambungkan ulang...`);
+  const reconnect = (msg) => {
+    toast.message(msg);
     flushLive(); cleanup(); endSessions();
     sessionsRef.current = []; queueRef.current = []; activeRef.current = null; delegationRef.current = null; returnRef.current = null; liveRef.current = {}; startedAtRef.current = null;
     setStatusMap({}); setCaption(null); setPhase("connecting");
     connect(++runIdRef.current);
   };
+
+  const changeModerator = async (pid) => {
+    if (!pid || pid === modId) return;
+    try { await api.patch(`/conversations/${cid}/moderator`, { persona_id: pid }); } catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengganti moderator"); return; }
+    setModId(pid);
+    reconnect(`Moderator: ${members.find((m) => m.id === pid)?.name || "asisten"} — menyambungkan ulang...`);
+  };
+
+  // roster changed mid-call (host invited friends/assistants) → the host restarts the assistant sessions; a client without a mesh yet also reconnects
+  const rosterKey = [...(conv.persona_ids || members.map((m) => m.id)), ...(conv.participants || [])].join(",");
+  const rosterRef = useRef(rosterKey);
+  useEffect(() => {
+    if (rosterRef.current === rosterKey) return;
+    rosterRef.current = rosterKey;
+    if (endedRef.current) return;
+    if (runAIRef.current || !meshRef.current) reconnect("Peserta baru bergabung — menyambungkan ulang...");
+    // eslint-disable-next-line
+  }, [rosterKey]);
 
   const hangupAll = async (withSummary) => {
     if (endedRef.current) return;
@@ -496,6 +513,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
       <LayoutMenu layout={layout} onChange={setLayout} />
       <button onClick={screen?.kind === "local" ? stopShare : startShare} disabled={phase === "connecting" || phase === "ending" || screen?.kind === "remote"} data-testid="rtm-share-screen" title={screen?.kind === "local" ? "Berhenti membagikan layar" : screen?.kind === "remote" ? `${screen.name} sedang membagikan layar` : "Bagikan layar ke teman (P2P, tanpa biaya asisten)"} className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition disabled:opacity-50 ${screen?.kind === "local" ? "bg-emerald-500" : "bg-white/15 hover:bg-white/25"}`}>{screen?.kind === "local" ? <MonitorOff size={22} /> : <MonitorUp size={22} />}</button>
       <button onClick={() => setShowCaption((s) => !s)} data-testid="rtm-captions" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}><Captions size={22} /></button>
+      {isHost && <InviteButton onClick={() => setInvite(true)} disabled={phase === "connecting" || phase === "ending"} />}
       {layout !== "chat" && <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />}
       <button onClick={() => hangupAll(true)} disabled={phase === "ending"} data-testid="rtm-end-save" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-5 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-60">
         {phase === "ending" ? <Loader2 size={20} className="animate-spin" /> : <PhoneOff size={20} />}<span className="hidden sm:inline">Akhiri & Simpan Notulen</span>
@@ -524,6 +542,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh }
       <MeetingShell layout={layout} chatOpen={chat.open} stage={stage} caption={captionEl} controls={controls} participants={participants}
         chat={(variant) => <MeetingChatPanel variant={variant} cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} onAttach={onChatAttach} />} />
       {notulen.dialog}
+      {invite && <InviteDialog conv={conv} onClose={() => setInvite(false)} onInvited={(c) => onConvChange && onConvChange(c)} />}
     </div>
   );
 }

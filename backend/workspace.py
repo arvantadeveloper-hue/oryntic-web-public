@@ -213,3 +213,56 @@ async def add_persona(cid: str, x: AddPersonaIn, u: dict = Depends(current_user)
     await db.messages.insert_one({"id": new_id(), "conversation_id": cid, "role": "assistant", "content": f"👋 **{p['name']}** bergabung ke percakapan.",
                                   "persona_id": "__system__", "persona_name": "Sistem", "is_summary": True, "portrait": None, "credits": 0, "created_at": now_iso()})
     return clean(await db.conversations.find_one({"id": cid}, {"_id": 0}))
+
+
+class AddMembersIn(BaseModel):
+    persona_ids: list[str] = Field(default_factory=list, max_length=10)
+    friend_ids: list[str] = Field(default_factory=list, max_length=10)
+
+
+@router.post("/conversations/{cid}/members")
+async def add_members(cid: str, x: AddMembersIn, u: dict = Depends(current_user)):
+    """Host invites friends and/or assistants into a running chat or call. A private/DM chat becomes a group."""
+    from datetime import datetime, timezone, timedelta
+    from chat import _fanout_message
+    from friends import friend_ids
+    from push import send_push
+    from realtime import notify, notify_users
+    from rtc import CALL_TTL_SEC
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not conv or not (conv.get("user_id") == u["id"] or u["id"] in (conv.get("participants") or [])):
+        raise HTTPException(404, "Conversation not found")
+    if conv.get("user_id") != u["id"]:
+        raise HTTPException(403, "Hanya host (pemulai percakapan) yang bisa mengundang")
+    have_p = set(conv.get("persona_ids") or [])
+    personas = [p async for p in db.personas.find({"id": {"$in": [i for i in x.persona_ids if i not in have_p]}, "user_id": workspace_id(u), "deleted": {"$ne": True}}, {"_id": 0})]
+    have_h = set(conv.get("participants") or [])
+    allowed = set(await friend_ids(u["id"]))
+    new_ids = [i for i in dict.fromkeys(x.friend_ids) if i in allowed and i not in have_h]
+    new_humans = [h async for h in db.users.find({"id": {"$in": new_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "avatar": 1})]
+    if not personas and not new_humans:
+        raise HTTPException(400, "Tidak ada teman atau asisten baru untuk diundang")
+    members = (conv.get("members") or []) + [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")} for p in personas]
+    participants = (conv.get("participants") or [u["id"]]) + [h["id"] for h in new_humans]
+    humans = [h async for h in db.users.find({"id": {"$in": participants}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "avatar": 1})] if len(participants) > 1 else []
+    upd = {"members": members, "persona_ids": [m["id"] for m in members], "participants": participants, "humans": humans, "updated_at": now_iso()}
+    if not conv.get("persona_id") and members:
+        upd["persona_id"] = members[0]["id"]
+    if conv.get("type") in ("private", "dm"):
+        upd["type"] = "group"
+        upd["title"] = _conv_title("group", members) if members else "Grup " + ", ".join(h["name"] for h in humans if h["id"] != u["id"])
+    await db.conversations.update_one({"id": cid}, {"$set": upd, "$unset": {"titles": ""}})
+    names = ", ".join([f"**{h['name']}**" for h in new_humans] + [f"**{p['name']}**" for p in personas])
+    text = f"👋 {u.get('name') or 'Host'} mengundang {names} ke percakapan."
+    await db.messages.insert_one({"id": new_id(), "conversation_id": cid, "role": "assistant", "content": text, "persona_id": "__system__", "persona_name": "Sistem",
+                                  "is_summary": True, "portrait": None, "credits": 0, "created_at": now_iso()})
+    await _fanout_message(cid, u["id"], u.get("name") or "Host", text.replace("**", ""))
+    await notify(cid, {"type": "participants", "conversation_id": cid})
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=CALL_TTL_SEC)).isoformat()
+    live = any((v.get("at") or "") > cutoff for v in (conv.get("active_call") or {}).values())
+    if live and new_humans:  # call already running → ring the newcomers right away
+        title = upd.get("title") or conv.get("title")
+        await notify_users([h["id"] for h in new_humans], {"type": "incoming_call", "conversation_id": cid, "from_name": u.get("name") or "Teman", "title": title})
+        for h in new_humans:
+            await send_push(h["id"], f"Panggilan masuk dari {u.get('name') or 'teman'}", title or "Ketuk untuk bergabung", {"link": f"/chat/{cid}", "tag": f"call-{cid}"}, kind="calls")
+    return clean(await db.conversations.find_one({"id": cid}, {"_id": 0}))

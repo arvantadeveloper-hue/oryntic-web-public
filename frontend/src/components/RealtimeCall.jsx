@@ -1,19 +1,32 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, PhoneOff, Loader2, Zap } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Loader2, Zap, MonitorUp, MonitorOff, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { vadUpdate, reportUsage, ContextPruner, runVoiceTool } from "../lib/realtimeSession";
+import { captureFrame } from "../lib/peerAudio";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
 import { MeetingShell, LayoutMenu, useMeetingLayout } from "./MeetingShell";
+import { InviteButton, InviteDialog } from "./InviteToCall";
 import { useAuth } from "../context/AuthContext";
 
 // ChatGPT-Voice style call: speech-to-speech via OpenAI Realtime (WebRTC), negotiated through our backend.
-export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, opening = null }) {
+export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onConvChange, opening = null }) {
   const { user } = useAuth();
   const persona = (conv.members || [])[0] || {};
+  const isHost = !conv.user_id || conv.user_id === user?.id;
   const [layout, setLayout] = useMeetingLayout();
+  const [invite, setInvite] = useState(false);
+  // screen share: local preview only (no other humans here); the assistant sees single snapshots on request
+  const [screen, setScreen] = useState(null);
+  const screenRef = useRef(null);
+  const videoRef = useRef(null);
+  const [snaps, setSnaps] = useState({ n: 0, credits: 0, busy: false });
+  const [visionRate, setVisionRate] = useState(null);
+  const snapshotItemRef = useRef(null);
+  useEffect(() => { screenRef.current = screen; if (videoRef.current) videoRef.current.srcObject = screen?.stream || null; }, [screen]);
+  useEffect(() => { api.get("/realtime/vision-rate").then((r) => setVisionRate(r.data.credits)).catch(() => {}); }, []);
   const [phase, setPhase] = useState("connecting"); // connecting|listening|user_speaking|thinking|speaking|ended
   const [muted, setMuted] = useState(false);
   const [, setLive] = useState(""); // assistant transcript being spoken (shown only in the chat panel)
@@ -53,6 +66,37 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
     if (!t) return;
     liveRef.current = ""; setLive("");
     saveTranscript("assistant", t);
+  };
+
+  const stopShare = () => {
+    const s = screenRef.current; if (!s) return;
+    s.stream.getTracks().forEach((t) => { try { t.stop(); } catch (e) {} });
+    setScreen(null);
+  };
+  const startShare = async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) { toast.error("Peramban ini tidak mendukung bagikan layar"); return; }
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 10, max: 15 }, width: { max: 1920 } }, audio: false });
+      stream.getVideoTracks()[0].onended = stopShare;
+      setScreen({ kind: "local", stream, name: user?.name || "Anda" });
+    } catch (e) { if (e?.name !== "NotAllowedError") toast.error("Gagal membagikan layar"); }
+  };
+  const showToAssistant = async () => {
+    if (!callIdRef.current || !screenRef.current || snaps.busy || dcRef.current?.readyState !== "open") return;
+    const img = captureFrame(videoRef.current);
+    if (!img) { toast.error("Layar belum siap ditangkap"); return; }
+    setSnaps((s) => ({ ...s, busy: true }));
+    try {
+      const r = await api.post(`/realtime/calls/${callIdRef.current}/snapshot`);
+      if (["speaking", "thinking"].includes(phaseRef.current)) { send({ type: "response.cancel" }); send({ type: "output_audio_buffer.clear" }); liveRef.current = ""; setLive(""); }
+      const itemId = `img_${Date.now().toString(36)}`; snapshotItemRef.current = itemId;
+      send({ type: "conversation.item.create", item: { id: itemId, type: "message", role: "user", content: [
+        { type: "input_image", image_url: img, detail: "low" },
+        { type: "input_text", text: `[${user?.name || "User"} shows you a snapshot of their shared screen. Look at it and comment briefly in 2-4 spoken sentences on what is relevant; ask if they want details.]` }] } });
+      send({ type: "response.create", response: { instructions: "The user just showed you a screenshot of their screen. Describe what matters on it briefly and respond to it." } });
+      setPhase("thinking");
+      setSnaps((s) => ({ n: s.n + 1, credits: s.credits + (r.data.credits || 0), busy: false }));
+    } catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengirim cuplikan"); setSnaps((s) => ({ ...s, busy: false })); }
   };
 
   const monitor = (stream) => {
@@ -112,6 +156,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
         break;
       }
       case "response.done":
+        if (snapshotItemRef.current) { send({ type: "conversation.item.delete", item_id: snapshotItemRef.current }); snapshotItemRef.current = null; }
         flushLive();
         prunerRef.current?.prune();
         setPhase((p) => (p === "user_speaking" ? p : "listening")); break;
@@ -169,6 +214,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
     try { dcRef.current?.close(); } catch (e) {}
     try { pcRef.current?.close(); } catch (e) {}
     try { pipeRef.current?.stop(); } catch (e) {}
+    stopShare();
     try { if (audioElRef.current) { audioElRef.current.srcObject = null; audioElRef.current.remove(); } } catch (e) {}
   };
 
@@ -221,15 +267,32 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
   const ring = 1 + (speaking ? level * 0.35 : phase === "user_speaking" ? 0.06 : 0);
 
   const participants = [{ id: "me", isMe: true, name: user?.name || "Anda", status: phase === "user_speaking" ? "speaking" : "listening", level: phase === "user_speaking" ? 0.5 : 0 }, { id: persona.id || "p", name: persona.name, portrait: persona.portrait, status: speaking ? "speaking" : phase === "thinking" ? "thinking" : "", level }];
-  const stage = (
-    <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-6">
-      <div className="relative flex items-center justify-center" style={{ width: 260, height: 260 }}>
-        <span className="absolute inset-0 rounded-full transition-transform duration-100" style={{ transform: `scale(${ring + 0.25})`, background: "radial-gradient(circle, rgba(47,107,255,.35) 0%, rgba(124,58,237,.12) 55%, transparent 70%)", opacity: speaking ? 0.9 : 0.45 }} />
-        <span className={`absolute inset-6 rounded-full border-2 transition-transform duration-100 ${speaking ? "border-[#2F6BFF]" : phase === "user_speaking" ? "border-emerald-400" : "border-white/15"}`} style={{ transform: `scale(${ring})` }} />
-        <div className="relative h-40 w-40 overflow-hidden rounded-full shadow-2xl" data-testid="rt-avatar" style={{ transform: `scale(${1 + (speaking ? level * 0.08 : 0)})`, transition: "transform .1s" }}>
-          {persona.portrait ? <img src={persona.portrait} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-5xl font-bold" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(persona.name || "A")[0]}</div>}
-        </div>
+  const avatar = (size) => (
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      <span className="absolute inset-0 rounded-full transition-transform duration-100" style={{ transform: `scale(${ring + 0.25})`, background: "radial-gradient(circle, rgba(47,107,255,.35) 0%, rgba(124,58,237,.12) 55%, transparent 70%)", opacity: speaking ? 0.9 : 0.45 }} />
+      <span className={`absolute inset-6 rounded-full border-2 transition-transform duration-100 ${speaking ? "border-[#2F6BFF]" : phase === "user_speaking" ? "border-emerald-400" : "border-white/15"}`} style={{ transform: `scale(${ring})` }} />
+      <div className="relative overflow-hidden rounded-full shadow-2xl" data-testid="rt-avatar" style={{ width: size * 0.62, height: size * 0.62, transform: `scale(${1 + (speaking ? level * 0.08 : 0)})`, transition: "transform .1s" }}>
+        {persona.portrait ? <img src={persona.portrait} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-5xl font-bold" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }}>{(persona.name || "A")[0]}</div>}
       </div>
+    </div>
+  );
+  const stage = screen ? (
+    <div className="flex flex-1 gap-4 overflow-hidden px-4 pb-2 sm:px-6">
+      <div className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black" data-testid="rt-screen">
+        <video ref={videoRef} autoPlay muted playsInline className="max-h-full max-w-full object-contain" />
+        <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur" data-testid="rt-screen-label"><MonitorUp size={12} className="text-emerald-300" /> Layar Anda</span>
+        <button onClick={showToAssistant} disabled={snaps.busy || phase === "connecting"} data-testid="rt-show-assistant" title="Kirim satu cuplikan layar ke asisten (ditagih per cuplikan)" className="absolute bottom-3 right-3 flex items-center gap-2 rounded-full bg-[#2F6BFF] px-4 py-2 text-xs font-bold text-white shadow-lg transition hover:brightness-110 disabled:opacity-60">
+          {snaps.busy ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />} Tunjukkan ke asisten{visionRate ? ` · ${visionRate} kredit` : ""}</button>
+      </div>
+      <div className="flex w-44 shrink-0 flex-col items-center justify-center gap-2">
+        {avatar(150)}
+        <h2 className="text-base font-bold">{persona.name || "Asisten"}</h2>
+        <p className="flex items-center gap-1.5 text-center text-[11px] text-white/70" data-testid="rt-phase">{phase === "connecting" && <Loader2 size={12} className="animate-spin" />}{label}</p>
+      </div>
+    </div>
+  ) : (
+    <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-6">
+      {avatar(260)}
       <h2 className="mt-6 text-2xl font-bold">{persona.name || "Asisten"}</h2>
       <p className="mt-1 flex items-center gap-2 text-sm text-white/70" data-testid="rt-phase">{phase === "connecting" && <Loader2 size={14} className="animate-spin" />}{label}</p>
     </div>
@@ -240,6 +303,8 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
       <button onClick={toggleMute} data-testid="rt-mute" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
       <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
       <LayoutMenu layout={layout} onChange={setLayout} />
+      <button onClick={screen ? stopShare : startShare} disabled={phase === "connecting"} data-testid="rt-share-screen" title={screen ? "Berhenti membagikan layar" : "Bagikan layar — lalu tekan “Tunjukkan ke asisten” agar asisten melihatnya"} className={`flex h-14 w-14 items-center justify-center rounded-full transition disabled:opacity-50 ${screen ? "bg-emerald-500" : "bg-white/15 hover:bg-white/25"}`}>{screen ? <MonitorOff size={22} /> : <MonitorUp size={22} />}</button>
+      {isHost && onConvChange && <InviteButton onClick={() => setInvite(true)} disabled={phase === "connecting"} />}
       {layout !== "chat" && <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />}
       <button onClick={hangup} data-testid="rt-end" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-6 text-sm font-bold transition hover:brightness-105"><PhoneOff size={20} /> Akhiri</button>
     </div>
@@ -250,11 +315,13 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
       <div className="flex items-center gap-3 px-5 py-4">
         <span className="flex h-9 items-center gap-2 rounded-full bg-white/10 px-3 text-sm font-semibold backdrop-blur"><span className={`h-2 w-2 rounded-full ${phase === "connecting" ? "bg-amber-400 animate-pulse" : "bg-emerald-400"}`} /> {conv.title}</span>
         <span className="hidden items-center gap-1 rounded-full bg-[#2F6BFF]/20 px-2.5 py-1 text-[11px] font-bold text-[#8FB0FF] sm:flex" data-testid="rt-badge"><Zap size={11} /> Realtime</span>
+        {snaps.n > 0 && <span className="flex h-9 items-center gap-1.5 rounded-full bg-[#2F6BFF]/25 px-3 text-xs font-semibold text-[#BFD3FF] backdrop-blur" data-testid="rt-snapshots" title="Cuplikan layar yang ditunjukkan ke asisten"><Camera size={12} /> {snaps.n} cuplikan · {snaps.credits} kredit</span>}
         <span className="ml-auto font-mono text-sm text-white/80" data-testid="rt-timer">{mm}:{ss}</span>
         {cpm && <span className="hidden text-xs text-white/50 sm:block">{cpm} kredit/mnt</span>}
       </div>
       <MeetingShell layout={layout} chatOpen={chat.open} stage={stage} caption={captionEl} controls={controls} participants={participants}
         chat={(variant) => <MeetingChatPanel variant={variant} cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} />} />
+      {invite && <InviteDialog conv={conv} onClose={() => setInvite(false)} onInvited={(c) => onConvChange && onConvChange(c)} />}
     </div>
   );
 }
