@@ -18,10 +18,10 @@ _MODEL_IDS = {m["id"] for m in MODEL_CATALOG}
 # Recommended "best" model per task category. Some are specialized/not executable here.
 TASK_MODEL_RECO = {
     "video": {"id": "seedance-2.5", "label": "Seedance 2.5", "reason": "Model terbaik untuk pembuatan video", "executable": False},
-    "image": {"id": "gemini-pro", "label": "Gemini Pro", "reason": "Kuat untuk tugas visual & multimodal", "executable": True},
-    "code": {"id": "claude-sonnet", "label": "Claude Sonnet", "reason": "Unggul untuk coding & reasoning", "executable": True},
-    "writing": {"id": "claude-sonnet", "label": "Claude Sonnet", "reason": "Penulisan panjang berkualitas tinggi", "executable": True},
-    "research": {"id": "gemini-pro", "label": "Gemini Pro", "reason": "Sintesis riset & reasoning kuat", "executable": True},
+    "image": {"id": "gemini-pro", "label": "Gemini 3.1 Pro", "reason": "Kuat untuk tugas visual & multimodal", "executable": True},
+    "code": {"id": "claude-sonnet", "label": "Claude Sonnet 5.5", "reason": "Unggul untuk coding & reasoning", "executable": True},
+    "writing": {"id": "claude-sonnet", "label": "Claude Sonnet 5.5", "reason": "Penulisan panjang berkualitas tinggi", "executable": True},
+    "research": {"id": "gemini-pro", "label": "Gemini 3.1 Pro", "reason": "Sintesis riset & reasoning kuat", "executable": True},
     "data": {"id": "gpt-astra", "label": "GPT Astra", "reason": "Analisis data kompleks & akurat", "executable": True},
 }
 _KW = {

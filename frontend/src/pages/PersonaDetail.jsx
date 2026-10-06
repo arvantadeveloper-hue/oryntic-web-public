@@ -102,7 +102,11 @@ export default function PersonaDetail() {
           <div className="mt-3">
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Otak Persona (Model AI)</label>
             <select className="input-dark py-2.5" value={p.model} onChange={(e) => changeModel(e.target.value)} data-testid="persona-model-select">
-              {models.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.tagline}</option>)}
+              {["openai", "anthropic", "gemini"].filter((p) => models.some((m) => m.provider === p)).map((p) => (
+                <optgroup key={p} label={models.find((m) => m.provider === p)?.provider_label || p}>
+                  {models.filter((m) => m.provider === p).map((m) => <option key={m.id} value={m.id}>{m.label} — {m.tagline}</option>)}
+                </optgroup>
+              ))}
             </select>
           </div>
           <div className="mt-3">

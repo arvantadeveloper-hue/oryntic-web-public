@@ -78,9 +78,12 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
   const items = messages;
   const [input, setInput] = useState("");
   const [atts, setAtts] = useState([]);
-  const [pending, setPending] = useState(null);
-  const [live, setLive] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [pendings, setPendings] = useState([]); // user messages sent but not yet echoed by the server
+  const [lives, setLives] = useState({});       // reqId -> streaming assistant reply
+  // hide optimistic bubbles as soon as the real messages arrive (conversation WebSocket pushes them into `messages`)
+  const pending = pendings.filter((p) => !messages.some((m) => m.role === "user" && m.content === p.content && m.created_at >= p.created_at));
+  const liveList = Object.entries(lives).filter(([, l]) => !(l.done && messages.some((m) => m.role === "assistant" && m.created_at >= l.sent_at)));
+  const live = liveList.length ? liveList[liveList.length - 1][1] : null;
   const endRef = useRef(null);
   const fileRef = useRef(null);
   const [showGallery, setShowGallery] = useState(false);
@@ -89,7 +92,7 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
   useEffect(() => { api.get("/integrations/google/status").then((r) => setDriveOn(!!r.data.connected)).catch(() => setDriveOn(false)); }, []);
   const addAtts = (items) => setAtts((a) => [...a, ...items].slice(0, 5));
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [items.length, live?.text, live?.status, pending]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [items.length, live?.text, live?.status, pending.length]);
 
   const pick = async (e) => {
     const out = [];
@@ -103,23 +106,29 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
   };
 
   const send = async () => {
-    if ((!input.trim() && atts.length === 0) || busy) return;
+    if ((!input.trim() && atts.length === 0)) return;
     const text = input, a = atts;
-    setInput(""); setAtts([]); setBusy(true);
-    setPending({ content: text, attachments: a.map((x) => ({ type: x.type, name: x.name })), created_at: new Date().toISOString(), sender_name: "Anda" });
-    const reply = { name: "", text: "", status: "" };
+    const reqId = Date.now().toString(36);
+    const sent_at = new Date().toISOString();
+    setInput(""); setAtts([]);
+    setPendings((p) => [...p, { id: "p-" + reqId, content: text, attachments: a.map((x) => ({ type: x.type, name: x.name })), created_at: sent_at, sender_name: "Anda" }]);
+    const reply = { name: "", text: "", status: "", sent_at };
+    const put = () => setLives((l) => ({ ...l, [reqId]: { ...reply } }));
     try {
       await streamChatWithAtt(cid, text, a, (ev) => {
-        if (ev.persona_id && ev.start) { reply.name = ev.persona_name; reply.text = ""; setLive({ ...reply }); }
-        if (ev.persona_id && ev.status) { reply.status = ev.status; setLive({ ...reply }); }
-        if (ev.persona_id && ev.delta !== undefined) { reply.text += ev.delta; reply.status = ""; setLive({ ...reply }); }
+        if (ev.persona_id && ev.start) { reply.name = ev.persona_name; reply.text = ""; put(); }
+        if (ev.persona_id && ev.status) { reply.status = ev.status; put(); }
+        if (ev.persona_id && ev.delta !== undefined) { reply.text += ev.delta; reply.status = ""; put(); }
         if (ev.attachments_context) onAttach?.(ev.attachment_names || a.map((x) => x.name), ev.attachments_context);
-        if (ev.persona_id && ev.final && ev.content) onExchange?.(text, ev.content, ev.persona_name);
+        if (ev.persona_id && ev.final) { reply.done = true; put(); if (ev.content) onExchange?.(text, ev.content, ev.persona_name); }
       }, { channel: "meeting_chat" });
       await onRefresh?.();
     } catch (e) {
       toast.error(e?.detail || (e?.status === 402 ? "Kuota kredit habis" : e?.status === 429 ? "Terlalu banyak pesan, tunggu sebentar." : "Gagal mengirim pesan"));
-    } finally { setBusy(false); setLive(null); setPending(null); }
+    } finally {
+      setLives((l) => { const { [reqId]: _gone, ...rest } = l; return rest; });
+      setPendings((p) => p.filter((x) => x.id !== "p-" + reqId));
+    }
   };
 
   const side = variant === "side";
@@ -137,13 +146,13 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
       </div>
 
       <div className={`flex-1 space-y-3 overflow-y-auto px-4 pb-3 ${side ? "" : "mx-auto w-full max-w-3xl"}`} data-testid="meeting-chat-list">
-        {items.length === 0 && !pending && (
+        {items.length === 0 && !pending.length && (
           <div className="mt-10 px-4 text-center text-xs leading-relaxed text-white/40" data-testid="meeting-chat-empty">
             Belum ada pesan. Transkrip panggilan akan muncul di sini. Ketik pertanyaan — asisten menjawab dalam teks (tabel, kode, tautan), bisa membuat gambar & dokumen, dan membaca lampiran Anda.
           </div>
         )}
         {items.map((m) => <Bubble key={m.id} m={m} me={m.role === "user"} cid={cid} onRefresh={onRefresh} />)}
-        {pending && <Bubble m={pending} me />}
+        {pending.map((p) => <Bubble key={p.id} m={p} me />)}
         {live && (
           <div className="mr-3 rounded-2xl bg-white/[0.07] px-3.5 py-2.5 text-sm text-white/90" data-testid="mc-live">
             <div className="mb-1 text-[10px] font-bold uppercase tracking-wider opacity-60">{live.name || "Asisten"}</div>
@@ -164,7 +173,7 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
           <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1} data-testid="meeting-chat-input" placeholder="Ketik pesan… (Enter kirim)"
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
             className="max-h-28 min-h-10 flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/35 focus:border-[#2F6BFF]/60 focus:outline-none" />
-          <button onClick={send} disabled={busy || (!input.trim() && atts.length === 0)} data-testid="meeting-chat-send" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#2F6BFF] text-white transition hover:brightness-110 disabled:opacity-40">{busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}</button>
+          <button onClick={send} disabled={!input.trim() && atts.length === 0} data-testid="meeting-chat-send" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#2F6BFF] text-white transition hover:brightness-110 disabled:opacity-40">{liveList.length ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}</button>
         </div>
       </div>
       {showGallery && createPortal(<div className="relative z-[120]"><GalleryPicker onClose={() => setShowGallery(false)} onPick={addAtts} max={5 - atts.length} /></div>, document.body)}

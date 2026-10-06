@@ -54,9 +54,9 @@ export default function Chat() {
   const [conv, setConv] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
+  const [activeStreams, setActiveStreams] = useState(0);
+  const streaming = activeStreams > 0;
   const [liveMap, setLiveMap] = useState({});
-  const [liveOrder, setLiveOrder] = useState([]);
   const [personas, setPersonas] = useState(cached.current.personas || null);
   const [friends, setFriends] = useState(cached.current.friends || []);
   // persist the chat list (conversations, assistants, friends) so the page paints instantly on the next visit (long strings such as base64 portraits are dropped to stay within the storage quota)
@@ -139,11 +139,11 @@ export default function Chat() {
         const t = prev.findIndex((m) => String(m.id).startsWith("tmp-u-") && m.content === msg.content);
         if (t >= 0) { const next = prev.slice(); next[t] = msg; return next; }
       }
-      return [...prev, msg];
+      return [...prev, msg].sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
     });
     if (msg.role === "assistant" && msg.persona_id) {
-      setLiveMap((prev) => { if (!prev[msg.persona_id]) return prev; const { [msg.persona_id]: _gone, ...rest } = prev; return rest; });
-      setLiveOrder((o) => o.filter((p) => p !== msg.persona_id));
+      // the final message replaces the oldest live bubble of that persona
+      setLiveMap((prev) => { const k = Object.keys(prev).find((key) => prev[key].pid === msg.persona_id); if (!k) return prev; const { [k]: _gone, ...rest } = prev; return rest; });
     }
   };
   useEffect(() => {
@@ -241,38 +241,43 @@ export default function Chat() {
   };
 
   const send = async () => {
-    if ((!input.trim() && attachments.length === 0) || streaming || !id) return;
+    if ((!input.trim() && attachments.length === 0) || !id) return;
     const text = input; const atts = attachments;
+    const reqId = Date.now().toString(36);
     setInput(""); setAttachments([]);
-    setMessages((m) => [...m, { id: "tmp-u-" + Date.now(), role: "user", content: text, attachments: atts.map((a) => ({ type: a.type, name: a.name })) }]);
-    setStreaming(true); setLiveMap({}); setLiveOrder([]);
+    setMessages((m) => [...m, { id: "tmp-u-" + reqId, role: "user", content: text, created_at: new Date().toISOString(), attachments: atts.map((a) => ({ type: a.type, name: a.name })) }]);
+    setActiveStreams((n) => n + 1);
+    const key = (pid) => `${reqId}:${pid}`;
+    const keys = new Set();
     try {
       await streamChatWithAtt(id, text, atts, (ev) => {
         const pid = ev.persona_id;
-        if (pid && ev.start) {
-          setLiveMap((prev) => ({ ...prev, [pid]: { name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" } }));
-          setLiveOrder((o) => (o.includes(pid) ? o : [...o, pid]));
-        }
-        if (pid && ev.status) {
-          setLiveMap((prev) => { const cur = prev[pid] || { name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" }; return { ...prev, [pid]: { ...cur, status: ev.status } }; });
-        }
-        if (pid && ev.delta !== undefined) {
-          setLiveMap((prev) => { const cur = prev[pid] || { name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" }; return { ...prev, [pid]: { ...cur, status: "", text: cur.text + ev.delta } }; });
-        }
-        if (pid && ev.final && speaker && ev.content) playTTS(ev.content, ev.voice);
+        if (!pid) { if (ev.summary_request) setSummaryRequest(true); if (ev.done) refreshUser(); return; }
+        const k = key(pid); keys.add(k);
+        const base = { pid, name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" };
+        if (ev.start) setLiveMap((prev) => ({ ...prev, [k]: { ...base } }));
+        if (ev.status) setLiveMap((prev) => ({ ...prev, [k]: { ...(prev[k] || base), status: ev.status } }));
+        if (ev.delta !== undefined) setLiveMap((prev) => { const cur = prev[k] || base; return { ...prev, [k]: { ...cur, status: "", text: cur.text + ev.delta } }; });
+        if (ev.final && speaker && ev.content) playTTS(ev.content, ev.voice);
         if (ev.summary_request) setSummaryRequest(true);
         if (ev.done) refreshUser();
       });
-      if (!convWs.current || convWs.current.readyState !== 1) { const r = await api.get(`/conversations/${id}/messages`); setMessages(r.data.messages); }
-      setLiveMap({}); setLiveOrder([]); loadConvs();
-    } catch (e) { toast.error(e?.detail || (e?.status === 429 ? "Terlalu banyak pesan, tunggu sebentar." : e?.status === 402 ? "Kuota kredit harian habis." : "Gagal mengirim pesan")); } finally { setStreaming(false); }
+      if (!convWs.current || convWs.current.readyState !== 1) { const r = await api.get(`/conversations/${id}/messages?limit=50`); applyPage(r.data); }
+      loadConvs();
+    } catch (e) { toast.error(e?.detail || (e?.status === 429 ? "Terlalu banyak pesan, tunggu sebentar." : e?.status === 402 ? "Kuota kredit harian habis." : "Gagal mengirim pesan")); }
+    finally {
+      setActiveStreams((n) => Math.max(0, n - 1));
+      // drop any live bubble of this request that the WebSocket did not already replace
+      setLiveMap((prev) => { const rest = { ...prev }; keys.forEach((k) => delete rest[k]); return rest; });
+      setMessages((m) => m.filter((x) => x.id !== "tmp-u-" + reqId || !m.some((y) => y.role === "user" && !String(y.id).startsWith("tmp-u-") && y.content === text)));
+    }
   };
 
   const delConv = async (c, e) => { e.stopPropagation(); await api.delete(`/conversations/${c.id}`); loadConvs(); if (c.id === id) nav("/chat"); };
   const refreshMsgs = () => { refreshUser(); return api.get(`/conversations/${id}/messages?limit=50`).then((r) => applyPage(r.data)).catch(() => {}); };
   const copy = (txt) => { navigator.clipboard.writeText(txt); toast.success("Disalin"); };
   const saveMem = async (m) => { await api.post("/memory", { persona_id: m.persona_id || conv?.persona_id || null, content: m.content.slice(0, 300) }); toast.success("Disimpan ke memori"); };
-  const regen = async (mid) => { setStreaming(true); try { await api.post(`/conversations/${id}/messages/${mid}/regenerate`); const mr = await api.get(`/conversations/${id}/messages`); setMessages(mr.data.messages); refreshUser(); } catch (e) { toast.error("Gagal"); } finally { setStreaming(false); } };
+  const regen = async (mid) => { setActiveStreams((n) => n + 1); try { await api.post(`/conversations/${id}/messages/${mid}/regenerate`); const mr = await api.get(`/conversations/${id}/messages?limit=50`); applyPage(mr.data); refreshUser(); } catch (e) { toast.error("Gagal"); } finally { setActiveStreams((n) => Math.max(0, n - 1)); } };
 
   const [savingNotes, setSavingNotes] = useState(false);
   const saveNotes = async () => {
@@ -426,10 +431,9 @@ export default function Chat() {
               </div>
             )
           ))}
-          {liveOrder.map((pid) => {
-            const l = liveMap[pid];
+          {Object.entries(liveMap).map(([k, l]) => {
             return (
-              <div key={pid} className="flex justify-start gap-2.5">
+              <div key={k} className="flex justify-start gap-2.5">
                 <div className="mt-1 shrink-0"><Avatar name={l.name} portrait={l.portrait} size={32} moderator={l.moderator} /></div>
                 <div className="max-w-[78%]">
                   <p className="mb-1 text-xs font-semibold text-slate-500">{l.name}</p>
@@ -464,7 +468,7 @@ export default function Chat() {
               {driveOn && <button onClick={() => setShowDrive(true)} data-testid="attach-drive-btn" title="Lampirkan dari Google Drive" className="hidden h-12 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E7ECF3] text-slate-500 hover:bg-slate-50 sm:flex"><HardDrive size={18} /></button>}
               <button onClick={toggleRecord} data-testid="mic-btn" className={`flex h-12 w-11 shrink-0 items-center justify-center rounded-xl border ${recording ? "animate-pulse border-[#EF4444] bg-[#EF4444] text-white" : "border-[#E7ECF3] text-slate-500 hover:bg-slate-50"}`}>{recording ? <Square size={16} /> : <Mic size={18} />}</button>
               <textarea className="input-dark max-h-32 min-h-[48px] resize-none" rows={1} placeholder={t("chat.placeholder")} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} data-testid="chat-input" />
-              <button onClick={send} disabled={streaming || (!input.trim() && attachments.length === 0)} className="btn-grad flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" data-testid="chat-send-btn"><Send size={18} /></button>
+              <button onClick={send} disabled={!input.trim() && attachments.length === 0} className="btn-grad flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" data-testid="chat-send-btn"><Send size={18} /></button>
             </div>
           </div>
         )}

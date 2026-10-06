@@ -167,19 +167,24 @@ export default function CreatePersona() {
           <FieldArea label="Instruksi sistem" value={profile.system_instructions || ""} onChange={(v) => setProfile((p) => ({ ...p, system_instructions: v }))} testid="rev-sysinstr" />
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Otak Persona (Model AI)</label>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {models.map((m) => {
-                const on = modelKey === m.id;
-                return (
-                  <button key={m.id} type="button" onClick={() => setModelKey(m.id)} data-testid={`model-${m.id}`}
-                    className={`flex items-start gap-3 rounded-xl border p-3 text-left transition ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3] hover:bg-slate-50"}`}>
-                    <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: m.accent }} />
-                    <span><span className="block text-sm font-bold text-slate-900">{m.label}</span>
-                      <span className="block text-xs text-slate-400">{m.tagline}</span></span>
-                  </button>
-                );
-              })}
-            </div>
+            {["openai", "anthropic", "gemini"].filter((p) => models.some((m) => m.provider === p)).map((p) => (
+              <div key={p} className="mb-3" data-testid={`model-group-${p}`}>
+                <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">{models.find((m) => m.provider === p)?.provider_label || p}</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {models.filter((m) => m.provider === p).map((m) => {
+                    const on = modelKey === m.id;
+                    return (
+                      <button key={m.id} type="button" onClick={() => setModelKey(m.id)} data-testid={`model-${m.id}`}
+                        className={`flex items-start gap-3 rounded-xl border p-3 text-left transition ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3] hover:bg-slate-50"}`}>
+                        <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: m.accent }} />
+                        <span><span className="block text-sm font-bold text-slate-900">{m.label}</span>
+                          <span className="block text-xs text-slate-400">{m.tagline}</span></span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Suara Persona (TTS)</label>

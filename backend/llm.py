@@ -15,7 +15,7 @@ EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 GPT_MODEL = os.environ.get("GPT_MODEL", "gpt-5.4")
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-3.1-flash-image-preview")
 
-# Model catalog — the selectable "brain" for each persona.
+# Model catalog — the selectable "brain" for each persona (grouped by provider in the UI).
 MODEL_CATALOG = [
     {"id": "gpt-astra", "label": "GPT Astra", "provider": "openai", "model": "gpt-6-astra",
      "tagline": "Paling cerdas untuk tugas kompleks", "accent": "#7C3AED"},
@@ -23,13 +23,47 @@ MODEL_CATALOG = [
      "tagline": "Seimbang, kreatif & ekspresif", "accent": "#2F6BFF"},
     {"id": "gpt-terra", "label": "GPT Terra", "provider": "openai", "model": "gpt-5.6-terra",
      "tagline": "Cepat & efisien untuk harian", "accent": "#22B8FF"},
-    {"id": "claude-sonnet", "label": "Claude Sonnet", "provider": "anthropic", "model": "claude-sonnet-5-5",
+    {"id": "gpt-5-5", "label": "GPT 5.5", "provider": "openai", "model": "gpt-5.5",
+     "tagline": "Generasi sebelumnya, stabil & hemat", "accent": "#60A5FA"},
+    {"id": "claude-opus-5-5", "label": "Claude Opus 5.5", "provider": "anthropic", "model": "claude-opus-5-5",
+     "tagline": "Flagship Anthropic — reasoning terdalam", "accent": "#D97706"},
+    {"id": "claude-sonnet", "label": "Claude Sonnet 5.5", "provider": "anthropic", "model": "claude-sonnet-5-5",
      "tagline": "Penulisan & analisis mendalam", "accent": "#F59E0B"},
-    {"id": "gemini-pro", "label": "Gemini Pro", "provider": "gemini", "model": "gemini-3.1-pro-preview",
+    {"id": "claude-opus-5", "label": "Claude Opus 5", "provider": "anthropic", "model": "claude-opus-5",
+     "tagline": "Opus generasi 5, sangat teliti", "accent": "#B45309"},
+    {"id": "claude-sonnet-5", "label": "Claude Sonnet 5", "provider": "anthropic", "model": "claude-sonnet-5",
+     "tagline": "Sonnet generasi 5, seimbang", "accent": "#FBBF24"},
+    {"id": "claude-opus-4-8", "label": "Claude Opus 4.8", "provider": "anthropic", "model": "claude-opus-4-8",
+     "tagline": "Coding & agentic yang matang", "accent": "#92400E"},
+    {"id": "claude-haiku", "label": "Claude Haiku 4.5", "provider": "anthropic", "model": "claude-haiku-4-5-20251001",
+     "tagline": "Sangat cepat & ringan", "accent": "#FCD34D"},
+    {"id": "claude-fable", "label": "Claude Fable 5.1", "provider": "anthropic", "model": "claude-fable-5-1",
+     "tagline": "Kreatif untuk cerita & naskah", "accent": "#F97316"},
+    {"id": "gemini-pro", "label": "Gemini 3.1 Pro", "provider": "gemini", "model": "gemini-3.1-pro-preview",
      "tagline": "Multimodal & reasoning kuat", "accent": "#10B981"},
+    {"id": "gemini-3-8-flash", "label": "Gemini 3.8 Flash", "provider": "gemini", "model": "gemini-3.8-flash",
+     "tagline": "Flash terbaru, cepat & cerdas", "accent": "#059669"},
+    {"id": "gemini-3-7-flash", "label": "Gemini 3.7 Flash", "provider": "gemini", "model": "gemini-3.7-flash",
+     "tagline": "Flash cepat untuk tugas harian", "accent": "#34D399"},
+    {"id": "gemini-3-6-flash", "label": "Gemini 3.6 Flash", "provider": "gemini", "model": "gemini-3.6-flash",
+     "tagline": "Flash hemat dengan konteks besar", "accent": "#6EE7B7"},
+    {"id": "gemini-3-5-flash", "label": "Gemini 3.5 Flash", "provider": "gemini", "model": "gemini-3.5-flash",
+     "tagline": "Cepat, hemat & multimodal", "accent": "#2DD4BF"},
+    {"id": "gemini-3-flash", "label": "Gemini 3 Flash", "provider": "gemini", "model": "gemini-3-flash-preview",
+     "tagline": "Flash generasi 3", "accent": "#14B8A6"},
 ]
+PROVIDERS = {"openai": {"label": "OpenAI", "env": "OPENAI_API_KEY"}, "anthropic": {"label": "Anthropic Claude", "env": "ANTHROPIC_API_KEY"}, "gemini": {"label": "Google Gemini", "env": "GEMINI_API_KEY"}}
 DEFAULT_MODEL_KEY = "gpt-terra"
 _MODEL_BY_ID = {m["id"]: m for m in MODEL_CATALOG}
+
+
+def provider_key(provider: str) -> str:
+    """Platform's own provider key when configured, else the Emergent universal key."""
+    return os.environ.get(PROVIDERS.get(provider, {}).get("env", ""), "").strip() or EMERGENT_LLM_KEY
+
+
+def provider_status() -> list:
+    return [{"id": k, "label": v["label"], "key_source": "platform" if os.environ.get(v["env"], "").strip() else "universal"} for k, v in PROVIDERS.items()]
 
 
 def resolve_model(model_key: str | None):
@@ -135,7 +169,7 @@ async def quota_exceeded(user: dict):
 async def llm_text(system_message: str, user_text: str, model_key: str | None = None) -> str:
     provider, model = resolve_model(model_key)
     chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
+        api_key=provider_key(provider),
         session_id=new_id(),
         system_message=system_message,
     ).with_model(provider, model)
@@ -200,7 +234,7 @@ async def synthesize_speech(text: str, voice: str = "alloy") -> bytes:
 
 
 async def describe_image(b64: str) -> str:
-    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=new_id(),
+    chat = LlmChat(api_key=provider_key("gemini"), session_id=new_id(),
                    system_message="You describe images factually for use as chat context.").with_model("gemini", "gemini-3.1-pro-preview")
     try:
         resp = await chat.send_message(UserMessage(text="Describe this image in detail (objects, text, context).", file_contents=[ImageContent(b64)]))
