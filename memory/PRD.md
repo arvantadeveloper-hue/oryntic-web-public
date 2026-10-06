@@ -490,3 +490,6 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 ## Update 2026-06 — Indikator koneksi realtime
 - `ConnectionDot` di header AppLayout (`data-testid="ws-status-dot"`, hijau "Terhubung" / kuning berdenyut "Menyambung ulang…") dari `useWsConnected()`. `userEvents.js` menanggapi `window offline/online` (tutup socket & tandai putus; sambung ulang segera). Teruji: offline → reconnecting → online → connected.
 - Keamanan WS diverifikasi: `/api/ws/user` per-akun (JWT), `/api/ws/{cid}` dibatasi `_can_access` (pemilik/peserta/admin workspace); Budi → chat Demo = 403, token palsu = 403.
+
+## Update 2026-06 — Dokumentasi Word
+- `scripts/gen_docs.py` (python-docx) menghasilkan 3 dokumen Bahasa Indonesia ke `frontend/public/docs/`: Oryntix_Functional_Specification.docx, Oryntix_Technical_Specification.docx, Oryntix_User_Manual.docx (dapat diunduh dari `/docs/<nama>.docx`). Jalankan ulang skrip untuk memperbarui.
