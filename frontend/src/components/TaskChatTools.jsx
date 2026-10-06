@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { onUserEvent } from "../lib/userEvents";
+import { onUserEvent, isWsConnected } from "../lib/userEvents";
 import { useNavigate } from "react-router-dom";
 import { ClipboardList, ExternalLink, Bot, Plus, Check, X } from "lucide-react";
 import { toast } from "sonner";
@@ -95,7 +95,7 @@ export function TaskNotifier() {
         await api.post("/task-notifications/ack");
       } catch (e) {}
     };
-    poll(); const iv = setInterval(poll, 60000); const off = onUserEvent(["task_update"], poll);
+    poll(); const iv = setInterval(() => { if (!isWsConnected()) poll(); }, 60000); const off = onUserEvent(["task_update", "ws_state"], poll);
     return () => { stop = true; clearInterval(iv); off(); };
   }, [nav]);
   return null;

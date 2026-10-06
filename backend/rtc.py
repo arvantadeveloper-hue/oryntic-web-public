@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from auth import current_user
 from db import db, now_iso, new_id
+from notif_state import compute_badges, compute_feed
 
 router = APIRouter(prefix="/api", tags=["rtc"])
 STUN_ONLY = [{"urls": "stun:stun.l.google.com:19302"}, {"urls": "stun:stun1.l.google.com:19302"}]
@@ -33,32 +34,14 @@ async def ice_servers(u: dict = Depends(current_user)):
 
 @router.get("/notifications/badges")
 async def badges(u: dict = Depends(current_user)):
-    """Sidebar badges: pending friend requests + unread chats."""
-    friend_requests = await db.friends.count_documents({"addressee_id": u["id"], "status": "pending"})
-    unread = 0
-    async for c in db.conversations.find({"$or": [{"user_id": u["id"]}, {"participants": u["id"]}], "archived_conv": {"$ne": True}, "last_message": {"$nin": ["", None]}},
-                                         {"_id": 0, "updated_at": 1, "read_at": 1, "last_sender_id": 1}):
-        if c.get("last_sender_id") == u["id"]:
-            continue
-        if (c.get("updated_at") or "") > ((c.get("read_at") or {}).get(u["id"]) or ""):
-            unread += 1
-    return {"friend_requests": friend_requests, "unread_chats": unread, "at": now_iso()}
+    """Sidebar badges: pending friend requests + unread chats (fallback for clients whose WebSocket is down)."""
+    return await compute_badges(u["id"])
 
 
 @router.get("/notifications/feed")
 async def notifications_feed(u: dict = Depends(current_user)):
-    """Bell panel: notification log (same source as FCM pushes) + live states (ringing reminders, pending friend requests)."""
-    seen = (u.get("notifications_seen_at") or "")
-    items = [dict(r, read=r["created_at"] <= seen) for r in await db.notifications.find({"user_id": u["id"]}, {"_id": 0}).sort("created_at", -1).to_list(30)]
-    for r in await db.reminders.find({"user_id": u["id"], "status": "ringing"}, {"_id": 0, "id": 1, "title": 1, "remind_at": 1}).to_list(5):
-        items.insert(0, {"id": f"rem-{r['id']}", "kind": "reminders", "title": f"Pengingat berbunyi: {r.get('title') or 'Agenda'}", "body": "Asisten siap menelepon Anda.", "link": "/reminders", "created_at": r.get("remind_at") or now_iso(), "read": False, "live": True})
-    reqs = await db.friends.find({"addressee_id": u["id"], "status": "pending"}, {"_id": 0, "id": 1, "requester_id": 1, "created_at": 1}).to_list(10)
-    if reqs:
-        people = {p["id"]: p async for p in db.users.find({"id": {"$in": [r["requester_id"] for r in reqs]}}, {"_id": 0, "id": 1, "name": 1, "email": 1})}
-        for r in reqs:
-            p = people.get(r["requester_id"]) or {}
-            items.insert(0, {"id": f"fr-{r['id']}", "kind": "friends", "title": f"Permintaan pertemanan dari {p.get('name') or p.get('email') or 'seseorang'}", "body": "Terima atau tolak di halaman Teman.", "link": "/friends", "created_at": r.get("created_at") or now_iso(), "read": False, "live": True})
-    return {"items": items, "unseen": sum(1 for i in items if not i["read"]), "seen_at": seen or None}
+    """Bell panel: notification log (same source as FCM pushes) + live states (fallback; the same snapshot rides on WebSocket events)."""
+    return await compute_feed(u["id"])
 
 
 @router.post("/notifications/seen")

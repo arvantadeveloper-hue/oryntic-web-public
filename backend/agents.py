@@ -34,6 +34,14 @@ _KW = {
 }
 
 
+async def _emit_task(task_id: str):
+    """Progress ping so open Workspace views update over the user WebSocket instead of polling."""
+    from realtime import notify_user
+    t = await db.tasks.find_one({"id": task_id}, {"_id": 0, "user_id": 1, "status": 1})
+    if t and t.get("user_id"):
+        await notify_user(t["user_id"], {"type": "task_update", "task_id": task_id, "status": t.get("status") or "running", "progress": True})
+
+
 def _classify(goal: str):
     g = goal.lower()
     for cat, kws in _KW.items():
@@ -68,14 +76,14 @@ async def _plan_steps(task_id: str, goal: str, model_key: str):
     subtasks = plan.get("subtasks", [])[:4] or [{"role": "Writing", "title": "Complete request", "instruction": goal}]
     steps = [{"id": new_id(), "role": st.get("role", "Writing"), "title": st.get("title", "Subtask"),
               "instruction": st.get("instruction", goal), "status": "pending", "output": "", "created_at": now_iso()} for st in subtasks]
-    await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "summary": plan.get("plan_summary", ""), "updated_at": now_iso()}})
+    await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "summary": plan.get("plan_summary", ""), "updated_at": now_iso()}}); await _emit_task(task_id)
     return steps, text_credits(goal, json.dumps(plan))
 
 
 async def _run_step(task_id: str, goal: str, step: dict, steps: list, model_key: str) -> int:
     """Execute one subtask (one retry), persist progress, return credits used."""
     step["status"] = "running"
-    await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "updated_at": now_iso()}})
+    await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "updated_at": now_iso()}}); await _emit_task(task_id)
     role = step["role"] if step["role"] in ROLE_PROMPTS else "Writing"
     sys = ROLE_PROMPTS[role] + " Keep the output focused and useful."
     prompt = f"Overall goal: {goal}\n\nYour subtask: {step['title']}\nInstructions: {step['instruction']}"
@@ -89,7 +97,7 @@ async def _run_step(task_id: str, goal: str, step: dict, steps: list, model_key:
             break
     step["output"] = out or "(This subtask could not be completed.)"
     step["status"] = "completed"
-    await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "updated_at": now_iso()}})
+    await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "updated_at": now_iso()}}); await _emit_task(task_id)
     return text_credits(prompt, step["output"])
 
 
@@ -107,7 +115,7 @@ async def _merge_outputs(goal: str, steps: list, model_key: str):
 
 async def _attach_video(task_id: str, user_id: str, goal: str, final: str):
     """Video tasks: render with Seedance (fal.ai) and persist to object storage. Returns (final, url, path, credits)."""
-    await db.tasks.update_one({"id": task_id}, {"$set": {"status": "running", "summary": "Membuat video dengan Seedance...", "updated_at": now_iso()}})
+    await db.tasks.update_one({"id": task_id}, {"$set": {"status": "running", "summary": "Membuat video dengan Seedance...", "updated_at": now_iso()}}); await _emit_task(task_id)
     video_url, video_path, credits = None, None, 0
     try:
         from video_gen import generate_seedance_video
@@ -127,7 +135,7 @@ async def _attach_video(task_id: str, user_id: str, goal: str, final: str):
 
 async def _orchestrate(task_id: str, user_id: str, goal: str, model_key: str = None):
     try:
-        await db.tasks.update_one({"id": task_id}, {"$set": {"status": "running", "updated_at": now_iso()}})
+        await db.tasks.update_one({"id": task_id}, {"$set": {"status": "running", "updated_at": now_iso()}}); await _emit_task(task_id)
         steps, credits_total = await _plan_steps(task_id, goal, model_key)
         for step in steps:
             credits_total += await _run_step(task_id, goal, step, steps, model_key)

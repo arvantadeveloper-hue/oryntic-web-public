@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, ExternalLink, Loader2, CheckCircle2, Clock, XCircle, ClipboardList, Images, FileText } from "lucide-react";
 import { api } from "../lib/api";
-import { onUserEvent } from "../lib/userEvents";
+import { onUserEvent, isWsConnected } from "../lib/userEvents";
 import { Markdown } from "./Markdown";
 import { MediaList } from "./MessageExtras";
 
@@ -17,7 +17,7 @@ function useTask(taskId) {
     const load = () => api.get(`/tasks/${taskId}`).then((r) => alive && setTask(r.data)).catch(() => {});
     load();
     const off = onUserEvent(["task_update"], (e) => { if (!e.task_id || e.task_id === taskId) load(); });
-    const iv = setInterval(() => { setTask((t) => { if (t && ["queued", "running"].includes(t.status)) load(); return t; }); }, 6000);
+    const iv = setInterval(() => { if (isWsConnected()) return; setTask((t) => { if (t && ["queued", "running"].includes(t.status)) load(); return t; }); }, 6000);
     return () => { alive = false; off(); clearInterval(iv); };
   }, [taskId]);
   return task;

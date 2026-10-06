@@ -27,6 +27,27 @@ if (messaging) {
   });
 }
 
+// Assistant portraits are content-addressed (/api/portraits/{id}/{hash}.jpg) → cache-first forever, independent of proxy Cache-Control.
+const PORTRAIT_CACHE = "oryntix-portraits-v1";
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== "GET" || url.origin !== self.location.origin || !url.pathname.startsWith("/api/portraits/")) return;
+  event.respondWith((async () => {
+    const cache = await caches.open(PORTRAIT_CACHE);
+    const hit = await cache.match(event.request, { ignoreSearch: true });
+    if (hit) return hit;
+    const res = await fetch(event.request);
+    if (res && res.ok) {
+      const headers = new Headers(res.headers); headers.set("Cache-Control", "public, max-age=31536000, immutable");
+      const body = await res.clone().arrayBuffer();
+      cache.put(event.request, new Response(body, { status: 200, headers })).catch(() => {});
+    }
+    return res;
+  })());
+});
+self.addEventListener("activate", (event) => { event.waitUntil(self.clients.claim()); });
+self.addEventListener("install", () => self.skipWaiting());
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const link = (event.notification.data && event.notification.data.link) || "/home";

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, CheckCheck, Loader2, MessageSquare, ClipboardList, Users, Phone, Sparkles } from "lucide-react";
 import { api } from "../lib/api";
-import { onUserEvent } from "../lib/userEvents";
+import { onUserEvent, useLiveSync } from "../lib/userEvents";
 
 const ICON = { messages: MessageSquare, tasks: ClipboardList, friends: Users, calls: Phone, reminders: Bell, system: Sparkles };
 const ago = (iso) => { const s = Math.max(0, (Date.now() - new Date(iso)) / 1000); return s < 60 ? "baru saja" : s < 3600 ? `${Math.floor(s / 60)} mnt` : s < 86400 ? `${Math.floor(s / 3600)} jam` : `${Math.floor(s / 86400)} hr`; };
@@ -14,7 +14,9 @@ export function NotificationBell() {
   const [feed, setFeed] = useState(null);
   const box = useRef(null);
   const load = () => api.get("/notifications/feed").then((r) => setFeed(r.data)).catch(() => {});
-  useEffect(() => { load(); const off = onUserEvent(["notification", "push", "reminder_due", "friend_request", "task_update", "incoming_call"], load); const t = setInterval(load, 120000); return () => { off(); clearInterval(t); }; }, []);
+  // feed snapshot rides on the event (ev.feed) → no GET; "push" (FCM foreground) has no snapshot → GET; interval only while the socket is down
+  useEffect(() => onUserEvent(["notification", "reminder_due", "friend_request", "task_update", "incoming_call", "push"], (ev) => { if (ev.feed) setFeed(ev.feed); else load(); }), []);
+  useLiveSync(load, [], 90000, []);
   useEffect(() => {
     if (!open) return undefined;
     load();

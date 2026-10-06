@@ -1344,6 +1344,8 @@ async def _fanout_message(cid: str, sender_id: str, sender_name: str, content: s
     if not conv:
         return
     others = [p for p in set((conv.get("participants") or []) + [conv.get("user_id")]) if p and p != sender_id]
+    # bump the row first so the conversation snapshot riding on the event is already current
+    await db.conversations.update_one({"id": cid}, {"$set": {"updated_at": now_iso(), "last_message": content[:120], "last_sender_id": sender_id}})
     await notify_users(others, {"type": "message_new", "conversation_id": cid, "sender_name": sender_name, "preview": content[:80]})
     for o in others:
         await send_push(o, f"{sender_name} · {conv.get('title') or 'Oryntix'}", content[:120], {"link": f"/chat/{cid}", "tag": f"conv-{cid}"}, kind="messages")

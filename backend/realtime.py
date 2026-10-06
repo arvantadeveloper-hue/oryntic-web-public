@@ -70,9 +70,34 @@ class UserManager:
 user_manager = UserManager()
 
 
-async def notify_user(uid: str, payload: dict):
+BADGE_EVENTS = {"message_new", "friend_request", "notification", "reminder_due", "incoming_call", "task_update", "archived"}
+FEED_EVENTS = {"friend_request", "notification", "reminder_due", "task_update"}
+
+
+async def _enrich(uid: str, payload: dict) -> dict:
+    """Attach the state the client would otherwise GET right after this event (badges, bell feed, conversation row, task row)."""
+    from notif_state import compute_badges, compute_feed, conversation_row, task_row
+    t = payload.get("type")
+    out = dict(payload)
     try:
-        await user_manager.send(uid, payload)
+        if t in BADGE_EVENTS:
+            out["badges"] = await compute_badges(uid)
+        if t in FEED_EVENTS:
+            out["feed"] = await compute_feed(uid)
+        if t == "message_new" and payload.get("conversation_id"):
+            out["conversation"] = await conversation_row(payload["conversation_id"], uid)
+        if t == "task_update" and payload.get("task_id"):
+            out["task"] = await task_row(payload["task_id"])
+    except Exception:
+        pass
+    return out
+
+
+async def notify_user(uid: str, payload: dict):
+    if not user_manager.online(uid):
+        return
+    try:
+        await user_manager.send(uid, await _enrich(uid, payload))
     except Exception:
         pass
 

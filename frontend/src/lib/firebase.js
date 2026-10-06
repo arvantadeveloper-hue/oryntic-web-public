@@ -20,6 +20,12 @@ const app = () => getApps()[0] || initializeApp(firebaseConfig);
 // The service worker cannot read process.env → the web config travels in its URL.
 const swRegistration = () => navigator.serviceWorker.register(`/firebase-messaging-sw.js?config=${encodeURIComponent(btoa(JSON.stringify(firebaseConfig)))}`);
 
+// Registered for everyone (not only push users): the same worker caches assistant portraits offline-first.
+export async function registerAssetWorker() {
+  if (!("serviceWorker" in navigator)) return null;
+  try { return await swRegistration(); } catch (e) { return null; }
+}
+
 export async function pushSupported() {
   return pushConfigured() && "serviceWorker" in navigator && "Notification" in window && (await isSupported());
 }

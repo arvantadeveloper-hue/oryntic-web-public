@@ -10,8 +10,9 @@ import { FriendCallRing } from "./FriendCallRing";
 import { TaskNotifier } from "./TaskChatTools";
 import { UpgradePlanDialog } from "./UpgradePlanDialog";
 import { NotificationBell } from "./NotificationBell";
+import { registerAssetWorker } from "../lib/firebase";
 import { PublishHost } from "./PublishDialog";
-import { onUserEvent } from "../lib/userEvents";
+import { onUserEvent, useLiveSync } from "../lib/userEvents";
 
 export function AppLayout() {
   const { user, logout } = useAuth();
@@ -20,18 +21,16 @@ export function AppLayout() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [badges, setBadges] = useState({ friend_requests: 0, unread_chats: 0 });
+  useEffect(() => { registerAssetWorker(); }, []);
+  // badges ride on every WebSocket event (ev.badges); GET only while the socket is down / after resume
+  useEffect(() => { if (!user) return undefined; return onUserEvent(["message_new", "friend_request", "notification", "reminder_due", "incoming_call", "task_update", "archived"], (ev) => { if (ev.badges) setBadges(ev.badges); }); }, [user]);
+  useLiveSync(() => { if (!user) return; api.get("/notifications/badges").then((r) => setBadges(r.data)).catch(() => {}); }, [], 60000, [user?.id]);
   useEffect(() => {
-    if (!user) return;
-    let alive = true;
-    const pull = () => api.get("/notifications/badges").then((r) => alive && setBadges(r.data)).catch(() => {});
-    pull();
-    const t = setInterval(pull, 120000); // fallback only — live updates arrive over the user WebSocket
-    const off = onUserEvent(["message_new", "friend_request", "notification"], pull);
-    const onVis = () => { if (document.visibilityState === "visible") pull(); };
-    document.addEventListener("visibilitychange", onVis);
+    if (!user) return undefined;
+    const pull = () => api.get("/notifications/badges").then((r) => setBadges(r.data)).catch(() => {});
     window.addEventListener("oryntix:badges", pull);
-    return () => { alive = false; clearInterval(t); off(); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("oryntix:badges", pull); };
-  }, [user?.id]); // eslint-disable-line
+    return () => window.removeEventListener("oryntix:badges", pull);
+  }, [user]);
   const badgeOf = (id) => (id === "friends" ? badges.friend_requests : id === "chat" ? badges.unread_chats : 0);
 
   const isAdmin = user?.role === "admin";

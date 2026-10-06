@@ -136,9 +136,12 @@ async def gen_portrait(pid: str, x: PortraitIn, u: dict = Depends(require_admin)
     if not data_url:
         raise HTTPException(502, "No image returned")
     await record_usage(u["id"], "persona_portrait", rate("image"), {"persona_id": pid})
-    await db.personas.update_one({"id": pid}, {"$set": {"portrait": data_url, "updated_at": now_iso()}})
+    from portraits import save_portrait
+    url = await save_portrait(pid, data_url)
+    await db.personas.update_one({"id": pid}, {"$set": {"portrait": url, "updated_at": now_iso()}})
+    await db.conversations.update_many({"members.id": pid}, {"$set": {"members.$[m].portrait": url}}, array_filters=[{"m.id": pid}])
     bal = (await db.users.find_one({"id": u["id"]}))["credits"]
-    return {"portrait": data_url, "credits_used": rate("image"), "credits": bal}
+    return {"portrait": url, "credits_used": rate("image"), "credits": bal}
 
 
 @router.put("/{pid}")

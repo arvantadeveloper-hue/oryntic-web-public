@@ -49,6 +49,8 @@ async def root():
 
 app.include_router(auth_router)
 app.include_router(personas_router)
+from portraits import router as portraits_router, migrate_portraits
+app.include_router(portraits_router, prefix="/api")
 app.include_router(chat_router)
 app.include_router(agents_router)
 app.include_router(reminders_router)
@@ -161,6 +163,7 @@ async def startup():
         logger.error(f"Object storage init failed: {e}")
     global _scheduler_task
     _scheduler_task = asyncio.create_task(_scheduler_loop())
+    asyncio.create_task(migrate_portraits())
     logger.info("Oryntix API started")
 
 

@@ -166,7 +166,9 @@ export default function Chat() {
     return () => { convWs.current = null; try { ws && ws.close(); } catch (e) {} };
     /* eslint-disable-next-line */
   }, [id]);
-  useEffect(() => { const off = onUserEvent(["message_new"], () => loadConvs()); return off; /* eslint-disable-next-line */ }, []);
+  // message_new carries the updated conversation row → upsert locally; GET only when the row is missing
+  useEffect(() => { const off = onUserEvent(["message_new"], (ev) => { if (ev.conversation) setConvs((prev) => [ev.conversation, ...prev.filter((c) => c.id !== ev.conversation.id)]); else loadConvs(); }); return off; /* eslint-disable-next-line */ }, []);
+  useEffect(() => onUserEvent(["ws_state"], (e) => { if (e.connected) loadConvs(); }), []); // resync list after a reconnect
   // background auto-archive finished → the server copy is the truth: refetch messages + conversation list and overwrite the local cache
   const reloadAfterArchive = () => { setMessages([]); setMsgsLoading(true); api.get(`/conversations/${id}/messages?limit=50`).then((r) => { setConv(r.data.conversation); applyPage(r.data); }).catch(() => {}).finally(() => setMsgsLoading(false)); loadConvs(); };
   useEffect(() => { const off = onUserEvent(["archived"], (ev) => { if (ev.conversation_id === id) reloadAfterArchive(); else loadConvs(); }); return off; /* eslint-disable-next-line */ }, [id]);
