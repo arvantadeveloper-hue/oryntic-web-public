@@ -42,6 +42,7 @@ export async function streamSSE(path, body, onEvent, signal) {
   });
   if (!res.ok || !res.body) {
     const err = new Error("stream failed"); err.status = res.status;
+    err.retryAfter = Number(res.headers.get("Retry-After")) || 0;
     try { err.detail = (await res.json()).detail; } catch (e) {}
     throw err;
   }

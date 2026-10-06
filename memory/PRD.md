@@ -433,3 +433,7 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 ## Update 2026-10 (l) — Balasan tampil sekaligus (tanpa efek ketik) + publish
 - `chat._plain_reply` & interjeksi moderator: satu event `delta` berisi seluruh teks (loop kata-per-kata + sleep dihapus). Indikator "mengetik" (titik-titik) tetap tampil sampai balasan jadi.
 - Publish produksi dikirim (secrets baru: ANTHROPIC_API_KEY, GEMINI_API_KEY; OPENAI_REALTIME_MODEL=gpt-realtime-2.1).
+
+## Update 2026-10 (m) — Message throttling berlapis pada chat
+- `ratelimit.throttle_message(user, content)` dipanggil di `POST /conversations/{cid}/send`: jeda minimal antar pesan (`chat_min_interval_ms` 1500), window 20/menit (`chat_per_min`) + 300/jam (`chat_per_hour`), maks balasan diproses bersamaan (`chat_max_inflight` 4, dihitung via `inflight_start/end` di stream), pesan identik maks 3/30 dtk (`chat_dup_per_30s`). Semua 429 menyertakan header `Retry-After`. Konfigurasi di Platform → Batas Pemakaian (`RateLimitsCard`, `LimitsIn`).
+- Frontend: `streamSSE` mengekspos `err.retryAfter`; Chat & MeetingChatPanel → cooldown hitung mundur pada tombol kirim (judul "Tunggu N dtk"), teks dikembalikan ke input, bubble optimis dihapus. Diuji: burst → 429 (Retry-After 1), spam identik ke-4 → 429 (30 dtk), UI cooldown aktif lalu pulih.

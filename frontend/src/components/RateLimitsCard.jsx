@@ -5,6 +5,10 @@ import { api } from "../lib/api";
 
 const FIELDS = [
   ["chat_per_min", "Pesan chat / menit"],
+  ["chat_per_hour", "Pesan chat / jam"],
+  ["chat_min_interval_ms", "Jeda minimal antar pesan (ms)"],
+  ["chat_max_inflight", "Balasan yang boleh diproses bersamaan"],
+  ["chat_dup_per_30s", "Pesan identik maksimal / 30 detik"],
   ["voice_per_min", "Permintaan suara (STT/TTS) / menit"],
   ["calls_per_hour", "Panggilan realtime / jam"],
   ["max_call_minutes", "Durasi maksimal panggilan (menit)"],

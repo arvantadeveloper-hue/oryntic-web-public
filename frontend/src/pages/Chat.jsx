@@ -56,6 +56,8 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [activeStreams, setActiveStreams] = useState(0);
   const streaming = activeStreams > 0;
+  const [cooldown, setCooldown] = useState(0); // seconds left after a 429 (message throttling)
+  useEffect(() => { if (cooldown <= 0) return undefined; const t = setTimeout(() => setCooldown((c) => c - 1), 1000); return () => clearTimeout(t); }, [cooldown]);
   const [liveMap, setLiveMap] = useState({});
   const [personas, setPersonas] = useState(cached.current.personas || null);
   const [friends, setFriends] = useState(cached.current.friends || []);
@@ -241,7 +243,7 @@ export default function Chat() {
   };
 
   const send = async () => {
-    if ((!input.trim() && attachments.length === 0) || !id) return;
+    if ((!input.trim() && attachments.length === 0) || !id || cooldown > 0) return;
     const text = input; const atts = attachments;
     const reqId = Date.now().toString(36);
     setInput(""); setAttachments([]);
@@ -264,7 +266,11 @@ export default function Chat() {
       });
       if (!convWs.current || convWs.current.readyState !== 1) { const r = await api.get(`/conversations/${id}/messages?limit=50`); applyPage(r.data); }
       loadConvs();
-    } catch (e) { toast.error(e?.detail || (e?.status === 429 ? "Terlalu banyak pesan, tunggu sebentar." : e?.status === 402 ? "Kuota kredit harian habis." : "Gagal mengirim pesan")); }
+    } catch (e) {
+      if (e?.status === 429) { setCooldown(Math.min(60, e.retryAfter || 3)); setInput((v) => v || text); }
+      setMessages((m) => m.filter((x) => x.id !== "tmp-u-" + reqId)); // rejected — put the text back, drop the optimistic bubble
+      toast.error(e?.detail || (e?.status === 429 ? "Terlalu banyak pesan, tunggu sebentar." : e?.status === 402 ? "Kuota kredit harian habis." : "Gagal mengirim pesan"));
+    }
     finally {
       setActiveStreams((n) => Math.max(0, n - 1));
       // drop any live bubble of this request that the WebSocket did not already replace
@@ -468,7 +474,7 @@ export default function Chat() {
               {driveOn && <button onClick={() => setShowDrive(true)} data-testid="attach-drive-btn" title="Lampirkan dari Google Drive" className="hidden h-12 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E7ECF3] text-slate-500 hover:bg-slate-50 sm:flex"><HardDrive size={18} /></button>}
               <button onClick={toggleRecord} data-testid="mic-btn" className={`flex h-12 w-11 shrink-0 items-center justify-center rounded-xl border ${recording ? "animate-pulse border-[#EF4444] bg-[#EF4444] text-white" : "border-[#E7ECF3] text-slate-500 hover:bg-slate-50"}`}>{recording ? <Square size={16} /> : <Mic size={18} />}</button>
               <textarea className="input-dark max-h-32 min-h-[48px] resize-none" rows={1} placeholder={t("chat.placeholder")} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} data-testid="chat-input" />
-              <button onClick={send} disabled={!input.trim() && attachments.length === 0} className="btn-grad flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" data-testid="chat-send-btn"><Send size={18} /></button>
+              <button onClick={send} disabled={cooldown > 0 || (!input.trim() && attachments.length === 0)} title={cooldown > 0 ? `Tunggu ${cooldown} dtk` : undefined} className="btn-grad flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" data-testid="chat-send-btn"><Send size={18} /></button>
             </div>
           </div>
         )}

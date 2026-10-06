@@ -77,6 +77,10 @@ async def admin_set_pricing(x: PricingIn, _: dict = Depends(require_platform_adm
 
 class LimitsIn(BaseModel):
     chat_per_min: int = Field(ge=1, le=1000)
+    chat_per_hour: int = Field(default=300, ge=1, le=100_000)
+    chat_min_interval_ms: int = Field(default=1500, ge=0, le=60_000)
+    chat_max_inflight: int = Field(default=4, ge=1, le=50)
+    chat_dup_per_30s: int = Field(default=3, ge=1, le=100)
     voice_per_min: int = Field(ge=1, le=1000)
     calls_per_hour: int = Field(ge=1, le=1000)
     max_call_minutes: int = Field(ge=1, le=600)

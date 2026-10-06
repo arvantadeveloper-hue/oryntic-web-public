@@ -84,6 +84,8 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
   const pending = pendings.filter((p) => !messages.some((m) => m.role === "user" && m.content === p.content && m.created_at >= p.created_at));
   const liveList = Object.entries(lives).filter(([, l]) => !(l.done && messages.some((m) => m.role === "assistant" && m.created_at >= l.sent_at)));
   const live = liveList.length ? liveList[liveList.length - 1][1] : null;
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => { if (cooldown <= 0) return undefined; const t = setTimeout(() => setCooldown((c) => c - 1), 1000); return () => clearTimeout(t); }, [cooldown]);
   const endRef = useRef(null);
   const fileRef = useRef(null);
   const [showGallery, setShowGallery] = useState(false);
@@ -106,7 +108,7 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
   };
 
   const send = async () => {
-    if ((!input.trim() && atts.length === 0)) return;
+    if ((!input.trim() && atts.length === 0) || cooldown > 0) return;
     const text = input, a = atts;
     const reqId = Date.now().toString(36);
     const sent_at = new Date().toISOString();
@@ -124,6 +126,7 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
       }, { channel: "meeting_chat" });
       await onRefresh?.();
     } catch (e) {
+      if (e?.status === 429) { setCooldown(Math.min(60, e.retryAfter || 3)); setInput((v) => v || text); }
       toast.error(e?.detail || (e?.status === 402 ? "Kuota kredit habis" : e?.status === 429 ? "Terlalu banyak pesan, tunggu sebentar." : "Gagal mengirim pesan"));
     } finally {
       setLives((l) => { const { [reqId]: _gone, ...rest } = l; return rest; });
@@ -173,7 +176,7 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
           <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1} data-testid="meeting-chat-input" placeholder="Ketik pesan… (Enter kirim)"
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
             className="max-h-28 min-h-10 flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/35 focus:border-[#2F6BFF]/60 focus:outline-none" />
-          <button onClick={send} disabled={!input.trim() && atts.length === 0} data-testid="meeting-chat-send" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#2F6BFF] text-white transition hover:brightness-110 disabled:opacity-40">{liveList.length ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}</button>
+          <button onClick={send} disabled={cooldown > 0 || (!input.trim() && atts.length === 0)} title={cooldown > 0 ? `Tunggu ${cooldown} dtk` : undefined} data-testid="meeting-chat-send" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#2F6BFF] text-white transition hover:brightness-110 disabled:opacity-40">{liveList.length ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}</button>
         </div>
       </div>
       {showGallery && createPortal(<div className="relative z-[120]"><GalleryPicker onClose={() => setShowGallery(false)} onPick={addAtts} max={5 - atts.length} /></div>, document.body)}

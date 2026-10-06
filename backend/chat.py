@@ -14,7 +14,7 @@ from db import db, now_iso, new_id, clean
 from auth import current_user, workspace_id, _lang_name
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
-from ratelimit import rate_limit
+from ratelimit import rate_limit, throttle_message, inflight_start, inflight_end
 from tools import route_model, wants_tool, plan_tool, GITHUB_RE, run_image_tool, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task
 from pricing import rate as tool_rate
 from llm import model_label
@@ -1153,7 +1153,7 @@ async def _choose_responders(x: MsgIn, conv: dict, personas: list, cid: str) -> 
 
 @router.post("/conversations/{cid}/send")
 async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
-    await rate_limit(u, "chat")
+    await throttle_message(u, x.content)
     conv, personas = await _load_ai_conv(cid, u)
     attach_text, attach_meta = await _process_attachments(x.attachments, u["id"])
     await _store_user_message(cid, x, u, attach_text, attach_meta)
@@ -1167,20 +1167,24 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
 
     async def stream():
         totals = [0]
-        if attach_text and x.channel == "meeting_chat":  # let the voice agents hear what was attached in the call chat panel
-            yield f"data: {json.dumps({'attachments_context': attach_text[:2000], 'attachment_names': [a.get('name') for a in attach_meta]})}\n\n"
-        for persona in responders:
-            prompt = (await _history_text(cid, query=x.content)) + extra + f"\n{persona['name']}:"
-            ctx = ReplyCtx(cid=cid, user=await _bill_user(persona), persona=persona, roster=roster, prompt=prompt, voice_mode=x.voice_mode,
-                           via=x.channel, user_text=x.content, attach_len=len(attach_text))
-            async for ev in _collect(_persona_reply(ctx), totals):
-                yield ev
-        if await _moderator_if_stuck(cid, conv, responders, roster, x):
-            async for ev in _collect(_moderator_interject(cid, u, roster, "stuck"), totals):
-                yield ev
-        if await _long_chat(cid, await db.conversations.find_one({"id": cid}, {"_id": 0, "summary_snoozed_at_count": 1})):
-            yield f"data: {json.dumps({'summary_request': True})}\n\n"
-        yield await _finish_stream(cid, u, totals[0], x.content)
+        inflight_start(u["id"])
+        try:
+            if attach_text and x.channel == "meeting_chat":  # let the voice agents hear what was attached in the call chat panel
+                yield f"data: {json.dumps({'attachments_context': attach_text[:2000], 'attachment_names': [a.get('name') for a in attach_meta]})}\n\n"
+            for persona in responders:
+                prompt = (await _history_text(cid, query=x.content)) + extra + f"\n{persona['name']}:"
+                ctx = ReplyCtx(cid=cid, user=await _bill_user(persona), persona=persona, roster=roster, prompt=prompt, voice_mode=x.voice_mode,
+                               via=x.channel, user_text=x.content, attach_len=len(attach_text))
+                async for ev in _collect(_persona_reply(ctx), totals):
+                    yield ev
+            if await _moderator_if_stuck(cid, conv, responders, roster, x):
+                async for ev in _collect(_moderator_interject(cid, u, roster, "stuck"), totals):
+                    yield ev
+            if await _long_chat(cid, await db.conversations.find_one({"id": cid}, {"_id": 0, "summary_snoozed_at_count": 1})):
+                yield f"data: {json.dumps({'summary_request': True})}\n\n"
+            yield await _finish_stream(cid, u, totals[0], x.content)
+        finally:
+            inflight_end(u["id"])
 
     return _sse(stream())
 
