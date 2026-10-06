@@ -158,6 +158,7 @@ GITHUB_TOOLS = [
      "parameters": {"type": "object", "properties": {"repo": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string", "description": "markdown summary of the changes"},
                                                      "changes": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}, "delete": {"type": "boolean"}}, "required": ["path"]}}}, "required": ["repo", "title", "changes"]}},
 ]
+GITLAB_TOOLS = [{**t, "name": t["name"].replace("github_", "gitlab_"), "description": t["description"].replace("GitHub", "GitLab").replace("pull request", "merge request")} for t in GITHUB_TOOLS]
 UPDATE_TOOL = {"type": "function", "name": "update_task",
                "description": "Apply a revision the user asked for to the Workspace result currently being presented/discussed. Pass the full revision instruction. The result is saved as a new version.",
                "parameters": {"type": "object", "properties": {"instruction": {"type": "string", "description": "What to change, in detail"}}, "required": ["instruction"]}}
@@ -346,7 +347,8 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         conv = await db.conversations.find_one({"id": call["conversation_id"]}, {"_id": 0, "task_id": 1}) or {}
         drive_on = bool(await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
         gh_on = bool(await db.github_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
-        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL] + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        gl_on = bool(await db.gitlab_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
+        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL] + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:

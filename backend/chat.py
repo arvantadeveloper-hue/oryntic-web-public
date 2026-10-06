@@ -665,24 +665,35 @@ async def _drive_turn(ctx, plan: dict):
         yield ev
 
 
+def _repo_provider(name: str) -> dict:
+    """Git hosting providers share one chat flow; only the API module and wording differ."""
+    if name == "gitlab":
+        import gitlab as m
+        return {"label": "GitLab", "pr": "Merge request", "connected": m.gl_connected, "repos": m.gl_projects, "tree": m.gl_tree, "read": m.gl_read, "issues": m.gl_issues, "create": m.gl_create_mr}
+    import github as m
+    return {"label": "GitHub", "pr": "Pull request", "connected": m.gh_connected, "repos": m.gh_repos, "tree": m.gh_tree, "read": m.gh_read, "issues": m.gh_issues, "create": m.gh_create_pr}
+
+
 async def _github_turn(ctx, plan: dict):
-    """GitHub Level 1 from chat: list repos, read tree/file, list issues, or author + open a pull request."""
-    from github import gh_connected, gh_repos, gh_tree, gh_read, gh_issues, gh_create_pr
+    """GitHub/GitLab Level 1 from chat: list repos, read tree/file, list issues, or author + open a pull/merge request."""
     tool = plan["tool"]
+    prov = _repo_provider(tool.split("_", 1)[0])
+    kind = tool.split("_", 1)[1]
+    gh_connected, gh_repos, gh_tree, gh_read, gh_issues, gh_create_pr = prov["connected"], prov["repos"], prov["tree"], prov["read"], prov["issues"], prov["create"]
     yield ctx.sse(start=True)
     if not await gh_connected(ctx.user["id"]):
-        async for ev in _emit_final(ctx, "GitHub belum terhubung. Hubungkan dulu di menu [Integrasi](/integrations) (tempel Personal Access Token), lalu minta lagi ya.", 0, {"tool": tool, "error": True}):
+        async for ev in _emit_final(ctx, f"{prov['label']} belum terhubung. Hubungkan dulu di menu [Integrasi](/integrations) (tempel Personal Access Token), lalu minta lagi ya.", 0, {"tool": tool, "error": True}):
             yield ev
         return
-    yield ctx.sse(status="Menghubungi GitHub...")
+    yield ctx.sse(status=f"Menghubungi {prov['label']}...")
     repo = (plan.get("repo") or (ctx.task or {}).get("github_repo") or "").strip()
     credits = 0
     try:
-        if tool == "github_repos":
+        if kind == "repos":
             rows = await gh_repos(ctx.user["id"], plan.get("query") or "")
             text = ("Ini repositori kamu:\n\n" + "\n".join(f"- [{r['full_name']}]({r['url']}){' 🔒' if r['private'] else ''}{' — ' + r['description'][:80] if r['description'] else ''}" for r in rows)) if rows else "Belum ada repositori yang bisa aku lihat dengan token ini."
             extra = {"tool": tool, "results": rows[:30]}
-        elif tool == "github_read":
+        elif kind == "read":
             path = (plan.get("path") or "").strip("/")
             if not repo:
                 raise HTTPException(400, "Sebutkan nama repo-nya (owner/repo) ya.")
@@ -698,9 +709,9 @@ async def _github_turn(ctx, plan: dict):
                     yield ctx.sse(status="Membaca & merangkum file...")
                     summary = await llm_text(ctx.system, f"The user asked: {ctx.user_text}\n\nFile `{f['path']}` from repo {repo}:\n```\n{f['content'][:30000]}\n```\n\nAnswer their request about this file in their language (explain/summarize/review as asked). Be concrete and reference line-level details where useful.", ctx.model_key)
                     credits = text_credits(f["content"][:30000], summary)
-                    text = f"{summary}\n\n[Lihat file di GitHub]({f['url']})"
+                    text = f"{summary}\n\n[Lihat file di {prov['label']}]({f['url']})"
             extra = {"tool": tool}
-        elif tool == "github_issues":
+        elif kind == "issues":
             if not repo:
                 raise HTTPException(400, "Sebutkan nama repo-nya (owner/repo) ya.")
             rows = await gh_issues(ctx.user["id"], repo, plan.get("state") or "open")
@@ -734,7 +745,7 @@ async def _github_turn(ctx, plan: dict):
             credits = text_credits(ctx_files, json.dumps(changes, ensure_ascii=False))
             yield ctx.sse(status="Membuat branch, commit & pull request...")
             pr = await gh_create_pr(ctx.user["id"], repo, (res.get("title") or plan.get("title") or "Perubahan dari Oryntix")[:200], res.get("body") or "", changes)
-            text = f"Pull request **#{pr['number']} {pr['title']}** sudah dibuka di **{repo}** — [lihat PR di GitHub]({pr['url']}).\n\nBranch `{pr['branch']}` → `{pr['base']}` · file: " + ", ".join(f"`{p}`" for p in pr["files"]) + f"\n\n{res.get('body') or ''}"
+            text = f"{prov['pr']} **!{pr['number']} {pr['title']}** sudah dibuka di **{repo}** — [lihat di {prov['label']}]({pr['url']}).\n\nBranch `{pr['branch']}` → `{pr['base']}` · file: " + ", ".join(f"`{p}`" for p in pr["files"]) + f"\n\n{res.get('body') or ''}"
             extra = {"tool": tool, "github_pr": pr}
     except HTTPException as e:
         text, extra = f"{e.detail}", {"tool": tool, "error": True}
@@ -748,7 +759,7 @@ async def _tool_turn(ctx, plan: dict):
     """Create an image/document from chat, or run a Google Drive / GitHub action. Expensive tools (≥ threshold) ask for confirmation first."""
     if plan["tool"].startswith("drive_"):
         gen = _drive_turn(ctx, plan)
-    elif plan["tool"].startswith("github_"):
+    elif plan["tool"].startswith(("github_", "gitlab_")):
         gen = _github_turn(ctx, plan)
     else:
         cfg = await get_routing()

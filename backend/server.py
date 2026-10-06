@@ -19,6 +19,7 @@ from platform_finance import router as finance_router
 from integrations import router as integrations_router
 from google_auth import router as google_auth_router
 from github import router as github_router
+from gitlab import router as gitlab_router
 from push import router as push_router
 from gallery import router as gallery_router
 from archives import router as archives_router, archive_tick
@@ -57,6 +58,7 @@ app.include_router(finance_router)
 app.include_router(integrations_router)
 app.include_router(google_auth_router)
 app.include_router(github_router)
+app.include_router(gitlab_router)
 app.include_router(push_router)
 app.include_router(gallery_router)
 app.include_router(archives_router)

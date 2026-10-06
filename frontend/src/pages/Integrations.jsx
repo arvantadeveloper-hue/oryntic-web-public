@@ -72,6 +72,7 @@ export default function Integrations() {
             </div>
           </div>
           <GitHubCard item={data.items?.find((x) => x.id === "github")} onChange={load} />
+          <GitHubCard provider="gitlab" item={data.items?.find((x) => x.id === "gitlab")} onChange={load} />
           <p className="mt-8 text-xs font-semibold uppercase tracking-wider text-slate-400">Segera hadir</p>
           <div className="mt-2 grid gap-3 sm:grid-cols-4" data-testid="integrations-coming-soon">{(data.coming_soon || []).map((n) => <div key={n} className="rounded-2xl border border-dashed border-[#CBD5E1] px-4 py-3 text-sm font-semibold text-slate-400">{n}</div>)}</div>
         </>

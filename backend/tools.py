@@ -71,7 +71,7 @@ async def route_model(persona_model: Optional[str], text: str, extra_len: int, o
 
 
 DRIVE_RE = re.compile(r"\b(google ?drive|drive|gdrive|google ?docs?|spreadsheet|google ?sheets?)\b", re.I)
-GITHUB_RE = re.compile(r"\b(github|repo|repository|repositori|pull ?request|PR|issues?|branch|commit)\b", re.I)
+GITHUB_RE = re.compile(r"\b(github|gitlab|repo|repository|repositori|pull ?request|merge ?request|PR|MR|issues?|branch|commit)\b", re.I)
 
 
 def wants_tool(text: str) -> bool:
@@ -80,7 +80,7 @@ def wants_tool(text: str) -> bool:
 
 async def plan_tool(text: str, history: str) -> dict:
     sys = ('Decide if the user\'s LAST message explicitly asks the assistant to CREATE a deliverable or act on an external service. Reply JSON only: '
-           '{"tool":"image"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"none",'
+           '{"tool":"image"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"gitlab_repos"|"gitlab_read"|"gitlab_issues"|"gitlab_pr"|"none",'
            '"image_prompt":str,"image_prompts":[str],"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet",'
            '"repo":str,"path":str,"query":str,"state":"open"|"closed"|"all","files":[str]}. '
            '"image" = the user wants a picture/illustration/logo/poster generated. If they ask for MORE THAN ONE image (e.g. "3 variasi", "beberapa poster", '
@@ -98,13 +98,14 @@ async def plan_tool(text: str, history: str) -> dict:
            '"github_read" = user asks to read/show/explain a file, folder or the structure of a GitHub repo (repo = owner/name as mentioned or from context; path = file/folder path or "" for the tree). '
            '"github_issues" = user asks about issues/PRs of a repo (repo; state). '
            '"github_pr" = user asks to change code/files in a repo and open a pull request / make a PR / fix something in the repo (repo; instructions = what to change; files = file paths they mentioned, may be empty; title = short PR title). '
-           'Only use github_* when GitHub/repo/PR/issue is clearly meant.')
+           'Use gitlab_* (same meanings; gitlab_pr = open a Merge Request) when the user says GitLab / merge request / MR or the project is known to be on GitLab; otherwise github_*. '
+           'Only use github_*/gitlab_* when a code repository, PR/MR or issue is clearly meant.')
     plan: dict = {}
     try:
         plan = await llm_json(sys, f"Recent conversation:\n{history[-2500:]}\n\nLAST MESSAGE: {text}")
     except Exception:
         plan = {}
-    if plan.get("tool") not in ("image", "document", "drive_save", "drive_update", "drive_link", "github_repos", "github_read", "github_issues", "github_pr"):
+    if plan.get("tool") not in ("image", "document", "drive_save", "drive_update", "drive_link", "github_repos", "github_read", "github_issues", "github_pr", "gitlab_repos", "gitlab_read", "gitlab_issues", "gitlab_pr"):
         return {"tool": "none"}
     if plan["tool"] == "image":
         prompts = [str(p).strip() for p in (plan.get("image_prompts") or []) if str(p).strip()][:6]

@@ -148,20 +148,22 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       return { ok: true, name: r.data.name, link: r.data.webViewLink, shared: r.data.shared, note: "the clickable link was posted to the chat panel (no need to read the URL aloud)" };
     }
     if (name === "search_workspace") { const r = await api.post(`/conversations/${cid}/workspace-search`, { query: args.query }); return { ok: true, ...r.data, note: "links were posted to the chat panel" }; }
-    if (name === "github_repos") {
-      const r = await api.get("/integrations/github/repos", { params: { q: args.query || "" } });
+    const gitProv = name.startsWith("gitlab_") ? "gitlab" : "github";
+    const gitLabel = gitProv === "gitlab" ? "GitLab" : "GitHub";
+    if (name === "github_repos" || name === "gitlab_repos") {
+      const r = await api.get(`/integrations/${gitProv}/repos`, { params: { q: args.query || "" } });
       const items = r.data.items || [];
-      if (items.length) await postCard(callId, "Repositori GitHub:\n" + items.slice(0, 15).map((x) => `- [${x.full_name}](${x.url})${x.private ? " 🔒" : ""}`).join("\n"));
+      if (items.length) await postCard(callId, `Repositori ${gitLabel}:\n` + items.slice(0, 15).map((x) => `- [${x.full_name}](${x.url})${x.private ? " 🔒" : ""}`).join("\n"));
       return { ok: true, count: items.length, repos: items.slice(0, 30).map((x) => ({ full_name: x.full_name, description: x.description, default_branch: x.default_branch, language: x.language })), note: "links were posted to the chat panel" };
     }
-    if (name === "github_read") {
-      const r = await api.post(args.path ? "/integrations/github/read" : "/integrations/github/tree", { repo: args.repo, path: args.path || "" });
+    if (name === "github_read" || name === "gitlab_read") {
+      const r = await api.post(args.path ? `/integrations/${gitProv}/read` : `/integrations/${gitProv}/tree`, { repo: args.repo, path: args.path || "" });
       return { ok: true, ...r.data };
     }
-    if (name === "github_issues") { const r = await api.post("/integrations/github/issues", { repo: args.repo, state: args.state || "open" }); return { ok: true, ...r.data }; }
-    if (name === "github_pr") {
-      const r = await api.post("/integrations/github/pr", { repo: args.repo, title: args.title, body: args.body || "", changes: args.changes || [] });
-      await postCard(callId, `Pull request dibuka: **#${r.data.number} ${r.data.title}** di ${r.data.repo} — [lihat PR di GitHub](${r.data.url})`);
+    if (name === "github_issues" || name === "gitlab_issues") { const r = await api.post(`/integrations/${gitProv}/issues`, { repo: args.repo, state: args.state || "open" }); return { ok: true, ...r.data }; }
+    if (name === "github_pr" || name === "gitlab_pr") {
+      const r = await api.post(`/integrations/${gitProv}/pr`, { repo: args.repo, title: args.title, body: args.body || "", changes: args.changes || [] });
+      await postCard(callId, `${gitProv === "gitlab" ? "Merge request" : "Pull request"} dibuka: **!${r.data.number} ${r.data.title}** di ${r.data.repo} — [lihat di ${gitLabel}](${r.data.url})`);
       return { ok: true, number: r.data.number, url: r.data.url, branch: r.data.branch, note: "the PR link was posted to the chat panel (no need to read the URL aloud)" };
     }
     if (name === "update_task") {
