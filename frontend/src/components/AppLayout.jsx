@@ -12,7 +12,7 @@ import { UpgradePlanDialog } from "./UpgradePlanDialog";
 import { NotificationBell } from "./NotificationBell";
 import { registerAssetWorker } from "../lib/firebase";
 import { PublishHost } from "./PublishDialog";
-import { onUserEvent, useLiveSync } from "../lib/userEvents";
+import { onUserEvent, useLiveSync, useWsConnected } from "../lib/userEvents";
 
 export function AppLayout() {
   const { user, logout } = useAuth();
@@ -132,6 +132,7 @@ export function AppLayout() {
               </button>
             )}
             <button className="hidden h-10 w-10 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 sm:flex" title="Bantuan"><HelpCircle size={19} /></button>
+            <ConnectionDot />
             <NotificationBell />
             <button onClick={() => nav("/chat")} className="btn-primary h-10 rounded-xl px-3.5 sm:px-4" data-testid="topbar-new"><Plus size={16} /> <span className="hidden sm:inline">New</span></button>
             <button onClick={() => nav("/profile")} className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }} data-testid="topbar-user">{(user?.name || "U")[0].toUpperCase()}</button>
@@ -147,5 +148,18 @@ export function AppLayout() {
       {showUpgrade && <UpgradePlanDialog onClose={() => setShowUpgrade(false)} />}
       <PublishHost />
     </div>
+  );
+}
+
+
+// Realtime status: green = WebSocket live (push mode), amber pulsing = reconnecting (temporary GET fallback).
+function ConnectionDot() {
+  const on = useWsConnected();
+  return (
+    <span title={on ? "Realtime terhubung — pembaruan langsung via WebSocket" : "Menyambung ulang… sementara memakai pembaruan berkala"} data-testid="ws-status-dot"
+      data-state={on ? "connected" : "reconnecting"} className="flex items-center gap-1.5 rounded-full border border-[#E7ECF3] bg-white px-2 py-1 text-[11px] font-semibold text-slate-500">
+      <span className={`h-2 w-2 rounded-full ${on ? "bg-emerald-500" : "bg-amber-400 animate-pulse"}`} />
+      <span className="hidden sm:inline">{on ? "Terhubung" : "Menyambung ulang…"}</span>
+    </span>
   );
 }

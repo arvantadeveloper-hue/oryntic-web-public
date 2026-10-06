@@ -55,6 +55,10 @@ export function useUserEvents(active) {
     open();
     let unsubPush = () => {};
     listenForegroundPush((d) => { emitUserEvent({ type: "push", ...d }); if (d.title) toast(d.title, { description: d.body }); }).then((u) => { unsubPush = u || (() => {}); }).catch(() => {});
-    return () => { stopped = true; clearTimeout(timer); clearInterval(ping); setWsConnected(false); try { ws && ws.close(); } catch (e) {} unsubPush(); };
+    // the browser's own network state: a dead socket is not reported until a ping fails, so flip immediately on offline/online
+    const onOffline = () => { setWsConnected(false); try { ws && ws.close(); } catch (e) {} };
+    const onOnline = () => { clearTimeout(timer); delay = 1000; if (!stopped && (!ws || ws.readyState > 1)) open(); };
+    window.addEventListener("offline", onOffline); window.addEventListener("online", onOnline);
+    return () => { stopped = true; clearTimeout(timer); clearInterval(ping); setWsConnected(false); window.removeEventListener("offline", onOffline); window.removeEventListener("online", onOnline); try { ws && ws.close(); } catch (e) {} unsubPush(); };
   }, [active]);
 }
