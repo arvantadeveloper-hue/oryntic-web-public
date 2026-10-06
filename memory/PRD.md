@@ -493,3 +493,6 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 
 ## Update 2026-06 — Dokumentasi Word
 - `scripts/gen_docs.py` (python-docx) menghasilkan 3 dokumen Bahasa Indonesia ke `frontend/public/docs/`: Oryntix_Functional_Specification.docx, Oryntix_Technical_Specification.docx, Oryntix_User_Manual.docx (dapat diunduh dari `/docs/<nama>.docx`). Jalankan ulang skrip untuk memperbarui.
+
+## Update 2026-06 — Tur singkat dalam aplikasi
+- `components/WelcomeTour.jsx`: 5 langkah (asisten → chat & gambar → video & dokumen → panggilan suara → ruang kerja/pengingat/kredit) dengan CTA ke halaman terkait, dot navigasi, Lewati/Selanjutnya; tampil sekali per browser (`localStorage.oryntix_tour_done`), dapat diputar ulang dari tombol Bantuan (?) di header (`openTour`). Dirender via portal ke body.

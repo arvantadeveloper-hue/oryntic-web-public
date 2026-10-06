@@ -11,6 +11,7 @@ import { TaskNotifier } from "./TaskChatTools";
 import { UpgradePlanDialog } from "./UpgradePlanDialog";
 import { NotificationBell } from "./NotificationBell";
 import { registerAssetWorker } from "../lib/firebase";
+import { WelcomeTour, openTour } from "./WelcomeTour";
 import { PublishHost } from "./PublishDialog";
 import { onUserEvent, useLiveSync, useWsConnected } from "../lib/userEvents";
 
@@ -131,9 +132,10 @@ export function AppLayout() {
                 <span className="font-bold text-slate-900">{credits}</span>
               </button>
             )}
-            <button className="hidden h-10 w-10 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 sm:flex" title="Bantuan"><HelpCircle size={19} /></button>
+            <button onClick={openTour} data-testid="help-tour-btn" className="hidden h-10 w-10 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 sm:flex" title="Bantuan — tur singkat"><HelpCircle size={19} /></button>
             <ConnectionDot />
             <NotificationBell />
+            <WelcomeTour user={user} />
             <button onClick={() => nav("/chat")} className="btn-primary h-10 rounded-xl px-3.5 sm:px-4" data-testid="topbar-new"><Plus size={16} /> <span className="hidden sm:inline">New</span></button>
             <button onClick={() => nav("/profile")} className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }} data-testid="topbar-user">{(user?.name || "U")[0].toUpperCase()}</button>
           </div>
