@@ -25,11 +25,24 @@ export function getToken() {
 
 export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
-// Open a realtime WebSocket for a conversation. Returns the WebSocket (auto-closes handled by caller).
-export function openConvSocket(cid, onEvent) {
-  const ws = new WebSocket(`${WS_BASE}/ws/${cid}?token=${getToken()}`);
-  ws.onmessage = (e) => { try { onEvent(JSON.parse(e.data)); } catch (_) {} };
-  return ws;
+// Conversation WebSocket with keepalive pings (proxies drop idle sockets) and auto-reconnect with backoff.
+// Returns a handle: { send(obj), close(), get socket(), onReconnect } — `onReconnect` fires after a re-established connection so callers can resync.
+export function openConvSocket(cid, onEvent, onReconnect) {
+  let ws = null, stopped = false, delay = 1000, timer = null, ping = null, wasOpen = false;
+  const open = () => {
+    if (stopped) return;
+    ws = new WebSocket(`${WS_BASE}/ws/${cid}?token=${getToken()}`);
+    ws.onopen = () => { delay = 1000; if (wasOpen) onReconnect?.(); wasOpen = true; clearInterval(ping); ping = setInterval(() => { try { ws.readyState === 1 && ws.send(JSON.stringify({ type: "ping" })); } catch (_) {} }, 25000); };
+    ws.onmessage = (e) => { try { onEvent(JSON.parse(e.data)); } catch (_) {} };
+    ws.onclose = (ev) => { clearInterval(ping); if (stopped || ev.code === 4401 || ev.code === 4403) return; timer = setTimeout(open, delay); delay = Math.min(delay * 2, 30000); };
+  };
+  open();
+  return {
+    get socket() { return ws; },
+    get readyState() { return ws ? ws.readyState : 3; },
+    send(obj) { try { ws && ws.readyState === 1 && ws.send(typeof obj === "string" ? obj : JSON.stringify(obj)); } catch (_) {} },
+    close() { stopped = true; clearTimeout(timer); clearInterval(ping); try { ws && ws.close(); } catch (_) {} },
+  };
 }
 
 // Generic SSE POST stream. `signal` (AbortSignal) lets the caller cancel mid-stream (barge-in).

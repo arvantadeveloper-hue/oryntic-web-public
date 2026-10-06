@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
-import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins, X, UserRound, ShieldCheck } from "lucide-react";
+import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins, X, UserRound, ShieldCheck, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 
@@ -51,7 +51,7 @@ export function MediaList({ media = [], dark = false }) {
           {(x.path || x.drive_id) && <button type="button" onClick={() => openPublish(x, x.request || x.prompt || "")} data-testid="media-publish-btn" className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black/80"><Share2 size={11} /> Publikasikan</button>}
           {x.link && <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
             <a href={x.link} target="_blank" rel="noreferrer" data-testid="media-drive-link" className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition ${chip}`}><HardDrive size={12} /> Buka di Google Drive <ExternalLink size={10} className="opacity-60" /></a>
-            {x.tier && <span className={dark ? "text-white/50" : "text-slate-400"} data-testid="media-video-meta">Seedance {x.tier} · {x.duration}s{x.resolution ? ` · ${x.resolution}` : ""}{x.aspect_ratio ? ` · ${ASPECT_LABEL[x.aspect_ratio] || x.aspect_ratio}` : ""}{x.real_person ? " · real person" : ""}</span>}
+            {x.tier && <span className={dark ? "text-white/50" : "text-slate-400"} data-testid="media-video-meta">Seedance {x.tier} · {x.duration}s{x.resolution ? ` · ${x.resolution}` : ""}{x.aspect_ratio ? ` · ${ASPECT_LABEL[x.aspect_ratio] || x.aspect_ratio}` : ""}{x.real_person ? " · real person" : ""}{x.audio ? " · dengan suara" : ""}</span>}
           </div>}
         </div>
       ))}
@@ -108,14 +108,16 @@ function VideoChoiceCard({ m, cid, onDone, dark }) {
   const [busy, setBusy] = useState(pt?.running ? "run" : "");
   const [res, setRes] = useState(pt.resolution || "720p");
   const [real, setReal] = useState(!!pt.real_person);
+  const [audio, setAudio] = useState(!!pt.with_audio);
   const [consent, setConsent] = useState(false);
-  const mult = pt.multipliers || { res: { "480p": 0.6, "720p": 1, "1080p": 1.6 }, real_person: 1.45 };
+  const mult = pt.multipliers || { res: { "480p": 0.6, "720p": 1, "1080p": 1.6 }, real_person: 1.45, audio: 1 };
   const canReal = !!pt.reference_path && (pt.options || []).some((o) => o.real_person);
-  const price = (o) => Math.max(1, Math.ceil(o.per_sec * pt.duration * (mult.res[res] ?? 1) * (real ? mult.real_person : 1)));
-  const supported = (o) => pt.duration <= o.max_dur && (o.resolutions || ["720p"]).includes(res) && (!real || o.real_person);
+  const canAudio = (pt.options || []).some((o) => o.audio);
+  const price = (o) => Math.max(1, Math.ceil(o.per_sec * pt.duration * (mult.res[res] ?? 1) * (real ? mult.real_person : 1) * (audio ? (mult.audio ?? 1) : 1)));
+  const supported = (o) => pt.duration <= o.max_dur && (o.resolutions || ["720p"]).includes(res) && (!real || o.real_person) && (!audio || o.audio);
   const pick = async (tier) => {
     setBusy(tier);
-    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: tier, resolution: res, real_person: real, app_url: window.location.origin } }); await onDone?.(); }
+    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: tier, resolution: res, real_person: real, with_audio: audio, app_url: window.location.origin } }); await onDone?.(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal memulai render video"); setBusy(""); }
   };
   const cancel = async () => { setBusy("cancel"); try { await api.post(`/conversations/${cid}/messages/${m.id}/cancel-tool`); await onDone?.(); } catch { setBusy(""); } };
@@ -135,6 +137,13 @@ function VideoChoiceCard({ m, cid, onDone, dark }) {
           <button type="button" onClick={() => setReal(true)} className={`${seg(real)} flex items-center gap-1`} data-testid="video-mode-real"><UserRound size={11} /> Real person <span className="font-normal opacity-70">×{mult.real_person}</span></button>
         </div>
       )}
+      {canAudio && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5" data-testid="video-audio-picker">
+          <span className={`mr-1 ${dark ? "text-white/60" : "text-amber-700"}`}>Suara</span>
+          <button type="button" onClick={() => setAudio(false)} className={`${seg(!audio)} flex items-center gap-1`} data-testid="video-audio-off"><VolumeX size={11} /> Tanpa suara</button>
+          <button type="button" onClick={() => setAudio(true)} className={`${seg(audio)} flex items-center gap-1`} data-testid="video-audio-on"><Volume2 size={11} /> Dengan suara & ambience {mult.audio && mult.audio !== 1 ? <span className="font-normal opacity-70">×{mult.audio}</span> : null}</button>
+        </div>
+      )}
       {real && (
         <label className={`mb-2 flex cursor-pointer items-start gap-2 rounded-lg px-2.5 py-2 ${dark ? "bg-white/10" : "bg-white"}`} data-testid="video-consent">
           <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" data-testid="video-consent-check" />
@@ -148,8 +157,8 @@ function VideoChoiceCard({ m, cid, onDone, dark }) {
             <button key={o.tier} type="button" disabled={!ok || !!busy} onClick={() => pick(o.tier)} data-testid={`video-choice-${o.tier}`}
               className={`flex flex-col items-start rounded-lg border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${dark ? "border-white/15 bg-white/10 hover:bg-white/15" : "border-[#2F6BFF]/30 bg-white hover:border-[#2F6BFF] hover:shadow-sm"}`}>
               <span className="flex w-full items-center gap-1 font-bold">{o.label}<span className={`ml-auto font-black ${dark ? "text-white" : "text-[#2F6BFF]"}`}>±{fmtCredits(cr)} kredit</span></span>
-              <span className={`mt-0.5 ${dark ? "text-white/60" : "text-slate-500"}`}>{fmtCredits(cr / pt.duration)} kredit/detik · {res}{real ? " · real person" : ""}
-                {!sup ? (pt.duration > o.max_dur ? ` · maks ${o.max_dur} dtk` : real && !o.real_person ? " · tidak ada mode real person" : ` · tidak ada ${res}`) : cr > pt.balance ? " · saldo tidak cukup" : real && !consent ? " · centang izin dulu" : ""}</span>
+              <span className={`mt-0.5 ${dark ? "text-white/60" : "text-slate-500"}`}>{fmtCredits(cr / pt.duration)} kredit/detik · {res}{real ? " · real person" : ""}{audio ? " · suara" : ""}
+                {!sup ? (pt.duration > o.max_dur ? ` · maks ${o.max_dur} dtk` : real && !o.real_person ? " · tidak ada mode real person" : audio && !o.audio ? " · tidak ada opsi suara" : ` · tidak ada ${res}`) : cr > pt.balance ? " · saldo tidak cukup" : real && !consent ? " · centang izin dulu" : ""}</span>
             </button>
           );
         })}

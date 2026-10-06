@@ -63,10 +63,11 @@ export default function PlatformPricing({ readOnly }) {
       <div className="mt-6 aivora-card p-5" data-testid="pp-video-options">
         <p className="text-sm font-bold text-slate-900">Opsi video Seedance — pengali harga per detik</p>
         <p className="text-xs text-slate-500">Harga dasar "Video Seedance 2.0 / 2.5" di atas berlaku untuk 720p mode normal. Pengali ini dikalikan ke kredit/detik saat user memilih resolusi lain atau mode real person (hanya Seedance 2.0, image-to-video). Provider: real person ≈ ×1,43–1,44.</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <div className="mt-3 grid gap-3 sm:grid-cols-4">
           <NumField label="480p Hemat (×)" value={draft.video_res_480_mult ?? 0.6} onChange={(v) => update({ video_res_480_mult: v })} step={0.05} testid="pp-video_res_480_mult" disabled={readOnly} />
           <NumField label="1080p Tajam (×)" value={draft.video_res_1080_mult ?? 1.6} onChange={(v) => update({ video_res_1080_mult: v })} step={0.05} testid="pp-video_res_1080_mult" disabled={readOnly} />
           <NumField label="Mode real person (×)" value={draft.video_real_person_mult ?? 1.45} onChange={(v) => update({ video_real_person_mult: v })} step={0.05} testid="pp-video_real_person_mult" disabled={readOnly} />
+          <NumField label="Suara / ambience (×)" value={draft.video_audio_mult ?? 1} onChange={(v) => update({ video_audio_mult: v })} step={0.05} testid="pp-video_audio_mult" disabled={readOnly} />
         </div>
       </div>
       <div className="mt-6 aivora-card p-5" data-testid="pp-realtime">

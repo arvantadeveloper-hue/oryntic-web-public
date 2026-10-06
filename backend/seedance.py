@@ -9,8 +9,8 @@ from pricing import RATES
 
 BASE = "https://api.seedance2video.io/v1"
 TIERS = {
-    "2.0": {"model": "seedance-2.0-pro", "label": "Seedance 2.0", "rate_key": "video20_per_sec", "max_dur": 15, "resolutions": ["480p", "720p", "1080p"], "real_person": True},
-    "2.5": {"model": "seedance-2.5", "label": "Seedance 2.5", "rate_key": "video_per_sec", "max_dur": 30, "resolutions": ["480p", "720p", "1080p"], "real_person": False},
+    "2.0": {"model": "seedance-2.0-pro", "label": "Seedance 2.0", "rate_key": "video20_per_sec", "max_dur": 15, "resolutions": ["480p", "720p", "1080p"], "real_person": True, "audio": True},
+    "2.5": {"model": "seedance-2.5", "label": "Seedance 2.5", "rate_key": "video_per_sec", "max_dur": 30, "resolutions": ["480p", "720p", "1080p"], "real_person": False, "audio": True},
 }
 RESOLUTIONS = {"480p": "480p Hemat", "720p": "720p Standar", "1080p": "1080p Tajam"}
 MIN_DUR, DEFAULT_DUR = 4, 5
@@ -32,17 +32,17 @@ def per_sec(tier: str) -> float:
 
 
 def multipliers() -> dict:
-    return {"res": dict(RATES.get("video_res_mult") or {"480p": 0.6, "720p": 1.0, "1080p": 1.6}), "real_person": float(RATES.get("video_real_person_mult") or 1.45)}
+    return {"res": dict(RATES.get("video_res_mult") or {"480p": 0.6, "720p": 1.0, "1080p": 1.6}), "real_person": float(RATES.get("video_real_person_mult") or 1.45), "audio": float(RATES.get("video_audio_mult") or 1.0)}
 
 
-def quote(tier: str, duration: int, resolution: str = "720p", real_person: bool = False) -> int:
+def quote(tier: str, duration: int, resolution: str = "720p", real_person: bool = False, audio: bool = False) -> int:
     m = multipliers()
-    return max(1, math.ceil(per_sec(tier) * duration * m["res"].get(resolution, 1.0) * (m["real_person"] if real_person else 1.0)))
+    return max(1, math.ceil(per_sec(tier) * duration * m["res"].get(resolution, 1.0) * (m["real_person"] if real_person else 1.0) * (m["audio"] if audio else 1.0)))
 
 
-def supports(tier: str, duration: int, resolution: str = "720p", real_person: bool = False) -> bool:
+def supports(tier: str, duration: int, resolution: str = "720p", real_person: bool = False, audio: bool = False) -> bool:
     c = TIERS[tier]
-    return duration <= c["max_dur"] and resolution in c["resolutions"] and (not real_person or c["real_person"])
+    return duration <= c["max_dur"] and resolution in c["resolutions"] and (not real_person or c["real_person"]) and (not audio or c.get("audio", False))
 
 
 def clamp_duration(d) -> int:
@@ -53,18 +53,20 @@ def clamp_duration(d) -> int:
     return max(MIN_DUR, min(30, d))
 
 
-def options(duration: int, resolution: str = "720p", real_person: bool = False) -> list:
+def options(duration: int, resolution: str = "720p", real_person: bool = False, audio: bool = False) -> list:
     """Both tiers with platform credits/sec (720p normal) and the total for this clip at the chosen options; unsupported combos are flagged."""
-    return [{"tier": t, "model": c["model"], "label": c["label"], "per_sec": round(per_sec(t), 2), "credits": quote(t, duration, resolution, real_person),
-             "max_dur": c["max_dur"], "resolutions": c["resolutions"], "real_person": c["real_person"], "available": supports(t, duration, resolution, real_person)}
-            for t, c in TIERS.items()]
+    return [{"tier": t, "model": c["model"], "label": c["label"], "per_sec": round(per_sec(t), 2), "credits": quote(t, duration, resolution, real_person, audio),
+             "max_dur": c["max_dur"], "resolutions": c["resolutions"], "real_person": c["real_person"], "audio": c.get("audio", False),
+             "available": supports(t, duration, resolution, real_person, audio)} for t, c in TIERS.items()]
 
 
-async def generate(prompt: str, tier: str, duration: int, aspect_ratio: str = "16:9", resolution: str = "720p", timeout: int = 900, image_url: Optional[str] = None, real_person: bool = False, consent_ref: str = "") -> dict:
+async def generate(prompt: str, tier: str, duration: int, aspect_ratio: str = "16:9", resolution: str = "720p", timeout: int = 900, image_url: Optional[str] = None, real_person: bool = False, consent_ref: str = "", generate_audio: bool = False) -> dict:
     """Submit and poll until done. image_url (public HTTPS on a Key-approved host) switches to image-to-video. Returns {video_url, provider_credits, generation_id}."""
     cfg = TIERS[tier]
     body = {"model": cfg["model"], "mode": "image-to-video" if image_url else "text-to-video", "prompt": prompt[:7000],
             "parameters": {"aspect_ratio": aspect_ratio, "resolution": resolution, "duration_seconds": int(duration)}}
+    if generate_audio:
+        body["parameters"]["generate_audio"] = True
     if image_url:
         body["inputs"] = [{"type": "image", "url": image_url}]
     if real_person and image_url:

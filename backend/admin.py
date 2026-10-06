@@ -131,6 +131,7 @@ class PlatformPricingIn(BaseModel):
     video_res_480_mult: float = Field(default=0.6, gt=0, le=5)
     video_res_1080_mult: float = Field(default=1.6, gt=0, le=10)
     video_real_person_mult: float = Field(default=1.45, gt=0, le=10)
+    video_audio_mult: float = Field(default=1.0, gt=0, le=10)
     vision_usd: float = Field(default=0.006, ge=0)
     bandwidth_usd_per_gb: float = Field(default=0.5, ge=0)
     margin_overrides: dict[str, float] = Field(default_factory=lambda: {"call_bandwidth": 50.0})

@@ -160,7 +160,7 @@ export default function Chat() {
         if ((ev.type === "message" || ev.type === "participants") && !streamingRef.current) {
           api.get(`/conversations/${id}/messages`).then((r) => { setConv(r.data.conversation); setMessages(r.data.messages); }).catch(() => {});
         }
-      });
+      }, () => { if (!streamingRef.current) api.get(`/conversations/${id}/messages?limit=50`).then((r) => { setConv(r.data.conversation); applyPage(r.data); }).catch(() => {}); });
       convWs.current = ws;
     } catch (e) {}
     return () => { convWs.current = null; try { ws && ws.close(); } catch (e) {} };
