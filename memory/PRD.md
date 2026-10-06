@@ -471,3 +471,9 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 ## Update 2026-06 — Gambar & video dari panggilan suara (Realtime)
 - Tool Realtime baru: `generate_image` → `POST /conversations/{cid}/voice-image` (render/edit gambar, kirim ke panel chat sebagai pesan media) dan `generate_video` → `POST /conversations/{cid}/voice-video` (posting kartu pilihan Seedance 2.0/2.5 atau pemberitahuan Drive/saldo; model menyebut harga lalu user tap). Instruksi sesi menegaskan asisten tidak boleh bilang tidak bisa membuat gambar/video.
 - Logika tawaran video dipindah ke `video_offer(user, cid, plan, user_text)` (dipakai chat teks & suara).
+
+## Update 2026-06 — Resolusi & mode real person video, lightbox gambar
+- Pricing: pengali `video_res_480_mult` (0.6), `video_res_1080_mult` (1.6), `video_real_person_mult` (1.45) di DEFAULT_PRICING/PricingIn + kartu "Opsi video Seedance" di Admin Tarif. RATES memuat `video_res_mult` & `video_real_person_mult`.
+- `seedance.py`: TIERS punya `resolutions` & `real_person` (2.0-pro: 480/720/1080 + real person; 2.5: 480/720/1080, tanpa real person). `quote(tier,dur,res,rp)`, `supports()`, `options(dur,res,rp)`; `generate(..., resolution, real_person, consent_ref)` mengirim `real_person_mode` + `compliance.rights_confirmed`.
+- Planner: `resolution` (hemat→480p, tajam/HD→1080p) & `real_person` (hanya bersama from_image). `pending_tool` membawa `resolution`, `real_person`, `multipliers`; kartu `VideoChoiceCard` punya segmented Resolusi (480p Hemat/720p Standar/1080p Tajam), Mode Normal/Real person (hanya jika ada gambar referensi) + checkbox izin wajib; harga per tier dihitung di klien dan divalidasi ulang di `run-tool?choice&resolution&real_person`.
+- Lightbox: klik gambar di chat/Galeri membuka modal besar (portal, Esc/backdrop tutup, tombol Unduh & Publikasikan) — tidak lagi buka tab baru.

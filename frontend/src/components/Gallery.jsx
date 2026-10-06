@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { HardDrive, FileText, Image as ImageIcon, Video, Download, ExternalLink, Loader2, Check, Users, Share2, Search, Send, MessageSquare, Wand2 } from "lucide-react";
 import { api, API_BASE, getToken } from "../lib/api";
-import { fileUrl, downloadUrl, openPublish, mediaSrc } from "./MessageExtras";
+import { fileUrl, downloadUrl, openPublish, mediaSrc, Lightbox } from "./MessageExtras";
 
 export const GALLERY_FILTERS = [
   { v: "all", label: "Semua" },
@@ -51,9 +51,11 @@ const KIND_ICON = { document: FileText, image: ImageIcon, video: Video, drive: H
 export function GalleryCard({ item, selectable = false, selected = false, onSelect, onOpen, onShare }) {
   const Icon = KIND_ICON[item.kind] || FileText;
   const date = new Date(item.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
-  const click = selectable ? () => onSelect(item) : onOpen ? () => onOpen(item) : undefined;
+  const [zoom, setZoom] = useState(false);
+  const click = selectable ? () => onSelect(item) : onOpen ? () => onOpen(item) : item.kind === "image" ? () => setZoom(true) : undefined;
   return (
-    <div onClick={click} data-testid={`gallery-item-${item.kind}`} className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-white transition ${selectable || onOpen ? "cursor-pointer" : ""} ${selected ? "border-[#2F6BFF] ring-2 ring-[#2F6BFF]/30" : "border-[#E7ECF3] hover:shadow-md"}`}>
+    <div onClick={click} data-testid={`gallery-item-${item.kind}`} className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-white transition ${selectable || onOpen || item.kind === "image" ? "cursor-pointer" : ""} ${selected ? "border-[#2F6BFF] ring-2 ring-[#2F6BFF]/30" : "border-[#E7ECF3] hover:shadow-md"}`}>
+      {zoom && <Lightbox media={{ type: "image", path: item.path, name: item.name, request: item.title }} onClose={() => setZoom(false)} />}
       {selectable && <span className={`absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md border bg-white ${selected ? "btn-grad border-transparent" : "border-slate-300"}`} data-testid="gallery-select-mark">{selected && <Check size={13} />}</span>}
       <div className="flex h-36 items-center justify-center overflow-hidden bg-slate-50">
         {item.kind === "image" ? <img src={fileUrl(item.path)} alt={item.name} loading="lazy" className="h-full w-full object-cover" />

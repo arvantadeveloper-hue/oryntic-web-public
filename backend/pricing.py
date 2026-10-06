@@ -20,6 +20,8 @@ DEFAULT_PRICING = {
     "rt_audio_in_usd_1m": 32.0, "rt_audio_out_usd_1m": 64.0, "rt_text_in_usd_1m": 4.0, "rt_text_out_usd_1m": 24.0, "rt_cached_in_usd_1m": 0.4,
     "video_usd_per_sec": 0.80,     # seedance2video.io Seedance 2.5 (720p) per output second
     "video20_usd_per_sec": 0.60,   # seedance2video.io Seedance 2.0 Pro (720p) per output second
+    # video option multipliers on the 720p/normal per-second price (provider: real-person ≈ ×1.43–1.44)
+    "video_res_480_mult": 0.6, "video_res_1080_mult": 1.6, "video_real_person_mult": 1.45,
     # per-model list prices (USD per 1M tokens, input/output) — each persona "brain" is billed at its own rate; ~4 chars per token
     "chars_per_token": 4.0,
     "model_prices": {
@@ -122,6 +124,8 @@ def compute_rates(p: dict) -> dict:
         "bandwidth_per_mb": round(usd_to_credits(p, _cost(p, "bandwidth_usd_per_gb") / 1024, "call_bandwidth"), 4),
         "video_per_sec": round(usd_to_credits(p, _cost(p, "video_usd_per_sec"), "video"), 2),
         "video20_per_sec": round(usd_to_credits(p, _cost(p, "video20_usd_per_sec"), "video20"), 2),
+        "video_res_mult": {"480p": float(p.get("video_res_480_mult") or 0.6), "720p": 1.0, "1080p": float(p.get("video_res_1080_mult") or 1.6)},
+        "video_real_person_mult": float(p.get("video_real_person_mult") or 1.45),
     }
 
 

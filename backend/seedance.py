@@ -9,9 +9,10 @@ from pricing import RATES
 
 BASE = "https://api.seedance2video.io/v1"
 TIERS = {
-    "2.0": {"model": "seedance-2.0-pro", "label": "Seedance 2.0", "rate_key": "video20_per_sec", "max_dur": 15},
-    "2.5": {"model": "seedance-2.5", "label": "Seedance 2.5", "rate_key": "video_per_sec", "max_dur": 30},
+    "2.0": {"model": "seedance-2.0-pro", "label": "Seedance 2.0", "rate_key": "video20_per_sec", "max_dur": 15, "resolutions": ["480p", "720p", "1080p"], "real_person": True},
+    "2.5": {"model": "seedance-2.5", "label": "Seedance 2.5", "rate_key": "video_per_sec", "max_dur": 30, "resolutions": ["480p", "720p", "1080p"], "real_person": False},
 }
+RESOLUTIONS = {"480p": "480p Hemat", "720p": "720p Standar", "1080p": "1080p Tajam"}
 MIN_DUR, DEFAULT_DUR = 4, 5
 ASPECTS = {"16:9": "Landscape 16:9 (YouTube)", "9:16": "Portrait 9:16 (Reels/Shorts/TikTok)", "1:1": "Persegi 1:1 (feed Instagram)", "4:3": "4:3", "3:4": "3:4", "21:9": "Sinematik 21:9"}
 
@@ -30,8 +31,18 @@ def per_sec(tier: str) -> float:
     return float(RATES.get(TIERS[tier]["rate_key"]) or 0)
 
 
-def quote(tier: str, duration: int) -> int:
-    return max(1, math.ceil(per_sec(tier) * duration))
+def multipliers() -> dict:
+    return {"res": dict(RATES.get("video_res_mult") or {"480p": 0.6, "720p": 1.0, "1080p": 1.6}), "real_person": float(RATES.get("video_real_person_mult") or 1.45)}
+
+
+def quote(tier: str, duration: int, resolution: str = "720p", real_person: bool = False) -> int:
+    m = multipliers()
+    return max(1, math.ceil(per_sec(tier) * duration * m["res"].get(resolution, 1.0) * (m["real_person"] if real_person else 1.0)))
+
+
+def supports(tier: str, duration: int, resolution: str = "720p", real_person: bool = False) -> bool:
+    c = TIERS[tier]
+    return duration <= c["max_dur"] and resolution in c["resolutions"] and (not real_person or c["real_person"])
 
 
 def clamp_duration(d) -> int:
@@ -42,19 +53,23 @@ def clamp_duration(d) -> int:
     return max(MIN_DUR, min(30, d))
 
 
-def options(duration: int) -> list:
-    """Both tiers with platform credits/sec and the total for this clip; a tier that cannot render this duration is flagged."""
-    return [{"tier": t, "model": c["model"], "label": c["label"], "per_sec": round(per_sec(t), 2), "credits": quote(t, duration),
-             "max_dur": c["max_dur"], "available": duration <= c["max_dur"]} for t, c in TIERS.items()]
+def options(duration: int, resolution: str = "720p", real_person: bool = False) -> list:
+    """Both tiers with platform credits/sec (720p normal) and the total for this clip at the chosen options; unsupported combos are flagged."""
+    return [{"tier": t, "model": c["model"], "label": c["label"], "per_sec": round(per_sec(t), 2), "credits": quote(t, duration, resolution, real_person),
+             "max_dur": c["max_dur"], "resolutions": c["resolutions"], "real_person": c["real_person"], "available": supports(t, duration, resolution, real_person)}
+            for t, c in TIERS.items()]
 
 
-async def generate(prompt: str, tier: str, duration: int, aspect_ratio: str = "16:9", resolution: str = "720p", timeout: int = 900, image_url: Optional[str] = None) -> dict:
+async def generate(prompt: str, tier: str, duration: int, aspect_ratio: str = "16:9", resolution: str = "720p", timeout: int = 900, image_url: Optional[str] = None, real_person: bool = False, consent_ref: str = "") -> dict:
     """Submit and poll until done. image_url (public HTTPS on a Key-approved host) switches to image-to-video. Returns {video_url, provider_credits, generation_id}."""
     cfg = TIERS[tier]
     body = {"model": cfg["model"], "mode": "image-to-video" if image_url else "text-to-video", "prompt": prompt[:7000],
             "parameters": {"aspect_ratio": aspect_ratio, "resolution": resolution, "duration_seconds": int(duration)}}
     if image_url:
         body["inputs"] = [{"type": "image", "url": image_url}]
+    if real_person and image_url:
+        body["parameters"]["real_person_mode"] = True
+        body["compliance"] = {"rights_confirmed": True, "consent_reference": consent_ref or new_id()}
     async with httpx.AsyncClient(timeout=90) as c:
         r = await c.post(f"{BASE}/videos", json=body, headers=_headers({"Idempotency-Key": new_id()}))
         if r.status_code >= 400:

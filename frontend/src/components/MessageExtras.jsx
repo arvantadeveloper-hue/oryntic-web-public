@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
-import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins } from "lucide-react";
+import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins, X, UserRound, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 
@@ -12,16 +13,35 @@ export const openPublish = (media, context = "") => window.dispatchEvent(new Cus
 const FMT = { docx: "Word", pdf: "PDF", md: "Markdown" };
 
 // Images / downloadable files produced by the assistant (media[]) + bare media URLs found in the text.
+// Full-size image viewer (portal so message-bubble transforms can't clip it); Esc or backdrop closes.
+export function Lightbox({ media, onClose }) {
+  useEffect(() => { const k = (e) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
+  if (!media) return null;
+  const src = media.url || fileUrl(media.path);
+  return createPortal(
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/90 p-4 sm:p-8 fade-up" onClick={(e) => { e.stopPropagation(); onClose(); }} data-testid="image-lightbox">
+      <button type="button" onClick={onClose} aria-label="Tutup" data-testid="lightbox-close" className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"><X size={20} /></button>
+      <img src={src} alt={media.name || ""} onClick={(e) => e.stopPropagation()} className="max-h-[85vh] max-w-full rounded-xl object-contain shadow-2xl" data-testid="lightbox-image" />
+      <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/60 px-3 py-1.5 text-xs text-white" onClick={(e) => e.stopPropagation()}>
+        {media.request || media.prompt ? <span className="max-w-[40vw] truncate opacity-80">{media.request || media.prompt}</span> : null}
+        {media.path && <a href={downloadUrl(media.path)} download={media.name || "gambar.jpg"} className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 font-semibold hover:bg-white/20" data-testid="lightbox-download"><Download size={12} /> Unduh</a>}
+        {media.path && <button type="button" onClick={() => { onClose(); openPublish(media, media.request || media.prompt || ""); }} className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 font-semibold hover:bg-white/20" data-testid="lightbox-publish"><Share2 size={12} /> Publikasikan</button>}
+      </div>
+    </div>, document.body);
+}
+
 export function MediaList({ media = [], dark = false }) {
+  const [zoom, setZoom] = useState(null);
   if (!media.length) return null;
   const chip = dark ? "bg-white/10 text-white/90 hover:bg-white/15" : "bg-[#EEF3FF] text-slate-700 hover:bg-[#E0E9FF]";
   return (
     <div className="mt-2 space-y-2" data-testid="media-list">
+      {zoom && <Lightbox media={zoom} onClose={() => setZoom(null)} />}
       {media.filter((x) => x.type === "image").map((x, i) => (
         <div key={`i${i}`} className="group relative">
-          <a href={x.url || fileUrl(x.path)} target="_blank" rel="noreferrer" data-testid="media-image" className={`block min-h-[80px] overflow-hidden rounded-xl ${dark ? "bg-black/20" : "bg-slate-100"}`}>
-            <img src={x.url || fileUrl(x.path)} alt={x.name || ""} className="max-h-72 w-full object-cover" />
-          </a>
+          <button type="button" onClick={() => setZoom(x)} data-testid="media-image" className={`block w-full min-h-[80px] cursor-zoom-in overflow-hidden rounded-xl text-left ${dark ? "bg-black/20" : "bg-slate-100"}`}>
+            <img src={x.url || fileUrl(x.path)} alt={x.name || ""} className="max-h-72 w-full object-cover transition group-hover:scale-[1.01]" />
+          </button>
           {x.path && <button type="button" onClick={() => openPublish(x)} data-testid="media-publish-btn" className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black/80"><Share2 size={11} /> Publikasikan</button>}
         </div>
       ))}
@@ -31,7 +51,7 @@ export function MediaList({ media = [], dark = false }) {
           {(x.path || x.drive_id) && <button type="button" onClick={() => openPublish(x, x.request || x.prompt || "")} data-testid="media-publish-btn" className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black/80"><Share2 size={11} /> Publikasikan</button>}
           {x.link && <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
             <a href={x.link} target="_blank" rel="noreferrer" data-testid="media-drive-link" className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition ${chip}`}><HardDrive size={12} /> Buka di Google Drive <ExternalLink size={10} className="opacity-60" /></a>
-            {x.tier && <span className={dark ? "text-white/50" : "text-slate-400"} data-testid="media-video-meta">Seedance {x.tier} · {x.duration}s{x.aspect_ratio ? ` · ${ASPECT_LABEL[x.aspect_ratio] || x.aspect_ratio}` : ""}</span>}
+            {x.tier && <span className={dark ? "text-white/50" : "text-slate-400"} data-testid="media-video-meta">Seedance {x.tier} · {x.duration}s{x.resolution ? ` · ${x.resolution}` : ""}{x.aspect_ratio ? ` · ${ASPECT_LABEL[x.aspect_ratio] || x.aspect_ratio}` : ""}{x.real_person ? " · real person" : ""}</span>}
           </div>}
         </div>
       ))}
@@ -81,28 +101,55 @@ export function MessageCta({ m, dark = false }) {
   return <Link to={m.cta.href} data-testid="msg-cta" className={`mt-2 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${dark ? "bg-white text-slate-900 hover:bg-white/90" : "bg-[#2F6BFF] text-white hover:bg-[#2558d6]"}`}>{m.cta.label} <ExternalLink size={11} /></Link>;
 }
 
-// Seedance 2.0 vs 2.5 picker: per-second platform price, clip total and whether the balance covers it.
+// Seedance 2.0 vs 2.5 picker with resolution + real-person options: per-second platform price, clip total and whether the balance covers it.
+const RES_OPTS = [["480p", "480p", "Hemat"], ["720p", "720p", "Standar"], ["1080p", "1080p", "Tajam"]];
 function VideoChoiceCard({ m, cid, onDone, dark }) {
-  const [busy, setBusy] = useState(m.pending_tool?.running ? "run" : "");
   const pt = m.pending_tool;
+  const [busy, setBusy] = useState(pt?.running ? "run" : "");
+  const [res, setRes] = useState(pt.resolution || "720p");
+  const [real, setReal] = useState(!!pt.real_person);
+  const [consent, setConsent] = useState(false);
+  const mult = pt.multipliers || { res: { "480p": 0.6, "720p": 1, "1080p": 1.6 }, real_person: 1.45 };
+  const canReal = !!pt.reference_path && (pt.options || []).some((o) => o.real_person);
+  const price = (o) => Math.max(1, Math.ceil(o.per_sec * pt.duration * (mult.res[res] ?? 1) * (real ? mult.real_person : 1)));
+  const supported = (o) => pt.duration <= o.max_dur && (o.resolutions || ["720p"]).includes(res) && (!real || o.real_person);
   const pick = async (tier) => {
     setBusy(tier);
-    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: tier, app_url: window.location.origin } }); await onDone?.(); }
+    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: tier, resolution: res, real_person: real, app_url: window.location.origin } }); await onDone?.(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal memulai render video"); setBusy(""); }
   };
   const cancel = async () => { setBusy("cancel"); try { await api.post(`/conversations/${cid}/messages/${m.id}/cancel-tool`); await onDone?.(); } catch { setBusy(""); } };
   if (busy && busy !== "cancel") return <RenderingBox kind="video" dark={dark} aspect={pt.aspect_ratio} />;
+  const seg = (on) => `rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${on ? (dark ? "bg-white text-slate-900" : "bg-[#2F6BFF] text-white") : (dark ? "bg-white/10 hover:bg-white/15" : "bg-white hover:bg-slate-100")}`;
   return (
     <div data-testid="video-choice-card" className={`mt-2 rounded-xl border p-3 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-50" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
-      <p className="mb-2 flex items-center gap-1.5 font-semibold"><Clapperboard size={14} /> Video {pt.duration} detik{pt.aspect_ratio && pt.aspect_ratio !== "16:9" ? ` · ${ASPECT_LABEL[pt.aspect_ratio] || pt.aspect_ratio}` : ""} · pilih model <span className={`ml-auto flex items-center gap-1 font-normal ${dark ? "text-white/60" : "text-amber-700"}`}><Coins size={11} /> saldo {fmtCredits(pt.balance)}</span></p>
+      <p className="mb-2 flex items-center gap-1.5 font-semibold"><Clapperboard size={14} /> Video {pt.duration} detik{pt.aspect_ratio && pt.aspect_ratio !== "16:9" ? ` · ${ASPECT_LABEL[pt.aspect_ratio] || pt.aspect_ratio}` : ""} <span className={`ml-auto flex items-center gap-1 font-normal ${dark ? "text-white/60" : "text-amber-700"}`}><Coins size={11} /> saldo {fmtCredits(pt.balance)}</span></p>
+      <div className="mb-2 flex flex-wrap items-center gap-1.5" data-testid="video-res-picker">
+        <span className={`mr-1 ${dark ? "text-white/60" : "text-amber-700"}`}>Resolusi</span>
+        {RES_OPTS.map(([v, l, hint]) => <button key={v} type="button" onClick={() => setRes(v)} className={seg(res === v)} data-testid={`video-res-${v}`} title={`×${mult.res[v] ?? 1}`}>{l} <span className="font-normal opacity-70">{hint}</span></button>)}
+      </div>
+      {canReal && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5" data-testid="video-mode-picker">
+          <span className={`mr-1 ${dark ? "text-white/60" : "text-amber-700"}`}>Mode</span>
+          <button type="button" onClick={() => setReal(false)} className={seg(!real)} data-testid="video-mode-normal">Normal</button>
+          <button type="button" onClick={() => setReal(true)} className={`${seg(real)} flex items-center gap-1`} data-testid="video-mode-real"><UserRound size={11} /> Real person <span className="font-normal opacity-70">×{mult.real_person}</span></button>
+        </div>
+      )}
+      {real && (
+        <label className={`mb-2 flex cursor-pointer items-start gap-2 rounded-lg px-2.5 py-2 ${dark ? "bg-white/10" : "bg-white"}`} data-testid="video-consent">
+          <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" data-testid="video-consent-check" />
+          <span className="flex items-start gap-1.5"><ShieldCheck size={13} className="mt-0.5 shrink-0" /> Saya memiliki hak dan izin atas orang yang ada di gambar ini (wajib untuk mode real person).</span>
+        </label>
+      )}
       <div className="grid gap-2 sm:grid-cols-2">
         {(pt.options || []).map((o) => {
-          const ok = o.available && o.credits <= pt.balance;
+          const sup = supported(o); const cr = price(o); const ok = sup && cr <= pt.balance && (!real || consent);
           return (
             <button key={o.tier} type="button" disabled={!ok || !!busy} onClick={() => pick(o.tier)} data-testid={`video-choice-${o.tier}`}
               className={`flex flex-col items-start rounded-lg border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${dark ? "border-white/15 bg-white/10 hover:bg-white/15" : "border-[#2F6BFF]/30 bg-white hover:border-[#2F6BFF] hover:shadow-sm"}`}>
-              <span className="flex w-full items-center gap-1 font-bold">{o.label}<span className={`ml-auto font-black ${dark ? "text-white" : "text-[#2F6BFF]"}`}>±{fmtCredits(o.credits)} kredit</span></span>
-              <span className={`mt-0.5 ${dark ? "text-white/60" : "text-slate-500"}`}>{fmtCredits(o.per_sec)} kredit/detik{!o.available ? ` · maks ${o.max_dur} dtk` : o.credits > pt.balance ? " · saldo tidak cukup" : ""}</span>
+              <span className="flex w-full items-center gap-1 font-bold">{o.label}<span className={`ml-auto font-black ${dark ? "text-white" : "text-[#2F6BFF]"}`}>±{fmtCredits(cr)} kredit</span></span>
+              <span className={`mt-0.5 ${dark ? "text-white/60" : "text-slate-500"}`}>{fmtCredits(cr / pt.duration)} kredit/detik · {res}{real ? " · real person" : ""}
+                {!sup ? (pt.duration > o.max_dur ? ` · maks ${o.max_dur} dtk` : real && !o.real_person ? " · tidak ada mode real person" : ` · tidak ada ${res}`) : cr > pt.balance ? " · saldo tidak cukup" : real && !consent ? " · centang izin dulu" : ""}</span>
             </button>
           );
         })}

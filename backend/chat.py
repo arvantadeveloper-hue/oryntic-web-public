@@ -452,7 +452,7 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in. Never switch to another language unless the user themselves writes in a different language."]
     parts.append(f"You are '{persona['name']}', an AI persona. {prof.get('system_instructions','')}")
     parts += persona_block(persona["name"], lang_name, voice_mode)
-    parts.append(f"VIDEO PRICING (platform credits, from the admin price list): {await video_pricing_text()}; default clip {seedance.DEFAULT_DUR} s, Seedance 2.0 up to 15 s, Seedance 2.5 up to 30 s. "
+    parts.append(f"VIDEO PRICING (platform credits, from the admin price list): {await video_pricing_text()}; default clip {seedance.DEFAULT_DUR} s at 720p, Seedance 2.0 up to 15 s, Seedance 2.5 up to 30 s; resolution 480p (hemat, ×{seedance.multipliers()['res'].get('480p')}) / 720p / 1080p (tajam, ×{seedance.multipliers()['res'].get('1080p')}); real-person mode (Seedance 2.0, image-to-video only, ×{seedance.multipliers()['real_person']}). "
                  "Rendered videos are saved to the user's Google Drive (must be connected). When the user asks how much a video / Seedance costs, quote exactly these credits per second and the total for their duration.")
     parts.append("CAPABILITIES: You CAN create and show images (photorealistic photos, renders, illustrations, logos, posters), short videos/clips and downloadable documents directly in this chat — the platform renders them for you automatically whenever the user asks. NEVER say you cannot render, generate, display or send images or videos. If the user asks for one and it has not appeared yet, simply say briefly that you are preparing it.")
     pers = prof.get("personality", {})
@@ -677,13 +677,15 @@ async def _run_video_bg(mid: str, cid: str, uid: str, persona_id: Optional[str],
     try:
         image_url = public_media_url(app_base, pt["reference_path"]) if pt.get("reference_path") and app_base else None
         aspect = pt.get("aspect_ratio") if pt.get("aspect_ratio") in seedance.ASPECTS else "16:9"
-        gen = await seedance.generate(prompt, tier, duration, aspect_ratio=aspect, image_url=image_url)
+        res = pt.get("resolution") if pt.get("resolution") in seedance.RESOLUTIONS else "720p"
+        rp = bool(pt.get("real_person")) and bool(image_url)
+        gen = await seedance.generate(prompt, tier, duration, aspect_ratio=aspect, resolution=res, image_url=image_url, real_person=rp, consent_ref=f"oryntix-{uid[:8]}-{mid[:8]}")
         data = await seedance.download(gen["video_url"])
-        title = f"Oryntix video - {(request or prompt)[:50].strip()} ({seedance.TIERS[tier]['label']}, {duration}s, {pt.get('aspect_ratio') or '16:9'}).mp4"
+        title = f"Oryntix video - {(request or prompt)[:50].strip()} ({seedance.TIERS[tier]['label']}, {duration}s, {pt.get('aspect_ratio') or '16:9'}, {pt.get('resolution') or '720p'}).mp4"
         f = await drive_save(uid, title, kind="file", data=data, mime="video/mp4", source={"kind": "video", "conversation_id": cid, "message_id": mid, "tier": tier})
-        credits = seedance.quote(tier, duration)
-        await record_usage(uid, "video_generation", credits, {"conversation_id": cid, "persona_id": persona_id, "tier": tier, "duration": duration, "provider_credits": gen.get("provider_credits")})
-        media = {"type": "video", "name": f["name"], "drive_id": f["drive_id"], "link": f.get("link"), "prompt": prompt[:400], "request": request[:300], "tier": tier, "duration": duration, "aspect_ratio": aspect}
+        credits = seedance.quote(tier, duration, res, rp)
+        await record_usage(uid, "video_generation", credits, {"conversation_id": cid, "persona_id": persona_id, "tier": tier, "duration": duration, "resolution": res, "real_person": rp, "provider_credits": gen.get("provider_credits")})
+        media = {"type": "video", "name": f["name"], "drive_id": f["drive_id"], "link": f.get("link"), "prompt": prompt[:400], "request": request[:300], "tier": tier, "duration": duration, "aspect_ratio": aspect, "resolution": res, "real_person": rp}
         if pt.get("reference_path"):
             media["animated_from"] = pt["reference_path"]
         upd = {"content": VIDEO_DONE_TEXT, "media": [media], "tool": "video", "credits": credits, "rendering": None}
@@ -703,10 +705,12 @@ async def video_offer(user: dict, cid: str, plan: dict, user_text: str) -> tuple
     prompt = (plan.get("video_prompt") or user_text).strip()
     ref = await _latest_media(cid, "image") if plan.get("from_image") else None
     aspect = plan.get("aspect_ratio") if plan.get("aspect_ratio") in seedance.ASPECTS else "16:9"
+    resolution = plan.get("resolution") if plan.get("resolution") in seedance.RESOLUTIONS else "720p"
+    real_person = bool(plan.get("real_person")) and bool(ref)
     if not seedance.configured():
         return "Fitur render video belum diaktifkan oleh admin platform (API key Seedance belum diatur). Coba lagi nanti ya.", {"tool": "video", "error": True}
     await pricing_refresh()
-    opts = seedance.options(duration)
+    opts = seedance.options(duration, resolution, real_person)
     balance = await _owner_balance(user)
     if not await drive_connected(user["id"]):
         est = " atau ".join(f"{o['label']} ±{_fmt_credits(o['credits'])} kredit" for o in opts if o["available"])
@@ -719,16 +723,18 @@ async def video_offer(user: dict, cid: str, plan: dict, user_text: str) -> tuple
         text = (f"Untuk video {duration} detik butuh " + " atau ".join(f"±{_fmt_credits(o['credits'])} kredit ({o['label']})" for o in avail)
                 + f", sedangkan saldo kredit kamu {_fmt_credits(balance)}. Tambah kredit dulu ya, nanti aku langsung render. 🙏")
         return text, {"tool": "video", "error": True, "cta": {"label": "Tambah Kredit", "href": "/wallet"}}
-    lines = [f"**{o['label']}** ±{_fmt_credits(o['per_sec'])} kredit/detik → ±{_fmt_credits(o['credits'])} kredit untuk {duration} detik"
-             + ("" if o["credits"] <= balance else " _(saldo tidak cukup)_") for o in avail]
+    mult = seedance.multipliers()
+    lines = [f"**{o['label']}** ±{_fmt_credits(o['per_sec'] * mult['res'].get(resolution, 1) * (mult['real_person'] if real_person else 1))} kredit/detik → ±{_fmt_credits(o['credits'])} kredit untuk {duration} detik"
+             + ("" if o["credits"] <= balance else " *(saldo tidak cukup)*") for o in avail]
     skipped = [o for o in opts if not o["available"]]
-    fmt = f" format {seedance.ASPECTS[aspect]}" if aspect != "16:9" else ""
+    fmt = (f" format {seedance.ASPECTS[aspect]}" if aspect != "16:9" else "") + (f", {seedance.RESOLUTIONS[resolution]}" if resolution != "720p" else "") + (", mode real person" if real_person else "")
     intro = (f"Siap, aku animasikan gambar terakhir jadi video {duration} detik{fmt}. 🎬 Mau pakai model yang mana?" if ref
              else f"Siap, videonya {duration} detik{fmt}. 🎬 Mau pakai model yang mana?")
     text = (f"{intro}\n\n" + "\n".join(f"- {l}" for l in lines)
-            + (f"\n\n_{skipped[0]['label']} maksimal {skipped[0]['max_dur']} detik, jadi tidak tersedia untuk durasi ini._" if skipped else "")
-            + f"\n\nSaldo kredit kamu: {_fmt_credits(balance)}. Pilih salah satu di bawah ya.")
-    pt = {"kind": "video", "prompt": prompt, "duration": duration, "aspect_ratio": aspect, "options": opts, "balance": balance, "request": user_text[:300]}
+            + "".join(f"\n\n*{o['label']} tidak tersedia: " + (f"maksimal {o['max_dur']} detik" if duration > o["max_dur"] else "tidak mendukung mode real person" if real_person and not o["real_person"] else f"tidak mendukung {resolution}") + ".*" for o in skipped)
+            + f"\n\nSaldo kredit kamu: {_fmt_credits(balance)}. Pilih resolusi dan model di bawah ya.")
+    pt = {"kind": "video", "prompt": prompt, "duration": duration, "aspect_ratio": aspect, "resolution": resolution, "real_person": real_person,
+          "multipliers": mult, "options": opts, "balance": balance, "request": user_text[:300]}
     if ref:
         pt["reference_path"] = ref["path"]
     return text, {"pending_tool": pt}
@@ -911,6 +917,8 @@ class VoiceVideoIn(BaseModel):
     prompt: str = Field(min_length=1, max_length=2000)
     duration: int = Field(default=5, ge=3, le=30)
     aspect_ratio: str = Field(default="16:9", max_length=8)
+    resolution: str = Field(default="720p", max_length=8)
+    real_person: bool = False
     from_image: bool = False
     request: str = Field(default="", max_length=300)
 
@@ -945,7 +953,7 @@ async def voice_image(cid: str, x: VoiceImageIn, u: dict = Depends(current_user)
 async def voice_video(cid: str, x: VoiceVideoIn, u: dict = Depends(current_user)):
     """Voice-call tool: post the Seedance 2.0/2.5 choice card (or the Drive/credits notice) to the chat panel; the user taps a model there."""
     persona = await _voice_persona(cid, u)
-    text, extra = await video_offer(u, cid, {"video_prompt": x.prompt, "duration": x.duration, "aspect_ratio": x.aspect_ratio, "from_image": x.from_image}, x.request or x.prompt)
+    text, extra = await video_offer(u, cid, {"video_prompt": x.prompt, "duration": x.duration, "aspect_ratio": x.aspect_ratio, "resolution": x.resolution, "real_person": x.real_person, "from_image": x.from_image}, x.request or x.prompt)
     msg = await _save_ai_msg(cid, persona, text, 0, "text", {**extra, "tool": extra.get("tool", "video")})
     await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"], "message": clean(msg)})
     pt = extra.get("pending_tool")
@@ -1621,7 +1629,7 @@ async def _pending_msg(cid: str, mid: str, u: dict) -> dict:
 
 
 @router.post("/conversations/{cid}/messages/{mid}/run-tool")
-async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Optional[str] = None, u: dict = Depends(current_user)):
+async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Optional[str] = None, resolution: Optional[str] = None, real_person: bool = False, u: dict = Depends(current_user)):
     msg = await _pending_msg(cid, mid, u)
     over = await quota_exceeded(u)
     if over:
@@ -1639,13 +1647,15 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
         await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
         return {**msg, **upd, "pending_tool": None}
     if pt.get("kind") == "video":
-        opt = next((o for o in pt.get("options") or [] if o["tier"] == choice and o.get("available")), None)
+        duration = int(pt["duration"])
+        res = resolution if resolution in seedance.RESOLUTIONS else (pt.get("resolution") or "720p")
+        rp = bool(real_person) and bool(pt.get("reference_path"))
+        opt = next((o for o in pt.get("options") or [] if o["tier"] == choice and seedance.supports(o["tier"], duration, res, rp)), None)
         if not opt:
             await db.messages.update_one({"id": mid}, {"$unset": {"pending_tool.running": ""}})
-            raise HTTPException(400, "Pilih model video dulu (Seedance 2.0 atau 2.5)")
-        duration = int(pt["duration"])
+            raise HTTPException(400, "Kombinasi model/resolusi/mode ini tidak tersedia — pilih yang lain")
         await pricing_refresh()
-        need = seedance.quote(opt["tier"], duration)
+        need = seedance.quote(opt["tier"], duration, res, rp)
         if await _owner_balance(u) < need:
             await db.messages.update_one({"id": mid}, {"$unset": {"pending_tool.running": ""}})
             raise HTTPException(402, f"Saldo kredit tidak cukup: butuh ±{need} kredit untuk {opt['label']} {duration} detik")
@@ -1653,10 +1663,10 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
         if not await drive_connected(u["id"]):
             await db.messages.update_one({"id": mid}, {"$unset": {"pending_tool.running": ""}})
             raise HTTPException(400, "Hubungkan Google Drive dulu — video disimpan ke Drive kamu")
-        upd = {"content": VIDEO_WAIT_TEXT.replace("render videonya", f"render videonya dengan {opt['label']}"), "tool": "video", "rendering": "video", "aspect_ratio": pt.get("aspect_ratio") or "16:9"}
+        upd = {"content": VIDEO_WAIT_TEXT.replace("render videonya", f"render videonya dengan {opt['label']} {res}{' mode real person' if rp else ''}"), "tool": "video", "rendering": "video", "aspect_ratio": pt.get("aspect_ratio") or "16:9"}
         await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
         await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
-        asyncio.create_task(_run_video_bg(mid, cid, u["id"], msg.get("persona_id"), {**pt, "tier": opt["tier"]}, (app_url or "").rstrip("/")))
+        asyncio.create_task(_run_video_bg(mid, cid, u["id"], msg.get("persona_id"), {**pt, "tier": opt["tier"], "resolution": res, "real_person": rp, "credits": need}, (app_url or "").rstrip("/")))
         return {**msg, **upd, "pending_tool": None}
     if pt.get("kind") == "image_set" and len(pt.get("prompts") or []) > 1:
         persona = await db.personas.find_one({"id": msg.get("persona_id")}, {"_id": 0, "id": 1, "name": 1}) or {"id": msg.get("persona_id"), "name": msg.get("persona_name") or "Asisten"}
