@@ -184,7 +184,39 @@ async def discuss_task(tid: str, x: DiscussIn, u: dict = Depends(current_user)):
             await db.conversations.insert_one(dict(conv))
     await db.conversations.update_one({"id": conv["id"]}, {"$set": {"task_id": tid, "updated_at": now_iso()}})
     await db.tasks.update_one({"id": tid}, {"$addToSet": {"conversation_ids": conv["id"]}})
+    await _quote_task_into_chat(conv, t, u, team, x.mode)
     return {"conversation_id": conv["id"], "open_call": x.mode in ("call", "meeting")}
+
+
+async def _quote_task_into_chat(conv: dict, t: dict, u: dict, team: list, mode: str) -> None:
+    """Drop the Workspace document into the chat as a quoted message, then the assistant confirms it has read the FULL content (so revisions can start right away)."""
+    from chat import _persona_system, _save_ai_msg
+    from llm import llm_text, record_usage, text_credits
+    from auth import lang_rule
+    from realtime import notify
+    body = (t.get("final_output") or "").strip()
+    excerpt = body.replace("#", "").replace("**", "").strip()[:400] or "(belum ada hasil)"
+    user_msg = {"id": new_id(), "conversation_id": conv["id"], "role": "user", "sender_user_id": u["id"], "sender_name": u.get("name") or "User", "created_at": now_iso(),
+                "content": "Ini dokumen dari Ruang Kerja. Tolong baca isinya secara lengkap; kalau nanti saya minta revisi, langsung ubah dan simpan versi barunya.",
+                "reply_to": {"id": t["id"], "name": f"Ruang Kerja · {t.get('goal') or 'Dokumen'} (v{t.get('version') or 1})", "content": excerpt, "link": f"/workspace/{t['id']}"},
+                "attachments": [{"type": "file", "name": (t.get("goal") or "Dokumen")[:80], "task_id": t["id"]}], "task_quote": True}
+    await db.messages.insert_one(dict(user_msg))
+    await notify(conv["id"], {"type": "message", "role": "user", "sender_name": user_msg["sender_name"], "message": clean(user_msg)})
+    if mode != "chat" or not team or not body:
+        return
+    persona = await db.personas.find_one({"id": team[0]["id"]}, {"_id": 0}) or team[0]
+    system = (await _persona_system(persona, u, None) +
+              "\n\nThe user just dropped a Workspace document into this chat (full text below). Reply in 2-4 short sentences: confirm you have read it, name its title and the 2-3 key points it contains, "
+              "and say they can ask for any revision and you will update it directly in the Workspace. No long summary, no list.\n\n" + lang_rule(u))
+    prompt = f"WORKSPACE DOCUMENT (version {t.get('version') or 1}) — '{t.get('goal')}':\n{body[:24000]}"
+    try:
+        text = await llm_text(system, prompt, persona.get("model"))
+    except Exception:
+        text = f"Dokumen **{t.get('goal')}** sudah saya baca. Sebutkan saja bagian yang mau direvisi, nanti langsung saya ubah dan simpan di Ruang Kerja."
+    used = text_credits(prompt, text, persona.get("model"))
+    if used:
+        await record_usage(u["id"], "chat", used, {"conversation_id": conv["id"], "persona_id": persona.get("id"), "task_id": t["id"]})
+    await _save_ai_msg(conv["id"], persona, text, used, "text", {"task_id": t["id"]})
 
 
 class AddPersonaIn(BaseModel):

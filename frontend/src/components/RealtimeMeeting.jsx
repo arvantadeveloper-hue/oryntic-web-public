@@ -313,7 +313,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
       case "output_audio_buffer.cleared":
         finishedSpeaking(s.callId); break;
       case "error":
-        if (!["response_cancel_not_active", "item_not_found"].includes(ev.error?.code) && !/item/i.test(ev.error?.message || "")) toast.error(ev.error?.message || "Realtime error");
+        if (!["response_cancel_not_active", "item_not_found", "conversation_already_has_active_response"].includes(ev.error?.code) && !/item/i.test(ev.error?.message || "")) toast.error(ev.error?.message || "Realtime error");
         break;
       default: break;
     }

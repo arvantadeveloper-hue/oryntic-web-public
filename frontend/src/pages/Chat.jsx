@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Send, Search, Trash2, RefreshCw, Users, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink, HardDrive, Reply, Forward, CornerUpLeft } from "lucide-react";
+import { Send, Search, Trash2, RefreshCw, Users, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, ClipboardList, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink, HardDrive, Reply, Forward, CornerUpLeft } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -420,7 +420,9 @@ export default function Chat() {
                     : a.path
                     ? <a key={k} href={downloadUrl(a.path)} target="_blank" rel="noreferrer" download={a.name} className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs underline-offset-2 hover:underline" data-testid="att-link-file">{a.kind === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}<ExternalLink size={10} /></a>
                     : <span key={k} className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs">{a.type === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}</span>)}</div>}
-                  {m.reply_to?.content && <div className="mb-2 rounded-lg border-l-2 border-white/70 bg-white/15 px-2.5 py-1.5 text-xs" data-testid="msg-quote"><p className="font-semibold">{m.reply_to.name || "Asisten"}</p><p className="line-clamp-2 opacity-90">{m.reply_to.content}</p></div>}
+                  {m.reply_to?.content && (m.reply_to.link
+                    ? <button onClick={() => nav(m.reply_to.link)} className="mb-2 block w-full rounded-lg border-l-2 border-white/70 bg-white/15 px-2.5 py-1.5 text-left text-xs transition hover:bg-white/25" data-testid="msg-quote-task" title="Buka di Ruang Kerja"><p className="flex items-center gap-1 font-semibold"><ClipboardList size={11} /> {m.reply_to.name}</p><p className="line-clamp-3 opacity-90">{m.reply_to.content}</p></button>
+                    : <div className="mb-2 rounded-lg border-l-2 border-white/70 bg-white/15 px-2.5 py-1.5 text-xs" data-testid="msg-quote"><p className="font-semibold">{m.reply_to.name || "Asisten"}</p><p className="line-clamp-2 opacity-90">{m.reply_to.content}</p></div>)}
                   {m.forwarded && <p className="mb-1 flex items-center gap-1 text-[11px] italic opacity-80" data-testid="msg-forwarded"><Forward size={11} /> Diteruskan</p>}
                   <p className="whitespace-pre-wrap">{m.content}</p>
                 </div>

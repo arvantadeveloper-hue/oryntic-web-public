@@ -56,6 +56,15 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
   const secs = () => (startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0);
 
   const send = (ev) => { try { if (dcRef.current?.readyState === "open") dcRef.current.send(JSON.stringify(ev)); } catch (e) {} };
+  // one active response per session: queue response.create while one runs, flush on response.done
+  const respActiveRef = useRef(false);
+  const respQueueRef = useRef([]);
+  const lastRespRef = useRef(null);
+  const createResponse = (ev = { type: "response.create" }) => {
+    if (respActiveRef.current) { respQueueRef.current.push(ev); return; }
+    lastRespRef.current = ev; send(ev);
+  };
+  const flushResponses = () => { const next = respQueueRef.current.shift(); if (next) { lastRespRef.current = next; send(next); } };
   const saveTranscript = (role, content) => {
     if (!callIdRef.current || !content.trim()) return;
     api.post(`/realtime/calls/${callIdRef.current}/transcript`, { role, content }).then(() => onRefresh && onRefresh()).catch(() => {});
@@ -93,7 +102,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       send({ type: "conversation.item.create", item: { id: itemId, type: "message", role: "user", content: [
         { type: "input_image", image_url: img, detail: "low" },
         { type: "input_text", text: `[${user?.name || "User"} shows you a snapshot of their shared screen. Look at it and comment briefly in 2-4 spoken sentences on what is relevant; ask if they want details.]` }] } });
-      send({ type: "response.create", response: { instructions: "The user just showed you a screenshot of their screen. Describe what matters on it briefly and respond to it." } });
+      createResponse({ type: "response.create", response: { instructions: "The user just showed you a screenshot of their screen. Describe what matters on it briefly and respond to it." } });
       setPhase("thinking");
       setSnaps((s) => ({ n: s.n + 1, credits: s.credits + (r.data.credits || 0), busy: false }));
     } catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengirim cuplikan"); setSnaps((s) => ({ ...s, busy: false })); }
@@ -123,6 +132,8 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       case "session.created":
       case "session.updated":
         setPhase((p) => (p === "connecting" ? "listening" : p)); break;
+      case "response.created":
+        respActiveRef.current = true; break;
       case "input_audio_buffer.speech_started":
         confirmInterrupt(); break;
       case "input_audio_buffer.speech_stopped":
@@ -151,16 +162,19 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
           if (out.ok && ev.name === "assign_task") toast.success(`Tugas dicatat ke Ruang Kerja (${out.when})`);
           if (out.ok && ev.name === "search_workspace") { toast.success(`${out.count} hasil Ruang Kerja dikirim ke chat`); onRefresh && onRefresh(); }
           send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: ev.call_id, output: JSON.stringify(out) } });
-          send({ type: "response.create", response: { instructions: "In one casual spoken sentence, tell the user what you just did (from the tool result). No follow-up question unless needed." } });
+          createResponse({ type: "response.create", response: { instructions: "In one casual spoken sentence, tell the user what you just did (from the tool result). No follow-up question unless needed." } });
         });
         break;
       }
       case "response.done":
+        respActiveRef.current = false; flushResponses();
         if (snapshotItemRef.current) { send({ type: "conversation.item.delete", item_id: snapshotItemRef.current }); snapshotItemRef.current = null; }
         flushLive();
         prunerRef.current?.prune();
         setPhase((p) => (p === "user_speaking" ? p : "listening")); break;
       case "error":
+        if (ev.error?.code === "conversation_already_has_active_response") { respActiveRef.current = true; if (lastRespRef.current) respQueueRef.current.unshift(lastRespRef.current); break; }
+        if (ev.error?.code === "response_cancel_not_active") break;
         if (!/item/i.test(ev.error?.message || "")) toast.error(ev.error?.message || "Realtime error"); break;
       default: break;
     }
@@ -186,7 +200,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       dc.onopen = () => {
         startedAtRef.current = Date.now(); setPhase("listening");
         // the user opens the conversation; the assistant only speaks first when IT is calling (reminder delivery)
-        if (opening) send({ type: "response.create" });
+        if (opening) createResponse();
         tickRef.current = setInterval(async () => {
           try { await api.post(`/realtime/calls/${callIdRef.current}/tick`, { elapsed_seconds: secs() }); onRefresh && onRefresh(); }
           catch (e) { if (e?.response?.status === 402) { toast.error(e.response.data?.detail || "Kredit habis"); hangup(); } }
@@ -220,6 +234,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
 
   // user truly barged in (sustained voice near the mic) → stop the assistant mid-sentence
   const userInterrupted = () => {
+    respQueueRef.current = [];
     if (["speaking", "thinking"].includes(phaseRef.current)) { send({ type: "response.cancel" }); send({ type: "output_audio_buffer.clear" }); }
     liveRef.current = ""; setLive(""); setPhase("user_speaking");
   };

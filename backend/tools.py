@@ -345,7 +345,7 @@ async def revise_with_llm(task: dict, request: str, system: str, model_key: Opti
     sys = system + ("\n\nYou are REVISING a workspace deliverable. Output the COMPLETE revised document in markdown (keep everything that was "
                     "not asked to change), then on the very last line write exactly: RINGKASAN PERUBAHAN: <1-2 sentences>. Keep the document in the user's language "
                     "per the LANGUAGE RULE above — never translate it to another language unless the revision request explicitly asks for that.")
-    prompt = f"CURRENT DOCUMENT:\n{(task.get('final_output') or '')[:15000]}\n\nREVISION REQUEST: {request}"
+    prompt = f"CURRENT DOCUMENT:\n{(task.get('final_output') or '')[:40000]}\n\nREVISION REQUEST: {request}"
     out = await llm_text(sys, prompt, model_key)
     summary = ""
     if "RINGKASAN PERUBAHAN:" in out:

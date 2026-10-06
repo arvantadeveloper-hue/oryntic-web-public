@@ -66,7 +66,7 @@ export class RealtimeSession {
     if (this.sendAudio && this.stream) this.stream.getTracks().forEach((t) => pc.addTrack(t, this.stream));
     else pc.addTransceiver("audio", { direction: "recvonly" });
     const dc = pc.createDataChannel("oai-events"); this.dc = dc;
-    dc.onmessage = (e) => { try { const ev = JSON.parse(e.data); reportUsage(this.callId, ev); this.pruner.onEvent(ev); this.onEvent(this, ev); } catch (err) {} };
+    dc.onmessage = (e) => { try { const ev = JSON.parse(e.data); reportUsage(this.callId, ev); this.pruner.onEvent(ev); this._track(ev); this.onEvent(this, ev); } catch (err) {} };
     pc.onconnectionstatechange = () => { if (["failed", "disconnected", "closed"].includes(pc.connectionState) && !this.closed) this.onError?.(this, new Error("connection lost")); };
     const opened = new Promise((resolve) => { dc.onopen = resolve; });
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
@@ -97,9 +97,23 @@ export class RealtimeSession {
 
   send(ev) { try { if (this.dc?.readyState === "open") this.dc.send(JSON.stringify(ev)); } catch (e) {} }
 
-  respond(instructions) { this.send({ type: "response.create", ...(instructions ? { response: { instructions } } : {}) }); }
+  // OpenAI allows one active response per session: queue response.create while one is running, flush on response.done.
+  _track(ev) {
+    if (ev.type === "response.created") this.active = true;
+    else if (ev.type === "response.done") { this.active = false; this._flush(); }
+    else if (ev.type === "error" && ev.error?.code === "conversation_already_has_active_response") { this.active = true; if (this._last) this.pending = [this._last, ...(this.pending || [])]; }
+  }
+  _flush() {
+    const next = (this.pending || []).shift();
+    if (next) { this._last = next; this.send(next); }
+  }
+  respond(instructions) {
+    const ev = { type: "response.create", ...(instructions ? { response: { instructions } } : {}) };
+    if (this.active) { (this.pending = this.pending || []).push(ev); return; }
+    this._last = ev; this.send(ev);
+  }
 
-  cancel() { this.send({ type: "response.cancel" }); this.send({ type: "output_audio_buffer.clear" }); }
+  cancel() { this.pending = []; this.send({ type: "response.cancel" }); this.send({ type: "output_audio_buffer.clear" }); }
 
   inject(text) { this.send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } }); }
 

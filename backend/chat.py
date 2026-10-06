@@ -41,7 +41,7 @@ async def _gallery_task_context(a: dict, user_id: str) -> Optional[str]:
     t = await db.tasks.find_one({"id": a["task_id"]}, {"_id": 0, "goal": 1, "final_output": 1, "workspace_id": 1, "user_id": 1})
     if not t or not (t.get("user_id") == user_id or await _same_workspace(user_id, t.get("workspace_id") or "")):
         return None
-    return f"[Dokumen Galeri '{t.get('goal') or a.get('name', 'berkas')}' (/workspace/{a['task_id']})]:\n{(t.get('final_output') or '')[:6000]}"
+    return f"[Dokumen Galeri '{t.get('goal') or a.get('name', 'berkas')}' (/workspace/{a['task_id']})]:\n{(t.get('final_output') or '')[:20000]}"
 
 
 def _blob_text(data: bytes, path: str, name: str) -> str:
@@ -1126,7 +1126,7 @@ async def _prepare_ctx(ctx: ReplyCtx) -> ReplyCtx:
     if conv.get("task_id"):
         ctx.task = await db.tasks.find_one({"id": conv["task_id"]}, {"_id": 0})
         if ctx.task:
-            ctx.system += TASK_CONTEXT.format(tid=ctx.task["id"], ver=ctx.task.get("version") or 1, status=ctx.task.get("status"), goal=ctx.task.get("goal"), body=(ctx.task.get("final_output") or "(belum ada hasil)")[:6000])
+            ctx.system += TASK_CONTEXT.format(tid=ctx.task["id"], ver=ctx.task.get("version") or 1, status=ctx.task.get("status"), goal=ctx.task.get("goal"), body=(ctx.task.get("final_output") or "(belum ada hasil)")[:24000])
     return ctx
 
 
