@@ -525,3 +525,4 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 
 ## Update 2026-06 — Dokumen Rencana Pengembangan Mobile
 - `scripts/gen_mobile_plan.py` (pakai helper `gen_docs.py`) → `frontend/public/docs/Oryntix_Mobile_Development_Plan.docx` (14 bab: ringkasan, tujuan, keputusan teknologi Expo/EAS/WebRTC/FCM/RevenueCat, arsitektur & struktur direktori, peta jalan Tahap 0–6 dengan fitur/endpoint/DoD, jadwal 16 minggu, tim, QA, kredensial, risiko, metrik, Lampiran A problem statement siap tempel, B tipe TS, C format SSE). Diakses di `/docs/Oryntix_Mobile_Development_Plan.docx`.
+- `scripts/gen_mobile_prompt.py` → `frontend/public/docs/Oryntix_Mobile_Prompt_Emergent.docx` + `.md`: PROMPT siap tempel ke job Emergent baru (konteks, 10 aturan wajib, tabel kontrak API 13 modul, Tahap 0–6 dengan instruksi & uji, tipe TS, kredensial per tahap, 7 kriteria penerimaan, instruksi mulai dari Tahap 0).
