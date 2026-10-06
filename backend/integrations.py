@@ -7,13 +7,13 @@ import re
 import time
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import httpx
 import jwt
 from cryptography.fernet import Fernet
 from db import db, now_iso, new_id
-from auth import current_user, JWT_SECRET, app_url
+from auth import current_user, current_user_q, JWT_SECRET, app_url
 from ratelimit import get_limits
 
 # Integrations hub. Stage 1: Google Drive / Docs / Sheets with the least-privilege `drive.file` scope:
@@ -401,6 +401,27 @@ async def content(file_id: str, u: dict = Depends(current_user)):
     out = await drive_content(u["id"], file_id)
     out.pop("image_b64", None)
     return {**out, "text": (out.get("text") or "")[:20000]}
+
+
+@router.get("/google/media/{file_id}")
+async def media(file_id: str, u: dict = Depends(current_user_q)):
+    """Stream a Drive file (e.g. a rendered video) through the API so <video> can play it without making the file public."""
+    tk = await access_token(u["id"])
+    client = httpx.AsyncClient(timeout=300)
+    req = client.build_request("GET", f"{DRIVE}/files/{file_id}", params={"alt": "media"}, headers={"Authorization": f"Bearer {tk}"})
+    r = await client.send(req, stream=True)
+    if r.status_code >= 400:
+        await r.aclose(); await client.aclose()
+        raise HTTPException(r.status_code if r.status_code in (401, 403, 404) else 400, "Berkas Drive tidak dapat diakses")
+
+    async def body():
+        try:
+            async for chunk in r.aiter_bytes(256 * 1024):
+                yield chunk
+        finally:
+            await r.aclose(); await client.aclose()
+    headers = {k: v for k, v in r.headers.items() if k.lower() in ("content-length", "content-type", "accept-ranges")}
+    return StreamingResponse(body(), status_code=200, headers=headers, media_type=r.headers.get("content-type", "video/mp4"))
 
 
 @router.post("/google/save")

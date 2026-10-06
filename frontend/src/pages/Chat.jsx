@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink, HardDrive } from "lucide-react";
+import { Send, Search, Trash2, RefreshCw, Users, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink, HardDrive, Reply, Forward, CornerUpLeft } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -10,7 +10,7 @@ import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
 import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
-import { MediaList, ToolRequestCard, ModelBadge, RenderingBox, downloadUrl } from "../components/MessageExtras";
+import { MediaList, ToolRequestCard, ModelBadge, RenderingBox, MessageCta, downloadUrl } from "../components/MessageExtras";
 import { GalleryPicker } from "../components/GalleryPicker";
 import { DrivePicker } from "../components/DrivePicker";
 import { SummaryPrompt } from "../components/ConversationTools";
@@ -72,6 +72,8 @@ export default function Chat() {
   const [picked, setPicked] = useState([]);
   const [mode, setMode] = useState("chat");
   const [attachments, setAttachments] = useState([]);
+  const [replyTo, setReplyTo] = useState(null);
+  const [forwardMsg, setForwardMsg] = useState(null);
   const [recording, setRecording] = useState(false);
   const [speaker, setSpeaker] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
@@ -244,10 +246,10 @@ export default function Chat() {
 
   const send = async () => {
     if ((!input.trim() && attachments.length === 0) || !id || cooldown > 0) return;
-    const text = input; const atts = attachments;
+    const text = input; const atts = attachments; const quote = replyTo;
     const reqId = Date.now().toString(36);
-    setInput(""); setAttachments([]);
-    setMessages((m) => [...m, { id: "tmp-u-" + reqId, role: "user", content: text, created_at: new Date().toISOString(), attachments: atts.map((a) => ({ type: a.type, name: a.name })) }]);
+    setInput(""); setAttachments([]); setReplyTo(null);
+    setMessages((m) => [...m, { id: "tmp-u-" + reqId, role: "user", content: text, reply_to: quote || undefined, created_at: new Date().toISOString(), attachments: atts.map((a) => ({ type: a.type, name: a.name })) }]);
     setActiveStreams((n) => n + 1);
     const key = (pid) => `${reqId}:${pid}`;
     const keys = new Set();
@@ -263,7 +265,7 @@ export default function Chat() {
         if (ev.final && speaker && ev.content) playTTS(ev.content, ev.voice);
         if (ev.summary_request) setSummaryRequest(true);
         if (ev.done) refreshUser();
-      });
+      }, quote ? { reply_to: quote } : {});
       if (!convWs.current || convWs.current.readyState !== 1) { const r = await api.get(`/conversations/${id}/messages?limit=50`); applyPage(r.data); }
       loadConvs();
     } catch (e) {
@@ -281,9 +283,6 @@ export default function Chat() {
 
   const delConv = async (c, e) => { e.stopPropagation(); await api.delete(`/conversations/${c.id}`); loadConvs(); if (c.id === id) nav("/chat"); };
   const refreshMsgs = () => { refreshUser(); return api.get(`/conversations/${id}/messages?limit=50`).then((r) => applyPage(r.data)).catch(() => {}); };
-  const copy = (txt) => { navigator.clipboard.writeText(txt); toast.success("Disalin"); };
-  const saveMem = async (m) => { await api.post("/memory", { persona_id: m.persona_id || conv?.persona_id || null, content: m.content.slice(0, 300) }); toast.success("Disimpan ke memori"); };
-  const regen = async (mid) => { setActiveStreams((n) => n + 1); try { await api.post(`/conversations/${id}/messages/${mid}/regenerate`); const mr = await api.get(`/conversations/${id}/messages?limit=50`); applyPage(mr.data); refreshUser(); } catch (e) { toast.error("Gagal"); } finally { setActiveStreams((n) => Math.max(0, n - 1)); } };
 
   const [savingNotes, setSavingNotes] = useState(false);
   const saveNotes = async () => {
@@ -409,6 +408,8 @@ export default function Chat() {
                     : a.path
                     ? <a key={k} href={downloadUrl(a.path)} target="_blank" rel="noreferrer" download={a.name} className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs underline-offset-2 hover:underline" data-testid="att-link-file">{a.kind === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}<ExternalLink size={10} /></a>
                     : <span key={k} className="flex items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-xs">{a.type === "image" ? <ImageIcon size={11} /> : <FileText size={11} />}{a.name}</span>)}</div>}
+                  {m.reply_to?.content && <div className="mb-2 rounded-lg border-l-2 border-white/70 bg-white/15 px-2.5 py-1.5 text-xs" data-testid="msg-quote"><p className="font-semibold">{m.reply_to.name || "Asisten"}</p><p className="line-clamp-2 opacity-90">{m.reply_to.content}</p></div>}
+                  {m.forwarded && <p className="mb-1 flex items-center gap-1 text-[11px] italic opacity-80" data-testid="msg-forwarded"><Forward size={11} /> Diteruskan</p>}
                   <p className="whitespace-pre-wrap">{m.content}</p>
                 </div>
               </div>
@@ -423,16 +424,15 @@ export default function Chat() {
                     <MediaList media={m.media || []} />
                     {m.task_id && <TaskCard m={m} onOpen={setPanelTask} />}
                     <ToolRequestCard m={m} cid={id} onDone={refreshMsgs} />
+                    <MessageCta m={m} />
                     <TaskOfferButtons m={m} cid={id} onDone={refreshMsgs} isLast={i === messages.length - 1} />
                     <WorkspaceResults m={m} />
                     <ArchiveResults m={m} cid={id} onDone={refreshMsgs} isLast={i === messages.length - 1} />
                   </div>
                   <ModelBadge m={m} />
                   <div className="mt-1.5 flex gap-3 opacity-0 transition group-hover:opacity-100">
-                    <button onClick={() => copy(m.content)} className="text-slate-400 hover:text-slate-700"><Copy size={13} /></button>
-                    <button onClick={() => playTTS(m.content, voiceFor(m.persona_id))} className="text-slate-400 hover:text-slate-700"><Volume2 size={13} /></button>
-                    {!m.is_moderator && <button onClick={() => saveMem(m)} className="text-slate-400 hover:text-slate-700"><Bookmark size={13} /></button>}
-                    {!m.is_moderator && <button onClick={() => regen(m.id)} className="text-slate-400 hover:text-slate-700"><RefreshCw size={13} /></button>}
+                    <button onClick={() => setReplyTo({ id: m.id, name: m.persona_name, content: m.content })} title="Balas (kutip)" aria-label="Balas" data-testid="msg-reply-btn" className="text-slate-400 hover:text-slate-700"><Reply size={14} /></button>
+                    <button onClick={() => setForwardMsg(m)} title="Teruskan pesan" aria-label="Teruskan" data-testid="msg-forward-btn" className="text-slate-400 hover:text-slate-700"><Forward size={14} /></button>
                   </div>
                 </div>
               </div>
@@ -468,6 +468,13 @@ export default function Chat() {
               </div>
             )}
             {isMulti && <p className="mb-2 text-xs text-slate-400">Tip: sebut @NamaAsisten untuk menuju satu asisten tertentu.</p>}
+            {replyTo && (
+              <div className="mb-2 flex items-start gap-2 rounded-xl border-l-4 border-[#2F6BFF] bg-[#EEF3FF] px-3 py-2 text-xs" data-testid="reply-preview">
+                <CornerUpLeft size={14} className="mt-0.5 shrink-0 text-[#2F6BFF]" />
+                <div className="min-w-0 flex-1"><p className="font-semibold text-[#2F6BFF]">Membalas {replyTo.name || "asisten"}</p><p className="line-clamp-2 text-slate-600">{replyTo.content}</p></div>
+                <button onClick={() => setReplyTo(null)} aria-label="Batal balas" data-testid="reply-cancel-btn" className="text-slate-400 hover:text-slate-700"><X size={14} /></button>
+              </div>
+            )}
             <div className="flex items-end gap-2">
               <input ref={fileRef} type="file" multiple accept="image/*,application/pdf,.txt,.md,.csv" className="hidden" onChange={onFiles} />
               <button onClick={() => fileRef.current?.click()} data-testid="attach-btn" title="Unggah berkas" className="flex h-12 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E7ECF3] text-slate-500 hover:bg-slate-50"><Paperclip size={18} /></button>
@@ -481,6 +488,7 @@ export default function Chat() {
         )}
       </div>
 
+      {forwardMsg && <ForwardDialog msg={forwardMsg} convs={convs} currentId={id} onClose={() => setForwardMsg(null)} />}
       {showArchive && conv && <ChatArchivesModal cid={id} onClose={() => setShowArchive(false)} onRestored={() => refreshMsgs()} />}
       {videoOpen && conv && (conv.type === "private" && rt.enabled
         ? <RealtimeCall conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />
@@ -527,6 +535,44 @@ export default function Chat() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+// Pick a conversation and forward an assistant message there (WhatsApp-style).
+function ForwardDialog({ msg, convs, currentId, onClose }) {
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState("");
+  const nav = useNavigate();
+  const list = convs.filter((c) => c.id !== currentId && (!q || (c.title || "").toLowerCase().includes(q.toLowerCase())));
+  const go = async (c) => {
+    setBusy(c.id);
+    try {
+      await api.post(`/conversations/${c.id}/send`, { content: msg.content, forwarded: true });
+      toast.success(`Pesan diteruskan ke ${c.title}`);
+      onClose(); nav(`/chat/${c.id}`);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Gagal meneruskan pesan"); setBusy(""); }
+  };
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
+      <div className="relative flex max-h-[80vh] w-full max-w-md flex-col rounded-3xl border border-[#E7ECF3] bg-white p-5 shadow-2xl fade-up" data-testid="forward-dialog">
+        <button onClick={onClose} className="absolute right-4 top-4 text-slate-400" aria-label="Tutup"><X size={18} /></button>
+        <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900"><Forward size={18} /> Teruskan pesan</h3>
+        <p className="mt-1 line-clamp-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">{msg.content}</p>
+        <input autoFocus className="input-dark mt-3 py-2" placeholder="Cari percakapan…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="forward-search" />
+        <div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto">
+          {list.map((c) => (
+            <button key={c.id} onClick={() => go(c)} disabled={!!busy} data-testid={`forward-target-${c.id}`} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-[#EEF3FF] disabled:opacity-60">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EEF3FF] text-[#2F6BFF]">{c.type === "private" ? <Bot size={16} /> : c.type === "dm" ? <MessageSquare size={16} /> : <Users size={16} />}</span>
+              <span className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{c.title}</p><p className="truncate text-[11px] text-slate-400">{c.last_message || ""}</p></span>
+              {busy === c.id && <Loader2 size={14} className="animate-spin text-slate-400" />}
+            </button>
+          ))}
+          {list.length === 0 && <p className="py-6 text-center text-sm text-slate-400">Tidak ada percakapan lain.</p>}
+        </div>
+      </div>
     </div>
   );
 }

@@ -18,7 +18,8 @@ DEFAULT_PRICING = {
     "bandwidth_usd_per_gb": 0.5,    # TURN relay cost for friend calls; +50% margin → $0.75/GB
     # OpenAI gpt-realtime-2 list prices (USD per 1M tokens): audio in 32 / out 64, text in 4 / out 24, cached 0.40 — billed per response from the usage report
     "rt_audio_in_usd_1m": 32.0, "rt_audio_out_usd_1m": 64.0, "rt_text_in_usd_1m": 4.0, "rt_text_out_usd_1m": 24.0, "rt_cached_in_usd_1m": 0.4,
-    "video_usd_per_sec": 0.062,
+    "video_usd_per_sec": 0.80,     # seedance2video.io Seedance 2.5 (720p) per output second
+    "video20_usd_per_sec": 0.60,   # seedance2video.io Seedance 2.0 Pro (720p) per output second
     # per-model list prices (USD per 1M tokens, input/output) — each persona "brain" is billed at its own rate; ~4 chars per token
     "chars_per_token": 4.0,
     "model_prices": {
@@ -48,7 +49,8 @@ FEATURES = {
     "realtime_call": ("Koneksi Realtime", "provider_usd_per_min", "menit"),
     "vision": ("Cuplikan layar ke asisten", "vision_usd", "cuplikan"),
     "call_bandwidth": ("Data panggilan teman", "bandwidth_usd_per_gb", "GB"),
-    "video": ("Video Seedance", "video_usd_per_sec", "detik"),
+    "video20": ("Video Seedance 2.0", "video20_usd_per_sec", "detik"),
+    "video": ("Video Seedance 2.5", "video_usd_per_sec", "detik"),
 }
 DEFAULT_TRIAL = {"trial_days": 7, "trial_daily_limit": 100, "trial_credits": 700}
 
@@ -119,6 +121,7 @@ def compute_rates(p: dict) -> dict:
         "vision": _credits(p, _cost(p, "vision_usd"), "vision"),
         "bandwidth_per_mb": round(usd_to_credits(p, _cost(p, "bandwidth_usd_per_gb") / 1024, "call_bandwidth"), 4),
         "video_per_sec": round(usd_to_credits(p, _cost(p, "video_usd_per_sec"), "video"), 2),
+        "video20_per_sec": round(usd_to_credits(p, _cost(p, "video20_usd_per_sec"), "video20"), 2),
     }
 
 
@@ -155,6 +158,9 @@ async def refresh(force: bool = False):
     if cfg and cfg.get("rt_text_out_usd_1m") == 16.0:  # one-off migration: gpt-realtime → gpt-realtime-2 text-output list price
         cfg["rt_text_out_usd_1m"] = 24.0
         await db.config.update_one({"id": "platform_pricing"}, {"$set": {"rt_text_out_usd_1m": 24.0}})
+    if cfg and cfg.get("video_usd_per_sec") == 0.062:  # one-off migration: fal Seedance 1.x → seedance2video.io Seedance 2.5 list cost
+        cfg["video_usd_per_sec"] = DEFAULT_PRICING["video_usd_per_sec"]
+        await db.config.update_one({"id": "platform_pricing"}, {"$set": {"video_usd_per_sec": cfg["video_usd_per_sec"]}})
     tr = await db.config.find_one({"id": "trial_config"}, {"_id": 0, "id": 0, "updated_at": 0})
     _cache["pricing"] = {**DEFAULT_PRICING, **(cfg or {})}
     _cache["trial"] = {**DEFAULT_TRIAL, **(tr or {})}

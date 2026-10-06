@@ -17,18 +17,19 @@ def _ext(path: str) -> str:
 
 async def _media_items(u: dict, kinds: tuple, before: Optional[str], limit: int, q_text: str = "") -> list:
     conv_ids = [c["id"] async for c in db.conversations.find({"$or": [{"workspace_id": workspace_id(u)}, {"user_id": u["id"]}]}, {"_id": 0, "id": 1})]
-    q = {"conversation_id": {"$in": conv_ids}, "media": {"$elemMatch": {"type": {"$in": list(kinds)}, "path": {"$exists": True}}}}
+    q = {"conversation_id": {"$in": conv_ids}, "media": {"$elemMatch": {"type": {"$in": list(kinds)}, "$or": [{"path": {"$exists": True}}, {"drive_id": {"$exists": True}}]}}}
     if q_text:
         rx = {"$regex": re.escape(q_text), "$options": "i"}
-        q["$or"] = [{"media.name": rx}, {"content": rx}]
+        q["$or"] = [{"media.request": rx}, {"media.prompt": rx}, {"media.name": rx}, {"content": rx}]
     if before:
         q["created_at"] = {"$lt": before}
     out = []
     async for m in db.messages.find(q, {"_id": 0, "id": 1, "media": 1, "conversation_id": 1, "task_id": 1, "persona_name": 1, "created_at": 1}).sort("created_at", -1).limit(limit):
         for x in m.get("media") or []:
-            if x.get("type") in kinds and x.get("path"):
-                out.append({"id": f"{m['id']}:{x['path']}", "kind": x["type"], "name": x.get("name") or x["path"].rsplit("/", 1)[-1], "format": x.get("format") or _ext(x["path"]),
-                            "path": x["path"], "conversation_id": m["conversation_id"], "task_id": m.get("task_id"), "persona_name": m.get("persona_name"), "created_at": m["created_at"]})
+            if x.get("type") in kinds and (x.get("path") or x.get("drive_id")):
+                ref = x.get("path") or x["drive_id"]
+                out.append({"id": f"{m['id']}:{ref}", "kind": x["type"], "name": x.get("name") or ref.rsplit("/", 1)[-1], "format": x.get("format") or _ext(ref) or "mp4",
+                            "title": x.get("request") or x.get("prompt"), "edited": bool(x.get("edited_from")), "path": x.get("path"), "drive_id": x.get("drive_id"), "link": x.get("link"), "conversation_id": m["conversation_id"], "task_id": m.get("task_id"), "persona_name": m.get("persona_name"), "created_at": m["created_at"]})
     return out
 
 
@@ -62,7 +63,7 @@ async def list_gallery(type: str = Query("all", pattern="^(all|image|video|docum
         if type == "video":
             items = [i for i in items if i["kind"] == "video"]
     if type in ("all", "document"):
-        dq = {"user_id": u["id"]}
+        dq = {"user_id": u["id"], "source.kind": {"$ne": "video"}}
         if q_text:
             dq["name"] = {"$regex": re.escape(q_text), "$options": "i"}
         if before:

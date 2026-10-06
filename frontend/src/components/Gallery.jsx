@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { HardDrive, FileText, Image as ImageIcon, Video, Download, ExternalLink, Loader2, Check, Users, Share2, Search } from "lucide-react";
+import { HardDrive, FileText, Image as ImageIcon, Video, Download, ExternalLink, Loader2, Check, Users, Share2, Search, Send, MessageSquare, Wand2 } from "lucide-react";
 import { api, API_BASE, getToken } from "../lib/api";
-import { fileUrl, downloadUrl } from "./MessageExtras";
+import { fileUrl, downloadUrl, openPublish, mediaSrc } from "./MessageExtras";
 
 export const GALLERY_FILTERS = [
   { v: "all", label: "Semua" },
@@ -57,11 +57,11 @@ export function GalleryCard({ item, selectable = false, selected = false, onSele
       {selectable && <span className={`absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md border bg-white ${selected ? "btn-grad border-transparent" : "border-slate-300"}`} data-testid="gallery-select-mark">{selected && <Check size={13} />}</span>}
       <div className="flex h-36 items-center justify-center overflow-hidden bg-slate-50">
         {item.kind === "image" ? <img src={fileUrl(item.path)} alt={item.name} loading="lazy" className="h-full w-full object-cover" />
-          : item.kind === "video" ? <video src={fileUrl(item.path)} preload="metadata" muted className="h-full w-full object-cover" />
+          : item.kind === "video" ? <video src={mediaSrc(item)} preload="metadata" muted className="h-full w-full object-cover" />
           : <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#EEF3FF] text-[#2F6BFF]"><Icon size={26} /></span>}
       </div>
       <div className="flex flex-1 flex-col p-3">
-        <p className="truncate text-sm font-semibold text-slate-900" title={item.name}>{item.name}</p>
+        <p className="truncate text-sm font-semibold text-slate-900" title={item.title || item.name} data-testid="gallery-item-title">{item.edited && <Wand2 size={11} className="mr-1 inline text-[#2F6BFF]" />}{item.title || item.name}</p>
         <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-400">{item.team && <Users size={11} />}{item.persona_name || "Asisten"} · {date}{item.version > 1 ? ` · v${item.version}` : ""}</p>
         {!selectable && (
           <div className="mt-2 flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -71,9 +71,14 @@ export function GalleryCard({ item, selectable = false, selected = false, onSele
               <a href={`${window.location.origin}/workspace/${item.task_id}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-[#EEF3FF] px-2 py-1 text-[11px] font-semibold text-[#2F6BFF] hover:bg-[#E0E9FF]" data-testid="gallery-open"><ExternalLink size={11} /> Buka</a>
               <a href={exportUrl(item.task_id, "docx")} download className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-dl-docx"><Download size={11} /> Word</a>
               <a href={exportUrl(item.task_id, "pdf")} download className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-dl-pdf"><Download size={11} /> PDF</a>
+            </>) : item.drive_id ? (<>
+              <a href={item.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-[#EEF3FF] px-2 py-1 text-[11px] font-semibold text-[#2F6BFF] hover:bg-[#E0E9FF]" data-testid="gallery-open-drive"><HardDrive size={11} /> Buka di Google Drive</a>
+              {item.conversation_id && <a href={`/chat/${item.conversation_id}`} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-open-chat"><MessageSquare size={11} /> Chat</a>}
             </>) : (<>
               <a href={fileUrl(item.path)} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-[#EEF3FF] px-2 py-1 text-[11px] font-semibold text-[#2F6BFF] hover:bg-[#E0E9FF]" data-testid="gallery-open"><ExternalLink size={11} /> Buka</a>
               <a href={downloadUrl(item.path)} download={item.name} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-dl-file"><Download size={11} /> Unduh</a>
+              {item.conversation_id && <a href={`/chat/${item.conversation_id}`} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-open-chat"><MessageSquare size={11} /> Chat</a>}
+              <button onClick={() => openPublish({ type: item.kind, path: item.path, name: item.name }, item.title || "")} className="flex items-center gap-1 rounded-lg bg-[#2F6BFF] px-2 py-1 text-[11px] font-semibold text-white hover:bg-[#2558d6]" data-testid="gallery-publish"><Send size={11} /> Publikasikan</button>
             </>)}
             {onShare && item.kind !== "drive" && <button onClick={() => onShare(item)} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-share"><Share2 size={11} /> Bagikan</button>}
           </div>
@@ -103,7 +108,7 @@ export function GallerySearch({ value, onChange }) {
   useEffect(() => { const t = setTimeout(() => onChange(v.trim()), 350); return () => clearTimeout(t); }, [v]); // eslint-disable-line
   return (
     <div className="relative w-full sm:w-72"><Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-      <input className="input-dark py-2 pl-10" placeholder="Cari judul atau isi dokumen…" value={v} onChange={(e) => setV(e.target.value)} data-testid="gallery-search" /></div>
+      <input className="input-dark py-2 pl-10" placeholder="Cari prompt gambar/video, judul, atau isi dokumen…" value={v} onChange={(e) => setV(e.target.value)} data-testid="gallery-search" /></div>
   );
 }
 

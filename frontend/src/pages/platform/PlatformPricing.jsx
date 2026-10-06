@@ -2,7 +2,7 @@ import React from "react";
 import { Loader2 } from "lucide-react";
 import { usePricingDraft, NumField, SaveBar } from "./pricingDraft";
 
-const FIELD = { text: "text_usd_per_1k_chars", image: "image_usd", profile: "profile_usd", stt: "stt_usd", tts: "tts_usd", realtime_call: "provider_usd_per_min", vision: "vision_usd", call_bandwidth: "bandwidth_usd_per_gb", video: "video_usd_per_sec" };
+const FIELD = { text: "text_usd_per_1k_chars", image: "image_usd", profile: "profile_usd", stt: "stt_usd", tts: "tts_usd", realtime_call: "provider_usd_per_min", vision: "vision_usd", call_bandwidth: "bandwidth_usd_per_gb", video: "video_usd_per_sec", video20: "video20_usd_per_sec" };
 const RT = [["rt_audio_in_usd_1m", "Audio masuk"], ["rt_audio_out_usd_1m", "Audio keluar"], ["rt_text_in_usd_1m", "Teks masuk"], ["rt_text_out_usd_1m", "Teks keluar"], ["rt_cached_in_usd_1m", "Cache"]];
 
 export default function PlatformPricing({ readOnly }) {
