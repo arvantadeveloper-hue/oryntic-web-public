@@ -522,3 +522,6 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 
 ## Update 2026-06 — Kembalikan ke versi lama
 - `POST /tasks/{tid}/versions/{ver}/restore` (non-destruktif: isi versi lama disimpan sebagai versi BARU via `save_revision`, catatan "Dikembalikan ke vN oleh <nama>"; 400 bila versi terbaru, 404 bila tidak ada). TaskDetail: tombol **Kembalikan ke versi ini** (`restore-version`, konfirmasi) hanya saat melihat versi lama. Revisi langsung dari Ruang Kerja (`/tasks/{tid}/revise`) kini juga membawa `lang_rule`. Teruji: v2 → restore v1 → v3; UI lihat v2 → restore → v4 + toast.
+
+## Update 2026-06 — Dokumen Rencana Pengembangan Mobile
+- `scripts/gen_mobile_plan.py` (pakai helper `gen_docs.py`) → `frontend/public/docs/Oryntix_Mobile_Development_Plan.docx` (14 bab: ringkasan, tujuan, keputusan teknologi Expo/EAS/WebRTC/FCM/RevenueCat, arsitektur & struktur direktori, peta jalan Tahap 0–6 dengan fitur/endpoint/DoD, jadwal 16 minggu, tim, QA, kredensial, risiko, metrik, Lampiran A problem statement siap tempel, B tipe TS, C format SSE). Diakses di `/docs/Oryntix_Mobile_Development_Plan.docx`.
