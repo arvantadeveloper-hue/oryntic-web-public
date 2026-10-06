@@ -21,7 +21,9 @@ if (messaging) {
       icon: "/brand/mark-512.png",
       badge: "/brand/mark-512.png",
       tag: d.tag || undefined,
-      renotify: !!d.tag,
+      renotify: !!d.tag && d.silent !== "1",
+      silent: d.silent === "1",
+      vibrate: d.silent === "1" ? [] : undefined,
       data: { link: d.link || (payload.fcmOptions && payload.fcmOptions.link) || "/home", kind: d.kind || "system" },
     });
   });

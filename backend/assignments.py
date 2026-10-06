@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from auth import current_user, workspace_id
+from auth import current_user, workspace_id, lang_rule, _lang_name
 from chat import _persona_system, _save_ai_msg, _get_personas, _owner_settings, _can_access
 from db import db, now_iso, new_id, clean
 from llm import llm_text, record_usage, text_credits
@@ -70,8 +70,8 @@ async def execute_assigned_task(tid: str):
         u = await db.users.find_one({"id": t["user_id"]}, {"_id": 0}) or {}
         persona = await db.personas.find_one({"id": t.get("persona_id")}, {"_id": 0}) or {"name": "Asisten", "model": None}
         system = (await _persona_system(persona, u, None) if persona.get("id") else "You are a diligent assistant.") + \
-            "\n\nYou are now EXECUTING a delegated task. Produce the COMPLETE deliverable in well-structured markdown (headings, lists, tables where useful). No preamble, no questions."
-        prompt = f"Task: {t.get('goal')}\nDetails: {t.get('brief') or ''}"
+            "\n\nYou are now EXECUTING a delegated task. Produce the COMPLETE deliverable in well-structured markdown (headings, lists, tables where useful). No preamble, no questions.\n\n" + lang_rule(u)
+        prompt = f"Task: {t.get('goal')}\nDetails: {t.get('brief') or ''}\n\n(Reminder: {lang_rule(u)})"
         model_key, _ = await route_model(persona.get("model"), prompt, 0, await _owner_settings(u) if u else {})
         out = await llm_text(system, prompt, model_key)
         used = text_credits(prompt, out)
@@ -136,7 +136,7 @@ async def accept_pending(conv: dict, u: dict, mode: str) -> dict:
                 f"Begitu selesai, saya kabari di sini — dan Anda bisa buat panggilan dari Ruang Kerja supaya saya paparkan hasilnya. [Lihat di Ruang Kerja](/workspace/{task['id']})")
         return await _save_ai_msg(conv["id"], persona, text, 0, "text", {"tool": "task_assigned", "task_id": task["id"]})
     system = await _persona_system(persona, u, None)
-    out = await llm_text(system + "\n\nThe user chose to work through the task together step by step. Propose a short plan (3-6 steps) and ask which step to start with. Keep it brief.",
+    out = await llm_text(system + "\n\nThe user chose to work through the task together step by step. Propose a short plan (3-6 steps) and ask which step to start with. Keep it brief.\n\n" + lang_rule(u),
                          f"Task: {plan.get('title')}\n{plan.get('brief') or ''}")
     used = text_credits(plan.get("brief") or "", out)
     await record_usage(u["id"], "chat", used, {"conversation_id": conv["id"]})
@@ -292,7 +292,7 @@ async def build_digest(u: dict, persona: dict) -> tuple:
             f"\n\nTasks still in progress/scheduled: {running}.")
     system = await _persona_system(persona, u, None) + ("\n\nWrite the user's DAILY DIGEST as a warm, concise morning briefing in markdown: greeting with the user's name, "
                                                         "today's agenda in order (times), tasks completed since yesterday, what is still in progress, and ONE short encouraging closing line. "
-                                                        "Use ONLY the data given; never invent items. Max ~180 words.")
+                                                        "Use ONLY the data given; never invent items. Max ~180 words.\n\n" + lang_rule(u))
     md = await llm_text(system, data)
     used = text_credits(data, md)
     await record_usage(u["id"], "daily_digest", used, {})
@@ -436,12 +436,12 @@ def names_mentioned(text: str, personas: list, exclude_id: Optional[str] = None)
     return [p["name"] for p in personas if p["id"] != exclude_id and _re.search(r"\b" + _re.escape(p["name"].lower()) + r"\b", low)]
 
 
-async def plan_subtasks(title: str, brief: str, personas: list, directives: str = "") -> list:
+async def plan_subtasks(title: str, brief: str, personas: list, directives: str = "", u: Optional[dict] = None) -> list:
     from llm import llm_json
     roster = "\n".join(f"- {p['name']} (model {p.get('model')})" for p in personas)
     try:
         r = await llm_json("Split the task into 2-5 independent sub-tasks for a team of AI assistants. Reply JSON {\"subtasks\":[{\"title\":str,\"brief\":str,\"specialty\":\"it\"|\"research\"|\"writing\"|\"general\",\"assignee\":str|null}]}. "
-                           "Indonesian titles. assignee: when the user EXPLICITLY names which assistant should handle a part (e.g. 'bagian keuangan minta Nova'), create a sub-task for that part and set assignee to the exact name as the user wrote it; "
+                           f"Titles and briefs in {_lang_name(u or {})}. assignee: when the user EXPLICITLY names which assistant should handle a part (e.g. 'bagian keuangan minta Nova'), create a sub-task for that part and set assignee to the exact name as the user wrote it; "
                            "every other sub-task gets assignee null. Never invent assignees.",
                            f"Task: {title}\nDetails: {brief}\nUser's assignment instructions: {directives or '(none)'}\nTeam:\n{roster}")
         subs = r.get("subtasks") if isinstance(r, dict) else None
@@ -484,7 +484,7 @@ def team_summary(task: dict) -> str:
 async def create_team_task(u: dict, lead: dict, conv: dict, plan: dict, source: str) -> dict:
     wid = workspace_id(u)
     personas = await db.personas.find({"user_id": wid, "deleted": {"$ne": True}}, {"_id": 0}).to_list(50)
-    subs = plan.get("subtasks") or await plan_subtasks(plan.get("title") or "", plan.get("brief") or "", personas, _directives(plan))
+    subs = plan.get("subtasks") or await plan_subtasks(plan.get("title") or "", plan.get("brief") or "", personas, _directives(plan), u)
     if len(subs) < 2:
         return await create_assigned_task(u, lead, conv, plan, source)
     sched = _utc(plan.get("scheduled_at"))
@@ -512,7 +512,7 @@ async def _assemble_team_output(parent: dict, kids: list) -> None:
     u = await db.users.find_one({"id": parent["user_id"]}, {"_id": 0}) or {}
     lead = await db.personas.find_one({"id": parent.get("persona_id")}, {"_id": 0}) or {"name": "Asisten"}
     parts = "\n\n".join(f"## {k['goal']} (oleh {k.get('persona_name')})\n{k.get('final_output') or '(gagal)'}" for k in kids)
-    system = (await _persona_system(lead, u, None) if lead.get("id") else "") + "\n\nYou are the TEAM LEAD assembling your team's sub-task results into ONE coherent, complete deliverable in markdown. Keep all substantive content, remove duplication, add a short executive summary at the top and credit each assistant's section."
+    system = (await _persona_system(lead, u, None) if lead.get("id") else "") + "\n\nYou are the TEAM LEAD assembling your team's sub-task results into ONE coherent, complete deliverable in markdown. Keep all substantive content, remove duplication, add a short executive summary at the top and credit each assistant's section.\n\n" + lang_rule(u) + " Translate any section that is in the wrong language."
     prompt = f"Task: {parent.get('goal')}\nDetails: {parent.get('brief')}\n\nSUB-TASK RESULTS:\n{parts[:40000]}"
     try:
         out = await llm_text(system, prompt, parent.get("model"))

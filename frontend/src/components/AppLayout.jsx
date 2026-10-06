@@ -13,6 +13,7 @@ import { NotificationBell } from "./NotificationBell";
 import { registerAssetWorker } from "../lib/firebase";
 import { WelcomeTour, openTour } from "./WelcomeTour";
 import { PublishHost } from "./PublishDialog";
+import { SoundToggleButton } from "./SoundToggle";
 import { onUserEvent, useLiveSync, useWsConnected } from "../lib/userEvents";
 
 export function AppLayout() {
@@ -134,6 +135,7 @@ export function AppLayout() {
             )}
             <button onClick={openTour} data-testid="help-tour-btn" className="hidden h-10 w-10 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 sm:flex" title="Bantuan — tur singkat"><HelpCircle size={19} /></button>
             <ConnectionDot />
+            <SoundToggleButton />
             <NotificationBell />
             <WelcomeTour user={user} />
             <button onClick={() => nav("/chat")} className="btn-primary h-10 rounded-xl px-3.5 sm:px-4" data-testid="topbar-new"><Plus size={16} /> <span className="hidden sm:inline">New</span></button>

@@ -1,0 +1,25 @@
+{
+  "summary": "Tested new 'host invites friends/assistants mid-call' feature end-to-end (backend + frontend). Backend: 7/7 pytest cases pass against POST /api/conversations/{cid}/members (happy path with friend+persona converting private->group, access propagation to invited friend, 403 non-host, 404 non-participant, 400 empty/unknown ids, group adds persona + moderator PATCH). Frontend (demo host private call): realtime-call overlay with rt-share-screen, call-invite-btn, rt-mute, rt-end all present; share-screen toggle creates rt-screen panel with 'Layar Anda' label and 'rt-show-assistant' button ('Tunjukkan ke asisten · 9 kredit'); second click stops. Invite dialog lists 1 friend + 2 personas, invite-submit disabled until a selection; selecting a persona and submitting switches the overlay to realtime-meeting with rtm-badge 'Realtime · 2 agen' and group controls (call-invite-btn, rtm-share-screen, rtm-leave). Non-host (Budi) group call on conv c313480b: realtime-meeting renders, call-invite-btn correctly NOT rendered, rtm-leave works. Both calls were ended immediately to minimise credit burn.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_add_members.py",
+    "/app/test_reports/pytest/add_members.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "workspace.py add_members (line 253): fallback title branch when members is empty is unreachable because 400 at line 243 rejects empty invites. Dead branch — minor cleanup.",
+    "add_members response flow is clean; _conv_title + $set/$unset titles handled correctly on private->group transition.",
+    "No GET /api/conversations/{cid} single endpoint exists (returns 405). Non-blocking but worth adding for clients that want to re-sync a single conv without full list fetch."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_add_members.py"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (host + non-host flows)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (host, admin); budi@aivora.ai / budi123456 (regular friend)",
+  "seed_data_creation": "Each test created fresh private convs via POST /api/conversations (type=private, persona_ids=[...]). Demo-host UI flow converted conv 0c635bfd-a2bd-436a-af19-54301eab08b9 (Nadia private) to group ('Grup: Nadia, Rio').",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression file: /app/backend/tests/test_add_members.py — run with: cd /app && python -m pytest backend/tests/test_add_members.py -v -o addopts=''. For future frontend realtime tests, ALWAYS inject mock getUserMedia + getDisplayMedia via page.add_init_script and end the call quickly (rtm-leave / rt-end) — real OpenAI realtime burns credits per minute. Conv 0c635bfd is no longer private (converted); for private-call UI tests, create a fresh one or pick another private conv (e.g. 56ca242b or 63336d6a Nadia private, e8efcc35 Nova private). Non-host test conv: c313480b-cbb7-40d3-9d01-b8192353a7e4.",
+  "rca of the issue": "N/A — no issues found."
+}

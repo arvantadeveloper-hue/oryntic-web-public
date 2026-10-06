@@ -4,6 +4,7 @@ import { User, Globe, Shield, Sparkles, KeyRound, Lock, Eye, EyeOff } from "luci
 import { NotulenFormatCard } from "../components/NotulenFormatCard";
 import { SmartRoutingToggle } from "../components/ModelRoutingCard";
 import { PushSettingsCard } from "../components/PushSettingsCard";
+import { SoundSettingsCard } from "../components/SoundToggle";
 import { api, setAuthToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
@@ -119,6 +120,7 @@ export default function Profile() {
       <ChangePasswordCard />
       <AutoArchiveCard user={user} onSaved={(u2) => setUser(u2)} />
       {user?.role === "admin" && <SmartRoutingToggle user={user} onSaved={() => api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {})} />}
+      <SoundSettingsCard />
       <PushSettingsCard />
       {user?.role === "admin" && <NotulenFormatCard user={user} onSaved={() => api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {})} />}
 

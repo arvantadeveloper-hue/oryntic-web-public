@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Phone, PhoneOff, Users } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { isMuted } from "./SoundToggle";
 
 // Simple synthesized ringtone (no asset needed): two-tone pulse every 2s.
 function startRing() {
@@ -46,11 +47,12 @@ export function FriendCallRing() {
     return () => { alive = false; clearInterval(iv); off(); };
   }, [user?.id, loc.pathname]); // eslint-disable-line
 
+  const muted = isMuted(user);
   useEffect(() => {
-    if (call && !stopRef.current) stopRef.current = startRing();
-    if (!call && stopRef.current) { stopRef.current(); stopRef.current = null; }
+    if (call && !muted && !stopRef.current) stopRef.current = startRing();
+    if ((!call || muted) && stopRef.current) { stopRef.current(); stopRef.current = null; }
     return () => { if (!call && stopRef.current) { stopRef.current(); stopRef.current = null; } };
-  }, [call]);
+  }, [call, muted]);
 
   if (!call) return null;
   const decline = () => { dismissed.current.add(call.conversation_id); setCall(null); };

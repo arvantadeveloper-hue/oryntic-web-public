@@ -4,6 +4,7 @@ import { Phone, PhoneOff, X, Volume2 } from "lucide-react";
 import { api, API_BASE, getToken } from "../lib/api";
 import { Mark } from "./Logo";
 import { useAuth } from "../context/AuthContext";
+import { isMuted } from "./SoundToggle";
 import { VideoRoom } from "./VideoRoom";
 import { RealtimeCall } from "./RealtimeCall";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
@@ -52,7 +53,7 @@ export function IncomingCall() {
 
   const speakAndContinue = async (data) => {
     // play the reminder aloud in the persona's voice, then continue as a normal call
-    if (data.persona && data.message) {
+    if (data.persona && data.message && !isMuted(user)) {
       setSpeaking(true);
       try {
         const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: data.message.slice(0, 1200), voice: data.persona.voice || "nova" }) });

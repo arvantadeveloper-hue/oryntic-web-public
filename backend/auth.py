@@ -142,6 +142,13 @@ def _lang_name(user: dict) -> str:
     return LANG_NAMES.get(code, LANG_NAMES.get(code.split("-")[0], "Bahasa Indonesia"))
 
 
+def lang_rule(user: dict) -> str:
+    """Hard language constraint appended to every prompt — the user's language wins over the language of the instructions, task or model."""
+    ln = _lang_name(user or {})
+    return (f"LANGUAGE RULE (overrides everything else): write ALL output — headings, lists, tables, summaries, code comments and explanations — in {ln}, "
+            f"even though these instructions are in English and regardless of which AI model is running. The ONLY exception: the user explicitly asked for another language.")
+
+
 # ---------- models ----------
 class RegisterIn(BaseModel):
     email: EmailStr
@@ -433,6 +440,7 @@ class SettingsIn(BaseModel):
     notulen_fields: Optional[list] = Field(default=None, max_length=12)  # [{name, required}]
     daily_digest: Optional[dict] = None  # {enabled, channel: chat|call|both, time: "HH:MM", persona_id}
     auto_archive_hours: Optional[int] = Field(default=None, ge=0, le=720)  # 0 = off; idle chats are summarized & archived after this many hours
+    mute_sounds: Optional[bool] = None  # silence ringtone/vibration, spoken reminder read-aloud and push notification sounds
 
 
 @router.put("/settings")

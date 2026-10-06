@@ -297,8 +297,9 @@ async def run_image_tool(uid: str, prompt: str, reference_path: Optional[str] = 
 
 async def run_document_tool(uid: str, system: str, title: str, instructions: str, history: str, model_key: Optional[str]) -> dict:
     sys = system + ("\n\nDOCUMENT MODE: write the COMPLETE document content in well-structured markdown (headings, lists, tables "
-                    "where useful). No preface, no closing chit-chat — only the document body.")
-    prompt = f"Context:\n{history[-3000:]}\n\nDocument title: {title}\nRequirements: {instructions}\n\nWrite the full document now."
+                    "where useful). No preface, no closing chit-chat — only the document body. The whole document follows the LANGUAGE RULE above "
+                    "(the user's language) unless the user explicitly asked for the document in another language.")
+    prompt = f"Context:\n{history[-3000:]}\n\nDocument title: {title}\nRequirements: {instructions}\n\nWrite the full document now, in the user's language per the LANGUAGE RULE."
     md = await llm_text(sys, prompt, model_key)
     base = _safe_name(title)
     docx_b, pdf_b = await asyncio.gather(asyncio.to_thread(build_docx, title, md), asyncio.to_thread(build_pdf, title, md))
@@ -342,7 +343,8 @@ async def save_revision(task: dict, new_md: str, note: str, persona: Optional[di
 async def revise_with_llm(task: dict, request: str, system: str, model_key: Optional[str]) -> tuple:
     """Returns (new_markdown, change_summary, credits)."""
     sys = system + ("\n\nYou are REVISING a workspace deliverable. Output the COMPLETE revised document in markdown (keep everything that was "
-                    "not asked to change), then on the very last line write exactly: RINGKASAN PERUBAHAN: <1-2 sentences>.")
+                    "not asked to change), then on the very last line write exactly: RINGKASAN PERUBAHAN: <1-2 sentences>. Keep the document in the user's language "
+                    "per the LANGUAGE RULE above — never translate it to another language unless the revision request explicitly asks for that.")
     prompt = f"CURRENT DOCUMENT:\n{(task.get('final_output') or '')[:15000]}\n\nREVISION REQUEST: {request}"
     out = await llm_text(sys, prompt, model_key)
     summary = ""

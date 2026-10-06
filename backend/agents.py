@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from db import db, now_iso, new_id, clean
-from auth import current_user, workspace_id
+from auth import current_user, workspace_id, lang_rule
 from workspace import task_access, get_task_for, task_view
 from llm import llm_text, llm_json, record_usage, text_credits, DEFAULT_MODEL_KEY, MODEL_CATALOG
 
@@ -65,12 +65,13 @@ class TaskIn(BaseModel):
     model: Optional[str] = None
 
 
-async def _plan_steps(task_id: str, goal: str, model_key: str):
+async def _plan_steps(task_id: str, goal: str, model_key: str, rule: str):
     """Coordinator breaks the goal into 2-4 subtasks. Returns (steps, credits)."""
     plan_sys = (
         "You are the orchestration coordinator of a team of AI agents. Break the user's goal into 2-4 concrete "
         "subtasks. For each subtask choose one role from: Research, Planning, Writing, Analyst, Coding. "
-        'Respond JSON: {"plan_summary": str, "subtasks": [{"role": str, "title": str, "instruction": str}]}'
+        'Respond JSON: {"plan_summary": str, "subtasks": [{"role": str, "title": str, "instruction": str}]}\n' + rule +
+        " (plan_summary, every title and every instruction must follow the language rule.)"
     )
     plan = await llm_json(plan_sys, f"Goal: {goal}", model_key)
     subtasks = plan.get("subtasks", [])[:4] or [{"role": "Writing", "title": "Complete request", "instruction": goal}]
@@ -80,13 +81,13 @@ async def _plan_steps(task_id: str, goal: str, model_key: str):
     return steps, text_credits(goal, json.dumps(plan))
 
 
-async def _run_step(task_id: str, goal: str, step: dict, steps: list, model_key: str) -> int:
+async def _run_step(task_id: str, goal: str, step: dict, steps: list, model_key: str, rule: str) -> int:
     """Execute one subtask (one retry), persist progress, return credits used."""
     step["status"] = "running"
     await db.tasks.update_one({"id": task_id}, {"$set": {"steps": steps, "updated_at": now_iso()}}); await _emit_task(task_id)
     role = step["role"] if step["role"] in ROLE_PROMPTS else "Writing"
-    sys = ROLE_PROMPTS[role] + " Keep the output focused and useful."
-    prompt = f"Overall goal: {goal}\n\nYour subtask: {step['title']}\nInstructions: {step['instruction']}"
+    sys = ROLE_PROMPTS[role] + " Keep the output focused and useful.\n" + rule
+    prompt = f"Overall goal: {goal}\n\nYour subtask: {step['title']}\nInstructions: {step['instruction']}\n\n(Reminder: {rule})"
     out = ""
     for _ in range(2):
         try:
@@ -101,14 +102,14 @@ async def _run_step(task_id: str, goal: str, step: dict, steps: list, model_key:
     return text_credits(prompt, step["output"])
 
 
-async def _merge_outputs(goal: str, steps: list, model_key: str):
+async def _merge_outputs(goal: str, steps: list, model_key: str, rule: str):
     merge_sys = (
         "You are the orchestration coordinator with a Reviewer. Combine the agents' outputs into a single, "
         "coherent, well-structured final deliverable in markdown. Remove redundancy, ensure consistency, "
-        "and add a short executive summary at the top."
+        "and add a short executive summary at the top.\n" + rule + " If any agent output is in the wrong language, translate it."
     )
     outputs = [f"### {s['title']} ({s['role']})\n{s['output']}" for s in steps]
-    merge_prompt = f"Goal: {goal}\n\nAgent outputs:\n\n" + "\n\n".join(outputs)
+    merge_prompt = f"Goal: {goal}\n\nAgent outputs:\n\n" + "\n\n".join(outputs) + f"\n\n(Reminder: {rule})"
     final = await llm_text(merge_sys, merge_prompt, model_key)
     return final, text_credits(merge_prompt, final)
 
@@ -136,10 +137,11 @@ async def _attach_video(task_id: str, user_id: str, goal: str, final: str):
 async def _orchestrate(task_id: str, user_id: str, goal: str, model_key: str = None):
     try:
         await db.tasks.update_one({"id": task_id}, {"$set": {"status": "running", "updated_at": now_iso()}}); await _emit_task(task_id)
-        steps, credits_total = await _plan_steps(task_id, goal, model_key)
+        rule = lang_rule(await db.users.find_one({"id": user_id}, {"_id": 0, "settings": 1}) or {})
+        steps, credits_total = await _plan_steps(task_id, goal, model_key, rule)
         for step in steps:
-            credits_total += await _run_step(task_id, goal, step, steps, model_key)
-        final, used = await _merge_outputs(goal, steps, model_key)
+            credits_total += await _run_step(task_id, goal, step, steps, model_key, rule)
+        final, used = await _merge_outputs(goal, steps, model_key, rule)
         credits_total += used
         video_url = video_path = None
         if _classify(goal) == "video":

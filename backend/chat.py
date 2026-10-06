@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from assistant_persona import persona_block
 from db import db, now_iso, new_id, clean
-from auth import current_user, workspace_id, _lang_name
+from auth import current_user, workspace_id, _lang_name, lang_rule
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit, throttle_message, inflight_start, inflight_end
@@ -449,7 +449,7 @@ def _relevant_memories(mems: list, query: str, cap: int = 10) -> list:
 async def _persona_system(persona, user, roster=None, voice_mode=False, query=None):
     prof = persona.get("profile", {})
     lang_name = _lang_name(user)
-    parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in. Never switch to another language unless the user themselves writes in a different language."]
+    parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in, and regardless of which AI model is answering or which tool/task mode is active. Never switch to another language unless the user explicitly asks for it."]
     parts.append(f"You are '{persona['name']}', an AI persona. {prof.get('system_instructions','')}")
     parts += persona_block(persona["name"], lang_name, voice_mode)
     parts.append(f"VIDEO PRICING (platform credits, from the admin price list): {await video_pricing_text()}; default clip {seedance.DEFAULT_DUR} s at 720p, Seedance 2.0 up to 15 s, Seedance 2.5 up to 30 s; resolution 480p (hemat, ×{seedance.multipliers()['res'].get('480p')}) / 720p / 1080p (tajam, ×{seedance.multipliers()['res'].get('1080p')}); real-person mode (Seedance 2.0, image-to-video only, ×{seedance.multipliers()['real_person']}); generated sound/ambience ×{seedance.multipliers()['audio']}. "
@@ -470,7 +470,7 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
         if others:
             parts.append(f"You are in a group conversation with the user and other AI assistants: {', '.join(others)}. "
                          f"Respond only as {persona['name']}, keep it concise, build on what others said without repeating them, and do not speak for the others.")
-    parts.append(f"Reminder: reply in {lang_name}.")
+    parts.append(lang_rule(user))
     return "\n".join(parts)
 
 
@@ -1115,6 +1115,8 @@ async def _prepare_ctx(ctx: ReplyCtx) -> ReplyCtx:
     if ctx.via == "meeting_chat":
         ctx.system += "\n\n" + MEETING_CHAT_STYLE
     ctx.model_key, ctx.routed = await route_model(ctx.persona.get("model"), ctx.user_text, ctx.attach_len, await _owner_settings(ctx.user))
+    if ctx.routed:  # another model answers this turn — restate the language rule so the switch is invisible to the user
+        ctx.system += f"\n\nMODEL SWITCH NOTE: you are a different model handling this turn on behalf of the same persona. Keep the same persona, tone and language. {lang_rule(ctx.user)}"
     last = await db.messages.find_one({"conversation_id": ctx.cid, "role": "assistant", "tool": "workspace_search"}, {"_id": 0, "results": 1}, sort=[("created_at", -1)])
     if last and last.get("results"):
         top = await db.tasks.find_one({"id": last["results"][0]["id"]}, {"_id": 0, "goal": 1, "final_output": 1})

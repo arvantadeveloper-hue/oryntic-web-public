@@ -112,16 +112,18 @@ async def send_push(uid: str, title: str, body: str, data: Optional[dict] = None
     any_native = any((r.get("platform") or "web") != "web" for r in rows)
     if not tokens:
         return 0
+    urow = await db.users.find_one({"id": uid}, {"_id": 0, "settings": 1}) or {}
+    muted = bool((urow.get("settings") or {}).get("mute_sounds"))
     from firebase_admin import messaging
     link = (data or {}).get("link") or "/home"
     msg = messaging.MulticastMessage(
         tokens=tokens,
-        data={k: str(v) for k, v in {**(data or {}), "title": title, "body": body, "kind": kind or "system"}.items()},
+        data={k: str(v) for k, v in {**(data or {}), "title": title, "body": body, "kind": kind or "system", "silent": "1" if muted else "0"}.items()},
         notification=messaging.Notification(title=title, body=body[:300]) if any_native else None,  # Android/iOS system tray; web uses webpush below
-        android=messaging.AndroidConfig(priority="high", notification=messaging.AndroidNotification(tag=(data or {}).get("tag"), click_action="FLUTTER_NOTIFICATION_CLICK")) if any_native else None,
-        apns=messaging.APNSConfig(payload=messaging.APNSPayload(aps=messaging.Aps(sound="default", thread_id=(data or {}).get("tag")))) if any_native else None,
+        android=messaging.AndroidConfig(priority="high", notification=messaging.AndroidNotification(tag=(data or {}).get("tag"), click_action="FLUTTER_NOTIFICATION_CLICK", **({"sound": None, "default_sound": False, "default_vibrate_timings": False} if muted else {}))) if any_native else None,
+        apns=messaging.APNSConfig(payload=messaging.APNSPayload(aps=messaging.Aps(sound=None if muted else "default", thread_id=(data or {}).get("tag")))) if any_native else None,
         webpush=messaging.WebpushConfig(
-            notification=messaging.WebpushNotification(title=title, body=body[:300], icon="/brand/mark-512.png", badge="/brand/mark-512.png", tag=(data or {}).get("tag"), renotify=bool((data or {}).get("tag"))),
+            notification=messaging.WebpushNotification(title=title, body=body[:300], icon="/brand/mark-512.png", badge="/brand/mark-512.png", tag=(data or {}).get("tag"), renotify=bool((data or {}).get("tag")) and not muted, silent=muted, vibrate=[] if muted else None),
             fcm_options=messaging.WebpushFCMOptions(link=link if link.startswith("http") else f"{os.environ.get('APP_URL', '').rstrip('/')}{link}" if os.environ.get("APP_URL") else link)),
     )
     try:
