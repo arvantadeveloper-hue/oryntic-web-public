@@ -140,3 +140,6 @@ code, pre { font-family: 'JetBrains Mono', monospace; }
 .md-body a{color:#2F6BFF}
 .md-body table{border-collapse:collapse;margin:.6em 0;width:100%}
 .md-body th,.md-body td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+
+@keyframes renderShimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+.render-shimmer { background: linear-gradient(100deg, transparent 20%, rgba(47, 107, 255, 0.14) 50%, transparent 80%); animation: renderShimmer 1.6s ease-in-out infinite; }

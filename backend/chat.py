@@ -1,5 +1,6 @@
 import json
 import re
+import logging
 import asyncio
 import base64
 import io
@@ -15,7 +16,7 @@ from auth import current_user, workspace_id, _lang_name
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit, throttle_message, inflight_start, inflight_end
-from tools import route_model, wants_tool, plan_tool, GITHUB_RE, SOCIAL_RE, run_image_tool, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task
+from tools import route_model, wants_tool, plan_tool, GITHUB_RE, SOCIAL_RE, run_image_tool, run_video_tool, video_rate, is_media_refusal, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task
 from pricing import rate as tool_rate
 from llm import model_label
 
@@ -448,6 +449,7 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in. Never switch to another language unless the user themselves writes in a different language."]
     parts.append(f"You are '{persona['name']}', an AI persona. {prof.get('system_instructions','')}")
     parts += persona_block(persona["name"], lang_name, voice_mode)
+    parts.append("CAPABILITIES: You CAN create and show images (photorealistic photos, renders, illustrations, logos, posters), short videos/clips and downloadable documents directly in this chat — the platform renders them for you automatically whenever the user asks. NEVER say you cannot render, generate, display or send images or videos. If the user asks for one and it has not appeared yet, simply say briefly that you are preparing it.")
     pers = prof.get("personality", {})
     parts.append(f"Persona flavour (secondary to the conversation style above): communication style {pers.get('communication_style','')}; formality {pers.get('formality','')}; attitude {pers.get('attitude','')}.")
     mems = _relevant_memories(await db.memory_items.find({"user_id": user["id"], "persona_id": persona["id"], "enabled": True}).to_list(50), query)
@@ -598,7 +600,7 @@ async def _image_turn(ctx, plan: dict, confirm_threshold: int):
         async for ev in _emit_final(ctx, _image_set_text(task, n), 0, {"tool": "image_set", "task_id": task["id"]}):
             yield ev
         return
-    yield ctx.sse(status="Sedang membuat gambar...")
+    yield ctx.sse(status="Merender gambar...", rendering="image")
     out = None
     try:
         out = await run_image_tool(ctx.user["id"], prompt)
@@ -611,6 +613,44 @@ async def _image_turn(ctx, plan: dict, confirm_threshold: int):
     await record_usage(ctx.user["id"], "image_generation", out["credits"], {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"]})
     async for ev in _emit_final(ctx, "Ini gambarnya! ✨ Kalau mau diubah gayanya, bilang saja.", out["credits"], {"media": out["media"], "tool": "image"}):
         yield ev
+
+
+VIDEO_WAIT_TEXT = "Oke, aku render videonya sekarang. 🎬 Proses ini biasanya 2–5 menit — hasilnya akan muncul otomatis di sini begitu selesai."
+VIDEO_DONE_TEXT = "Ini videonya! 🎬 Kalau mau adegan atau gayanya diubah, bilang saja."
+VIDEO_FAIL_TEXT = "Maaf, videonya belum berhasil dirender. Coba ulangi dengan deskripsi adegan yang lain ya."
+
+
+async def _run_video_bg(mid: str, cid: str, uid: str, persona_id: Optional[str], prompt: str):
+    """Background: render the clip, then replace the placeholder message with the video (pushed over the conversation socket)."""
+    try:
+        out = await run_video_tool(uid, prompt)
+        await record_usage(uid, "video_generation", out["credits"], {"conversation_id": cid, "persona_id": persona_id})
+        upd = {"content": VIDEO_DONE_TEXT, "media": out["media"], "tool": "video", "credits": out["credits"], "rendering": None}
+    except Exception as exc:
+        logging.getLogger("chat").warning("video render failed: %s", exc)
+        upd = {"content": VIDEO_FAIL_TEXT, "tool": "video", "error": True, "rendering": None}
+    await db.messages.update_one({"id": mid}, {"$set": upd})
+    msg = await db.messages.find_one({"id": mid}, {"_id": 0})
+    if msg:
+        await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona_id, "message": msg})
+
+
+async def _video_turn(ctx, plan: dict, confirm_threshold: int):
+    credits = video_rate()
+    prompt = (plan.get("video_prompt") or ctx.user_text).strip()
+    yield ctx.sse(start=True)
+    if credits >= confirm_threshold:
+        text = f"Siap, aku bisa render videonya! 🎬 Klip ±5 detik, perkiraan biaya ±{credits} kredit. Lanjutkan?"
+        yield ctx.sse(delta=text)
+        async for ev in _emit_final(ctx, text, 0, {"pending_tool": {"kind": "video", "prompt": prompt, "credits": credits, "count": 1}}):
+            yield ev
+        return
+    yield ctx.sse(status="Merender video...", rendering="video")
+    msg = await _save_ai_msg(ctx.cid, ctx.persona, VIDEO_WAIT_TEXT, 0, ctx.via, {"rendering": "video", "tool": "video"})
+    asyncio.create_task(_run_video_bg(msg["id"], ctx.cid, ctx.user["id"], ctx.persona["id"], prompt))
+    yield ctx.sse(final=True, message_id=msg["id"], content=VIDEO_WAIT_TEXT, rendering="video", tool="video")
+    await notify(ctx.cid, {"type": "message", "role": "assistant", "persona_id": ctx.persona["id"], "message": clean(msg)})
+    yield 0
 
 
 async def _document_turn(ctx, plan: dict):
@@ -883,7 +923,7 @@ async def _tool_turn(ctx, plan: dict):
         gen = _social_turn(ctx, plan)
     else:
         cfg = await get_routing()
-        gen = _image_turn(ctx, plan, cfg["confirm_threshold"]) if plan["tool"] == "image" else _document_turn(ctx, plan)
+        gen = {"image": _image_turn, "video": _video_turn}.get(plan["tool"], lambda c, p, _t: _document_turn(c, p))(ctx, plan, cfg["confirm_threshold"])
     async for ev in gen:
         yield ev
 
@@ -1084,6 +1124,14 @@ async def _plain_reply(ctx: ReplyCtx):
         full = await llm_text(ctx.system, ctx.prompt, ctx.model_key)
     except Exception:
         full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
+    if not ctx.voice_mode and is_media_refusal(ctx.user_text, full):
+        # the model wrongly claimed it cannot render — render it anyway
+        plan = await plan_tool(ctx.user_text, ctx.prompt)
+        if plan.get("tool") not in ("image", "video"):
+            plan = {"tool": "video" if re.search(r"\b(video\w*|klip|clip|animasi|reels?)\b", ctx.user_text, re.I) else "image", "image_prompts": [ctx.user_text], "image_prompt": ctx.user_text, "video_prompt": ctx.user_text}
+        async for ev in _tool_turn(ctx, plan):
+            yield ev
+        return
     yield ctx.sse(delta=full)  # whole reply at once — no word-by-word typing effect
     used = text_credits(ctx.prompt, full, ctx.model_key)
     await record_usage(ctx.user["id"], "chat", used, {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"], "model": ctx.model_key, **ctx.meta_extra})
@@ -1441,6 +1489,12 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, u: dict = 
         await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
         await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
         return {**msg, **upd, "pending_tool": None}
+    if pt.get("kind") == "video":
+        upd = {"content": VIDEO_WAIT_TEXT, "tool": "video", "rendering": "video"}
+        await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
+        await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
+        asyncio.create_task(_run_video_bg(mid, cid, u["id"], msg.get("persona_id"), pt["prompt"]))
+        return {**msg, **upd, "pending_tool": None}
     if pt.get("kind") == "image_set" and len(pt.get("prompts") or []) > 1:
         persona = await db.personas.find_one({"id": msg.get("persona_id")}, {"_id": 0, "id": 1, "name": 1}) or {"id": msg.get("persona_id"), "name": msg.get("persona_name") or "Asisten"}
         task = await _start_image_set(u, persona, cid, pt["prompts"], f"{len(pt['prompts'])} gambar")
@@ -1463,7 +1517,8 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, u: dict = 
 @router.post("/conversations/{cid}/messages/{mid}/cancel-tool")
 async def cancel_tool(cid: str, mid: str, u: dict = Depends(current_user)):
     msg = await _pending_msg(cid, mid, u)
-    upd = {"content": "Oke, pembuatan gambar dibatalkan. Kalau berubah pikiran, tinggal bilang ya!", "tool_cancelled": True}
+    what = {"video": "video", "social": "posting"}.get((msg.get("pending_tool") or {}).get("kind"), "gambar")
+    upd = {"content": f"Oke, pembuatan {what} dibatalkan. Kalau berubah pikiran, tinggal bilang ya!", "tool_cancelled": True}
     await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
     await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
     return {**msg, **upd, "pending_tool": None}

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon } from "lucide-react";
+import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 
@@ -42,9 +42,29 @@ export function MediaList({ media = [], dark = false }) {
 }
 
 // "Buat gambar? ±25 kredit" confirmation for expensive tools.
+const RENDER_LABEL = { image: "Merender gambar…", video: "Merender video… (±2–5 menit)" };
+
+export function RenderingBox({ kind = "image", dark = false }) {
+  const Icon = kind === "video" ? Clapperboard : ImageIcon;
+  return (
+    <div data-testid={`rendering-box-${kind}`} className={`relative mt-2 w-full max-w-[420px] overflow-hidden rounded-xl border ${kind === "video" ? "aspect-video" : "aspect-[4/3]"} ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-100"}`}>
+      <div className="render-shimmer absolute inset-0" />
+      <div className={`relative flex h-full flex-col items-center justify-center gap-2 ${dark ? "text-white/70" : "text-slate-500"}`}>
+        <span className={`flex h-11 w-11 items-center justify-center rounded-full ${dark ? "bg-white/10" : "bg-white shadow-sm"}`}><Icon size={20} className="animate-pulse text-[#2F6BFF]" /></span>
+        <span className="flex items-center gap-1.5 text-xs font-semibold"><Loader2 size={12} className="animate-spin" /> {RENDER_LABEL[kind] || RENDER_LABEL.image}</span>
+      </div>
+    </div>
+  );
+}
+
+const TOOL_LABEL = (pt) => pt.kind === "social" ? `Posting ke ${(pt.providers || []).join(", ")}`
+  : pt.kind === "video" ? `Render video ±5 detik · ±${pt.credits} kredit`
+  : pt.count > 1 ? `Buat ${pt.count} gambar (tugas Ruang Kerja) · ±${pt.credits} kredit` : `Buat gambar · ±${pt.credits} kredit`;
+
 export function ToolRequestCard({ m, cid, onDone, dark = false }) {
   const [busy, setBusy] = useState(m.pending_tool?.running ? "run" : "");
   if (!m.pending_tool) return null;
+  if (busy === "run" && (m.pending_tool.kind === "image" || m.pending_tool.kind === "video")) return <RenderingBox kind={m.pending_tool.kind} dark={dark} />;
   const act = async (kind) => {
     setBusy(kind);
     try { await api.post(`/conversations/${cid}/messages/${m.id}/${kind === "run" ? "run-tool" : "cancel-tool"}`, null, { params: kind === "run" ? { app_url: window.location.origin } : {} }); await onDone?.(); }
@@ -52,7 +72,7 @@ export function ToolRequestCard({ m, cid, onDone, dark = false }) {
   };
   return (
     <div data-testid="tool-request-card" className={`mt-2 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
-      <ImageIcon size={14} /><span className="flex-1 font-semibold">{m.pending_tool.kind === "social" ? `Posting ke ${(m.pending_tool.providers || []).join(", ")}` : m.pending_tool.count > 1 ? `Buat ${m.pending_tool.count} gambar (tugas Ruang Kerja) · ±${m.pending_tool.credits} kredit` : `Buat gambar · ±${m.pending_tool.credits} kredit`}</span>
+      {m.pending_tool.kind === "video" ? <Clapperboard size={14} /> : <ImageIcon size={14} />}<span className="flex-1 font-semibold">{TOOL_LABEL(m.pending_tool)}</span>
       <button onClick={() => act("run")} disabled={!!busy} data-testid="tool-run-btn" className="flex items-center gap-1 rounded-lg bg-[#2F6BFF] px-3 py-1.5 font-bold text-white disabled:opacity-60">{busy === "run" ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Lanjutkan</button>
       <button onClick={() => act("cancel")} disabled={!!busy} data-testid="tool-cancel-btn" className={`rounded-lg px-3 py-1.5 font-semibold disabled:opacity-60 ${dark ? "bg-white/10" : "bg-white"}`}>Batal</button>
     </div>

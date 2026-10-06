@@ -75,17 +75,27 @@ SOCIAL_RE = re.compile(r"\b(linkedin|instagram|facebook|youtube|sosmed|social me
 GITHUB_RE = re.compile(r"\b(github|gitlab|repo|repository|repositori|pull ?request|merge ?request|PR|MR|issues?|branch|commit|review|diff)\b", re.I)
 
 
+MEDIA_RE = re.compile(r"\b(gambar\w*|image|picture|foto\w*|photo\w*|ilustrasi|illustration|logo|poster|banner|visual\w*|sketsa|lukisan|render\w*|wallpaper|thumbnail|video\w*|klip|clip|animasi|animation|reels?|footage|cuplikan)\b", re.I)
+REFUSAL_RE = re.compile(r"(belum|tidak|nggak|gak|tak)\s+(bisa|dapat|mampu|sanggup)\s+(me(m|n|ng)?)?(render|buat|bikin|hasilkan|tampilkan|munculkan|generate|kirim)\w*[^.\n]{0,40}\b(gambar|foto|image|visual|video|klip|ilustrasi)|\b(can(no|')t|unable to)\s+(render|generate|create|display|make|show)\w*[^.\n]{0,40}\b(image|picture|photo|video|visual)", re.I)
+
+
 def wants_tool(text: str) -> bool:
-    return bool(text) and ((bool(TOOL_RE.search(text)) and bool(CREATE_RE.search(text))) or bool(DRIVE_RE.search(text)) or bool(GITHUB_RE.search(text)) or bool(SOCIAL_RE.search(text)))
+    return bool(text) and ((bool(TOOL_RE.search(text)) and bool(CREATE_RE.search(text))) or bool(MEDIA_RE.search(text)) or bool(DRIVE_RE.search(text)) or bool(GITHUB_RE.search(text)) or bool(SOCIAL_RE.search(text)))
+
+
+def is_media_refusal(user_text: str, reply: str) -> bool:
+    """The model claimed it cannot render an image/video although the user asked for one."""
+    return bool(user_text and reply and MEDIA_RE.search(user_text) and REFUSAL_RE.search(reply))
 
 
 async def plan_tool(text: str, history: str) -> dict:
     sys = ('Decide if the user\'s LAST message explicitly asks the assistant to CREATE a deliverable or act on an external service. Reply JSON only: '
-           '{"tool":"image"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"github_review"|"gitlab_repos"|"gitlab_read"|"gitlab_issues"|"gitlab_pr"|"gitlab_review"|"social_publish"|"none",'
-           '"image_prompt":str,"image_prompts":[str],"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet",'
+           '{"tool":"image"|"video"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"github_review"|"gitlab_repos"|"gitlab_read"|"gitlab_issues"|"gitlab_pr"|"gitlab_review"|"social_publish"|"none",'
+           '"image_prompt":str,"image_prompts":[str],"video_prompt":str,"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet",'
            '"repo":str,"path":str,"query":str,"state":"open"|"closed"|"all","files":[str],"number":int,"providers":[str],"caption":str,"content_kind":"text"|"image"|"video"}. '
-           '"image" = the user wants a picture/illustration/logo/poster generated. If they ask for MORE THAN ONE image (e.g. "3 variasi", "beberapa poster", '
+           '"image" = the user wants ANY still visual generated, shown or rendered: photo, photorealistic/realistic picture, render, illustration, logo, poster, banner, wallpaper, thumbnail, sketch, painting, visualization ("tunjukkan", "tampilkan", "render", "visualisasikan", "gambarkan" count as a request). Also when they ask to change/redo the style of a previously generated image. If they ask for MORE THAN ONE image (e.g. "3 variasi", "beberapa poster", '
            '"gambar A dan gambar B"), put one detailed English prompt PER image in image_prompts (max 6) and the first one in image_prompt; for a single image image_prompts has exactly one item. '
+           '"video" = the user wants a short video/clip/animation/reel/footage generated or rendered (video_prompt: detailed English prompt describing scene, motion, camera, mood, ~5 seconds). '
            '"document" = the user wants a written file '
            '(report, proposal, letter, article, notulen, template) they can download. Otherwise "none" (questions, explanations, '
            'tables shown inline, code snippets are NOT documents). image_prompt: detailed English prompt for an image model. '
@@ -108,12 +118,14 @@ async def plan_tool(text: str, history: str) -> dict:
         plan = await llm_json(sys, f"Recent conversation:\n{history[-2500:]}\n\nLAST MESSAGE: {text}")
     except Exception:
         plan = {}
-    if plan.get("tool") not in ("image", "document", "drive_save", "drive_update", "drive_link", "github_repos", "github_read", "github_issues", "github_pr", "github_review", "gitlab_repos", "gitlab_read", "gitlab_issues", "gitlab_pr", "gitlab_review", "social_publish"):
+    if plan.get("tool") not in ("image", "video", "document", "drive_save", "drive_update", "drive_link", "github_repos", "github_read", "github_issues", "github_pr", "github_review", "gitlab_repos", "gitlab_read", "gitlab_issues", "gitlab_pr", "gitlab_review", "social_publish"):
         return {"tool": "none"}
     if plan["tool"] == "image":
         prompts = [str(p).strip() for p in (plan.get("image_prompts") or []) if str(p).strip()][:6]
         plan["image_prompts"] = prompts or [(plan.get("image_prompt") or "").strip() or "illustration"]
         plan["image_prompt"] = plan["image_prompts"][0]
+    if plan["tool"] == "video":
+        plan["video_prompt"] = (plan.get("video_prompt") or plan.get("image_prompt") or "").strip() or "cinematic short clip"
     return plan
 
 
@@ -256,6 +268,29 @@ async def run_image_tool(uid: str, prompt: str) -> dict:
     await asyncio.to_thread(put_object, path, raw, mime)
     await add_storage(uid, len(raw))
     return {"media": [{"type": "image", "path": path, "name": f"gambar.{ext}"}], "credits": rate("image")}
+
+
+def video_rate() -> int:
+    """Credits for one ~5-second Seedance clip at the platform tariff."""
+    import math
+    from pricing import RATES
+    return max(1, math.ceil(float(RATES.get("video_per_sec", 16)) * 5))
+
+
+async def run_video_tool(uid: str, prompt: str) -> dict:
+    from video_gen import generate_seedance_video
+    from storage import store_remote_video
+    url = await asyncio.to_thread(generate_seedance_video, prompt)
+    if not url:
+        raise RuntimeError("video generation returned nothing")
+    vid = new_id()
+    path = await asyncio.to_thread(store_remote_video, url, uid, vid)
+    media = {"type": "video", "name": "video.mp4"}
+    if path:
+        media["path"] = path
+    else:
+        media["url"] = url
+    return {"media": [media], "credits": video_rate()}
 
 
 async def run_document_tool(uid: str, system: str, title: str, instructions: str, history: str, model_key: Optional[str]) -> dict:

@@ -6,7 +6,7 @@ import { api, streamChatWithAtt } from "../lib/api";
 import { GalleryPicker } from "./GalleryPicker";
 import { DrivePicker } from "./DrivePicker";
 import { Markdown } from "./Markdown";
-import { MediaList, ToolRequestCard, ModelBadge } from "./MessageExtras";
+import { MediaList, ToolRequestCard, ModelBadge, RenderingBox } from "./MessageExtras";
 
 const VIDEO_RE = /https?:\/\/[^\s)>"']+\.(?:mp4|webm)(?:\?[^\s)>"']*)?/gi;
 const IMAGE_RE = /https?:\/\/[^\s)>"']+\.(?:png|jpe?g|gif|webp)(?:\?[^\s)>"']*)?/gi;
@@ -64,6 +64,7 @@ function Bubble({ m, me, cid, onRefresh }) {
         ? <a key={k} href={a.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-md bg-white/20 px-1.5 py-0.5 text-[11px] hover:underline"><HardDrive size={10} />{a.name}<ExternalLink size={9} /></a>
         : <span key={k} className="flex items-center gap-1 rounded-md bg-white/20 px-1.5 py-0.5 text-[11px]">{a.type === "image" ? <ImageIcon size={10} /> : <FileText size={10} />}{a.name}</span>)}</div>}
       {me ? <p className="whitespace-pre-wrap break-words">{m.content}</p> : <div className={MD_DARK}><Markdown content={m.content} /></div>}
+      {!me && m.rendering && !mediaOf(m).length && <RenderingBox kind={m.rendering} dark />}
       {!me && <MediaList media={mediaOf(m)} dark />}
       {!me && <ToolRequestCard m={m} cid={cid} onDone={onRefresh} dark />}
       {!me && <ModelBadge m={m} dark />}
@@ -119,8 +120,8 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
     try {
       await streamChatWithAtt(cid, text, a, (ev) => {
         if (ev.persona_id && ev.start) { reply.name = ev.persona_name; reply.text = ""; put(); }
-        if (ev.persona_id && ev.status) { reply.status = ev.status; put(); }
-        if (ev.persona_id && ev.delta !== undefined) { reply.text += ev.delta; reply.status = ""; put(); }
+        if (ev.persona_id && ev.status) { reply.status = ev.status; reply.rendering = ev.rendering || ""; put(); }
+        if (ev.persona_id && ev.delta !== undefined) { reply.text += ev.delta; reply.status = ""; reply.rendering = ""; put(); }
         if (ev.attachments_context) onAttach?.(ev.attachment_names || a.map((x) => x.name), ev.attachments_context);
         if (ev.persona_id && ev.final) { reply.done = true; put(); if (ev.content) onExchange?.(text, ev.content, ev.persona_name); }
       }, { channel: "meeting_chat" });
@@ -159,7 +160,7 @@ export function MeetingChatPanel({ cid, messages = [], onRefresh, onClose, onExc
         {live && (
           <div className="mr-3 rounded-2xl bg-white/[0.07] px-3.5 py-2.5 text-sm text-white/90" data-testid="mc-live">
             <div className="mb-1 text-[10px] font-bold uppercase tracking-wider opacity-60">{live.name || "Asisten"}</div>
-            {live.status ? <p className="flex items-center gap-2 text-white/70" data-testid="mc-live-status"><Loader2 size={13} className="animate-spin" /> {live.status}</p>
+            {live.rendering ? <RenderingBox kind={live.rendering} dark /> : live.status ? <p className="flex items-center gap-2 text-white/70" data-testid="mc-live-status"><Loader2 size={13} className="animate-spin" /> {live.status}</p>
               : live.text ? <div className={MD_DARK}><Markdown content={live.text} /></div> : <span className="inline-flex gap-1"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/60" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/60" style={{ animationDelay: ".15s" }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/60" style={{ animationDelay: ".3s" }} /></span>}
           </div>
         )}

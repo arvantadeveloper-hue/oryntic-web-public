@@ -10,7 +10,7 @@ import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
 import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
-import { MediaList, ToolRequestCard, ModelBadge, downloadUrl } from "../components/MessageExtras";
+import { MediaList, ToolRequestCard, ModelBadge, RenderingBox, downloadUrl } from "../components/MessageExtras";
 import { GalleryPicker } from "../components/GalleryPicker";
 import { DrivePicker } from "../components/DrivePicker";
 import { SummaryPrompt } from "../components/ConversationTools";
@@ -258,8 +258,8 @@ export default function Chat() {
         const k = key(pid); keys.add(k);
         const base = { pid, name: ev.persona_name, portrait: ev.portrait, moderator: ev.is_moderator, text: "" };
         if (ev.start) setLiveMap((prev) => ({ ...prev, [k]: { ...base } }));
-        if (ev.status) setLiveMap((prev) => ({ ...prev, [k]: { ...(prev[k] || base), status: ev.status } }));
-        if (ev.delta !== undefined) setLiveMap((prev) => { const cur = prev[k] || base; return { ...prev, [k]: { ...cur, status: "", text: cur.text + ev.delta } }; });
+        if (ev.status) setLiveMap((prev) => ({ ...prev, [k]: { ...(prev[k] || base), status: ev.status, rendering: ev.rendering || "" } }));
+        if (ev.delta !== undefined) setLiveMap((prev) => { const cur = prev[k] || base; return { ...prev, [k]: { ...cur, status: "", rendering: "", text: cur.text + ev.delta } }; });
         if (ev.final && speaker && ev.content) playTTS(ev.content, ev.voice);
         if (ev.summary_request) setSummaryRequest(true);
         if (ev.done) refreshUser();
@@ -419,6 +419,7 @@ export default function Chat() {
                   <p className="mb-1 text-xs font-semibold text-slate-500">{m.persona_name}{m.is_moderator && " · moderator"}</p>
                   <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm ${m.is_moderator ? "border border-[#2F6BFF]/30 bg-[#EEF3FF] text-slate-700" : "aivora-card text-slate-700"}`} data-testid="msg-assistant">
                     <Markdown content={m.content} />
+                    {m.rendering && !(m.media || []).length && <RenderingBox kind={m.rendering} />}
                     <MediaList media={m.media || []} />
                     {m.task_id && <TaskCard m={m} onOpen={setPanelTask} />}
                     <ToolRequestCard m={m} cid={id} onDone={refreshMsgs} />
@@ -444,7 +445,7 @@ export default function Chat() {
                 <div className="max-w-[78%]">
                   <p className="mb-1 text-xs font-semibold text-slate-500">{l.name}</p>
                   <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm ${l.moderator ? "border border-[#2F6BFF]/30 bg-[#EEF3FF]" : "aivora-card"} text-slate-700`} data-testid="msg-streaming">
-                    {l.status ? <span className="flex items-center gap-2 text-slate-500" data-testid="msg-streaming-status"><Loader2 size={13} className="animate-spin" /> {l.status}</span> : l.text ? <Markdown content={l.text} /> : <span className="inline-flex gap-1"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: ".15s" }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: ".3s" }} /></span>}
+                    {l.rendering ? <RenderingBox kind={l.rendering} /> : l.status ? <span className="flex items-center gap-2 text-slate-500" data-testid="msg-streaming-status"><Loader2 size={13} className="animate-spin" /> {l.status}</span> : l.text ? <Markdown content={l.text} /> : <span className="inline-flex gap-1"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: ".15s" }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: ".3s" }} /></span>}
                   </div>
                 </div>
               </div>
