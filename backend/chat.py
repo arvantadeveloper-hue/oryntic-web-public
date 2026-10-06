@@ -1016,9 +1016,7 @@ async def _plain_reply(ctx: ReplyCtx):
         full = await llm_text(ctx.system, ctx.prompt, ctx.model_key)
     except Exception:
         full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
-    for i, w in enumerate(full.split(" ")):
-        yield ctx.sse(delta=(w if i == 0 else " " + w))
-        await asyncio.sleep(0.01)
+    yield ctx.sse(delta=full)  # whole reply at once — no word-by-word typing effect
     used = text_credits(ctx.prompt, full)
     await record_usage(ctx.user["id"], "chat", used, {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"], "model": ctx.model_key, **ctx.meta_extra})
     extra = {"model_key": ctx.model_key, "model_label": model_label(ctx.model_key), "routed": ctx.routed} if ctx.routed else {}
@@ -1237,9 +1235,7 @@ async def _moderator_interject(cid: str, u: dict, roster: list, reason: str):
         yield 0
         return
     yield f"data: {json.dumps({**MOD_META, 'start': True})}\n\n"
-    for i, w in enumerate(inter.split(" ")):
-        yield f"data: {json.dumps({**MOD_META, 'delta': (w if i == 0 else ' ' + w)})}\n\n"
-        await asyncio.sleep(0.008)
+    yield f"data: {json.dumps({**MOD_META, 'delta': inter})}\n\n"
     yield f"data: {json.dumps({**MOD_META, 'final': True, 'content': inter})}\n\n"
     yield used
 
