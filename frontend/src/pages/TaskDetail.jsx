@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { onUserEvent, isWsConnected } from "../lib/userEvents";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Download, Copy, CheckCircle2, Loader2, Clock, XCircle, MessageSquare, Phone, X, History, FileText, FileSpreadsheet, FileType, Bot, PencilLine } from "lucide-react";
+import { ArrowLeft, Download, Copy, CheckCircle2, Loader2, Clock, XCircle, MessageSquare, Phone, X, History, GitCompareArrows, FileText, FileSpreadsheet, FileType, Bot, PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { Markdown } from "../components/Markdown";
 import { MediaList } from "../components/MessageExtras";
 import { Mark } from "../components/Logo";
+import { VersionDiff } from "../components/VersionDiff";
 
 const roleColor = { Research: "#00D1FF", Planning: "#F59E0B", Writing: "#7C3AED", Analyst: "#06B6D4", Coding: "#10B981", Reviewer: "#EF4444" };
 const FORMATS = [
@@ -136,8 +137,9 @@ export default function TaskDetail() {
   const nav = useNavigate();
   const [task, setTask] = useState(null);
   const [viewVer, setViewVer] = useState(null); // {version, content}
+  const [compare, setCompare] = useState(null); // {version, content} base version shown as a diff against the one being viewed
 
-  const load = () => api.get(`/tasks/${id}`).then((r) => { setTask(r.data); setViewVer(null); }).catch(() => {});
+  const load = () => api.get(`/tasks/${id}`).then((r) => { setTask(r.data); setViewVer(null); setCompare(null); }).catch(() => {});
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
   useEffect(() => {
     if (!task) return;
@@ -160,6 +162,15 @@ export default function TaskDetail() {
   };
   const content = viewVer ? viewVer.content : task.final_output;
   const allVersions = [...(task.versions || []).map((v) => v.version), task.version];
+  const curVer = viewVer ? viewVer.version : task.version;
+  const fetchVer = async (v) => (v === task.version ? { version: v, content: task.final_output } : (await api.get(`/tasks/${id}/versions/${v}`)).data);
+  const toggleCompare = async () => {
+    if (compare) { setCompare(null); return; }
+    const base = [...allVersions].filter((v) => v < curVer).pop() ?? allVersions.find((v) => v !== curVer);
+    if (base === undefined) return;
+    try { setCompare(await fetchVer(base)); } catch (e) { toast.error("Versi tidak ditemukan"); }
+  };
+  const setBase = async (v) => { try { setCompare(await fetchVer(v)); } catch (e) { toast.error("Versi tidak ditemukan"); } };
 
   return (
     <div className="mx-auto max-w-4xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="task-detail-page">
@@ -221,6 +232,9 @@ export default function TaskDetail() {
                   </select>
                 </label>
               )}
+              {allVersions.length > 1 && (
+                <button onClick={toggleCompare} className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs ${compare ? "border-[#2F6BFF] bg-[#EEF3FF] font-semibold text-[#2F6BFF]" : "border-slate-200 text-slate-600"}`} data-testid="compare-toggle" title="Tampilkan perbedaan dengan versi lain"><GitCompareArrows size={13} /> {compare ? "Tutup perbandingan" : "Bandingkan"}</button>
+              )}
               <button onClick={() => { navigator.clipboard.writeText(content || ""); toast.success("Disalin"); }} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600" data-testid="copy-output"><Copy size={13} /> Salin</button>
               <RevisePanel task={task} onDone={load} />
             </div>
@@ -231,7 +245,18 @@ export default function TaskDetail() {
             <video src={task.video_path ? `${API_BASE}/files/${task.video_path}?auth=${getToken()}` : task.video_url} controls className="mb-3 w-full rounded-2xl border border-[#E7ECF3]" data-testid="task-video" />
           )}
           {(task.media || []).length > 0 && <div className="mb-3 aivora-card p-4" data-testid="task-media"><MediaList media={task.media} /></div>}
-          <div className="aivora-card p-6" data-testid="final-output"><Markdown content={content} /></div>
+          {compare && (
+            <div className="mb-3" data-testid="compare-panel">
+              <label className="mb-2 flex items-center gap-2 text-xs text-slate-600">Bandingkan v{curVer} dengan
+                <select value={compare.version} onChange={(e) => setBase(parseInt(e.target.value, 10))} className="rounded-lg border border-slate-200 bg-white px-2 py-1 outline-none" data-testid="compare-base-select">
+                  {allVersions.filter((v) => v !== curVer).map((v) => <option key={v} value={v}>v{v}</option>)}
+                </select>
+                <span className="text-slate-400">· hijau = ditambahkan, merah = dihapus</span>
+              </label>
+              <VersionDiff oldText={compare.content} newText={content} oldLabel={`v${compare.version}`} newLabel={`v${curVer}`} />
+            </div>
+          )}
+          {!compare && <div className="aivora-card p-6" data-testid="final-output"><Markdown content={content} /></div>}
           <p className="mt-3 text-right text-xs text-slate-500">Total: {task.credits_used} kredit</p>
         </div>
       )}

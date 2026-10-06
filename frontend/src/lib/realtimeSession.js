@@ -8,6 +8,11 @@ export const vadUpdate = (sensitivity, createResponse) => ({
   session: { type: "realtime", audio: { input: { turn_detection: { type: "semantic_vad", eagerness: ({ low: "low", medium: "low", high: "medium" })[sensitivity] || "low", create_response: createResponse, interrupt_response: false } } } },
 });
 
+// Short listener sounds ("hmm", "iya", "oke"...) are backchannels, not turns — see REALTIME AVATAR CONVERSATION BEHAVIOR in the persona prompt.
+const BACKCHANNEL_WORD = "(h+m+|he+m+|e+m+|m+|he-?e[hm]|ya+|iya+|yoi|oh+|oke+|okey|ok|okay|sip+|hehe+|he+|gitu|baik|betul|bener)";
+export const isBackchannel = (t) => { const w = (t || "").toLowerCase().replace(/[^\p{L}\s-]/gu, " ").trim().split(/\s+/).filter(Boolean); return w.length > 0 && w.length <= 3 && w.every((x) => new RegExp(`^${BACKCHANNEL_WORD}$`, "u").test(x)); };
+export const RESUME_AFTER_BACKCHANNEL = (t) => `The user only made a short listening sound ("${t}") — it was NOT an interruption. Continue your previous answer exactly from where you stopped, without repeating what you already said and without commenting on the interruption.`;
+
 // Replaces old audio turns with ONE compact text item, so every new response re-reads far fewer (and cheaper, text) input tokens.
 export class ContextPruner {
   constructor(session, { keep = 6, threshold = 14, maxChars = 2400 } = {}) {

@@ -8,7 +8,7 @@ export const SENS_HINT = {
   medium: "Seimbang — suara Anda lolos, obrolan orang jauh diabaikan.",
   high: "Peka — untuk ruangan sunyi atau suara pelan.",
 };
-export const BARGE_CONFIRM_MS = 700; // sustained voice needed before we treat it as a real interruption
+export const BARGE_CONFIRM_MS = 1300; // sustained voice needed before we treat it as a real interruption ("hmm"/"iya" backchannels stay below this)
 const PREF_KEY = "aivora_mic_prefs";
 
 export function loadMicPrefs(user) {

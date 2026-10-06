@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Zap, MonitorUp, MonitorOff, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
-import { vadUpdate, reportUsage, ContextPruner, runVoiceTool } from "../lib/realtimeSession";
+import { vadUpdate, reportUsage, ContextPruner, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL } from "../lib/realtimeSession";
 import { captureFrame } from "../lib/peerAudio";
 import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
@@ -138,9 +138,17 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
         confirmInterrupt(); break;
       case "input_audio_buffer.speech_stopped":
         setPhase("thinking"); break;
-      case "conversation.item.input_audio_transcription.completed":
-        if (ev.transcript) saveTranscript("user", ev.transcript);
+      case "conversation.item.input_audio_transcription.completed": {
+        const t = (ev.transcript || "").trim();
+        if (t && isBackchannel(t) && Date.now() - interruptedAtRef.current < 8000) {
+          interruptedAtRef.current = 0;
+          if (respActiveRef.current) { send({ type: "response.cancel" }); send({ type: "output_audio_buffer.clear" }); } // server VAD already started answering the "hmm"
+          createResponse({ type: "response.create", response: { instructions: RESUME_AFTER_BACKCHANNEL(t) } });
+          break;
+        }
+        if (t) saveTranscript("user", t);
         break;
+      }
       case "response.output_audio.delta":
       case "response.audio.delta":
         setPhase("speaking"); break;
@@ -233,9 +241,10 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
   };
 
   // user truly barged in (sustained voice near the mic) → stop the assistant mid-sentence
+  const interruptedAtRef = useRef(0); // when we cut the assistant off; a backchannel transcript right after → resume instead of answering "hmm"
   const userInterrupted = () => {
     respQueueRef.current = [];
-    if (["speaking", "thinking"].includes(phaseRef.current)) { send({ type: "response.cancel" }); send({ type: "output_audio_buffer.clear" }); }
+    if (["speaking", "thinking"].includes(phaseRef.current)) { interruptedAtRef.current = Date.now(); send({ type: "response.cancel" }); send({ type: "output_audio_buffer.clear" }); }
     liveRef.current = ""; setLive(""); setPhase("user_speaking");
   };
   const confirmInterrupt = () => {

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap, Gavel, VolumeX, Volume2, MonitorUp, MonitorOff, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { RealtimeSession, runVoiceTool } from "../lib/realtimeSession";
+import { RealtimeSession, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL } from "../lib/realtimeSession";
 import { PeerMesh, createMixer, captureFrame } from "../lib/peerAudio";
 import { PresentationPanel } from "./PresentationPanel";
 import { InviteButton, InviteDialog } from "./InviteToCall";
@@ -217,10 +217,11 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
     if (returnRef.current) { mod().toolOutput(returnRef.current.call_id, { status: "interrupted by user" }); returnRef.current = null; }
   };
 
+  const interruptedRef = useRef(null); // {callId, at} — a backchannel transcript right after → that speaker resumes
   const userInterrupted = () => {
     queueRef.current = [];
     const act = activeRef.current;
-    if (act) { byCall(act)?.cancel(); setStatus(byCall(act).persona.id, ""); }
+    if (act) { interruptedRef.current = { callId: act, at: Date.now() }; byCall(act)?.cancel(); setStatus(byCall(act).persona.id, ""); }
     if (toolRef.current) { const t = toolRef.current; toolRef.current = null; t.promise.then((out) => { byCall(t.callId)?.toolOutput(t.call_id, out); if (out.ok && t.name === "update_task") setTaskTick((x) => x + 1); }); }
     activeRef.current = null; settleTools();
     if (doneTimerRef.current) { clearTimeout(doneTimerRef.current); doneTimerRef.current = null; }
@@ -271,6 +272,12 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
         if (userTimerRef.current) clearTimeout(userTimerRef.current);
         const t = (ev.transcript || "").trim();
         if (!t) { if (!activeRef.current) listening(); break; }
+        if (isBackchannel(t)) {
+          const ir = interruptedRef.current; interruptedRef.current = null;
+          if (ir && Date.now() - ir.at < 8000 && byCall(ir.callId)) { enqueue(byCall(ir.callId), RESUME_AFTER_BACKCHANNEL(t)); startNext(); }
+          else if (!activeRef.current) listening(); // nothing was cut off: a lone "hmm" needs no answer
+          break;
+        }
         setCaption({ name: user?.name || "Anda", text: t });
         saveTranscript(s.callId, "user", t);
         panelists().forEach((o) => o.inject(`[${user?.name || "User"}]: ${t}`));
