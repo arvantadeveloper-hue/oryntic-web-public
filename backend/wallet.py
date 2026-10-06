@@ -28,8 +28,15 @@ async def wallet(u: dict = Depends(current_user)):
     for e in events:
         consumed += e.get("credits", 0)
         breakdown[e["feature"]] = breakdown.get(e["feature"], 0) + e.get("credits", 0)
+    from auth import credit_meta
+    meta = await credit_meta(u)
     return {
-        "available": user.get("credits", 0) if user else 0,
+        "available": meta["credits"],
+        "credits_cap": meta["credits_cap"],
+        "plan": (user or {}).get("plan"),
+        "trial_ends_at": (user or {}).get("trial_ends_at"),
+        "daily_limit": int(u.get("daily_credit_limit") or 0),
+        "daily_used": meta["daily_used"],
         "reserved": 0,
         "consumed": consumed,
         "transactions": txns,

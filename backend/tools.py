@@ -71,16 +71,21 @@ async def route_model(persona_model: Optional[str], text: str, extra_len: int, o
 
 
 DRIVE_RE = re.compile(r"\b(google ?drive|drive|gdrive|google ?docs?|spreadsheet|google ?sheets?)\b", re.I)
+GITHUB_RE = re.compile(r"\b(github|repo|repository|repositori|pull ?request|PR|issues?|branch|commit)\b", re.I)
 
 
 def wants_tool(text: str) -> bool:
-    return bool(text) and ((bool(TOOL_RE.search(text)) and bool(CREATE_RE.search(text))) or bool(DRIVE_RE.search(text)))
+    return bool(text) and ((bool(TOOL_RE.search(text)) and bool(CREATE_RE.search(text))) or bool(DRIVE_RE.search(text)) or bool(GITHUB_RE.search(text)))
 
 
 async def plan_tool(text: str, history: str) -> dict:
-    sys = ('Decide if the user\'s LAST message explicitly asks the assistant to CREATE a deliverable. Reply JSON only: '
-           '{"tool":"image"|"document"|"drive_save"|"drive_update"|"drive_link"|"none","image_prompt":str,"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet"}. '
-           '"image" = the user wants a picture/illustration/logo/poster generated. "document" = the user wants a written file '
+    sys = ('Decide if the user\'s LAST message explicitly asks the assistant to CREATE a deliverable or act on an external service. Reply JSON only: '
+           '{"tool":"image"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"none",'
+           '"image_prompt":str,"image_prompts":[str],"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet",'
+           '"repo":str,"path":str,"query":str,"state":"open"|"closed"|"all","files":[str]}. '
+           '"image" = the user wants a picture/illustration/logo/poster generated. If they ask for MORE THAN ONE image (e.g. "3 variasi", "beberapa poster", '
+           '"gambar A dan gambar B"), put one detailed English prompt PER image in image_prompts (max 6) and the first one in image_prompt; for a single image image_prompts has exactly one item. '
+           '"document" = the user wants a written file '
            '(report, proposal, letter, article, notulen, template) they can download. Otherwise "none" (questions, explanations, '
            'tables shown inline, code snippets are NOT documents). image_prompt: detailed English prompt for an image model. '
            'title: short document title in the user\'s language. instructions: what the document must contain. '
@@ -88,14 +93,23 @@ async def plan_tool(text: str, history: str) -> dict:
            '(kind "sheet" when they want a spreadsheet, else "doc"; text = the content to save if they described it). '
            '"drive_update" = user asks to update/edit/append to an existing Google Doc on Drive (file = document name or id as the user said it; '
            'text = the exact content to add/write; mode "replace" only if they want to overwrite). '
-           '"drive_link" = user asks for the Drive link of a document (file = name).')
+           '"drive_link" = user asks for the Drive link of a document (file = name). '
+           '"github_repos" = user asks to list/find their GitHub repositories (query = optional filter). '
+           '"github_read" = user asks to read/show/explain a file, folder or the structure of a GitHub repo (repo = owner/name as mentioned or from context; path = file/folder path or "" for the tree). '
+           '"github_issues" = user asks about issues/PRs of a repo (repo; state). '
+           '"github_pr" = user asks to change code/files in a repo and open a pull request / make a PR / fix something in the repo (repo; instructions = what to change; files = file paths they mentioned, may be empty; title = short PR title). '
+           'Only use github_* when GitHub/repo/PR/issue is clearly meant.')
     plan: dict = {}
     try:
         plan = await llm_json(sys, f"Recent conversation:\n{history[-2500:]}\n\nLAST MESSAGE: {text}")
     except Exception:
         plan = {}
-    if plan.get("tool") not in ("image", "document", "drive_save", "drive_update", "drive_link"):
+    if plan.get("tool") not in ("image", "document", "drive_save", "drive_update", "drive_link", "github_repos", "github_read", "github_issues", "github_pr"):
         return {"tool": "none"}
+    if plan["tool"] == "image":
+        prompts = [str(p).strip() for p in (plan.get("image_prompts") or []) if str(p).strip()][:6]
+        plan["image_prompts"] = prompts or [(plan.get("image_prompt") or "").strip() or "illustration"]
+        plan["image_prompt"] = plan["image_prompts"][0]
     return plan
 
 

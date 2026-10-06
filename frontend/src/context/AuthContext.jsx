@@ -18,21 +18,25 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
+  // every auth payload is followed by /auth/me so credit gauges (credits_cap, daily_used) are in sync from the first screen
+  const syncMe = () => api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {});
+
   const login = async (email, password) => {
     const r = await api.post("/auth/login", { email, password });
     setAuthToken(r.data.access_token);
     setUser(r.data.user);
+    syncMe();
     return r.data.user;
   };
 
   const register = async (email, password, name) => {
     const r = await api.post("/auth/register", { email, password, name, app_url: window.location.origin });
-    if (r.data.access_token) { setAuthToken(r.data.access_token); setUser(r.data.user); }
+    if (r.data.access_token) { setAuthToken(r.data.access_token); setUser(r.data.user); syncMe(); }
     return r.data;
   };
 
   // apply a {access_token, user} payload (email verification, invite acceptance, workspace switch)
-  const applyAuth = (data) => { setAuthToken(data.access_token); setUser(data.user); return data.user; };
+  const applyAuth = (data) => { setAuthToken(data.access_token); setUser(data.user); syncMe(); return data.user; };
 
   const switchWorkspace = async (workspaceId) => applyAuth((await api.post("/auth/switch-workspace", { workspace_id: workspaceId })).data);
 

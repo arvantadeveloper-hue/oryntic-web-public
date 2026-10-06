@@ -125,6 +125,10 @@ export default function Profile() {
       <div className="mt-4 aivora-card p-6 text-sm text-slate-500">
         <p className="font-semibold text-slate-900">Privasi & Data</p>
         <p className="mt-1">Data percakapan & memori Anda hanya digunakan untuk menjalankan layanan. Foto referensi persona hanya dipakai untuk penampilan visual. Anda dapat menghapus persona, memori, dan percakapan kapan saja.</p>
+        <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid="profile-legal-links">
+          <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-[#2F6BFF] hover:underline" data-testid="profile-terms-link">Ketentuan Layanan</a>
+          <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-[#2F6BFF] hover:underline" data-testid="profile-privacy-link">Kebijakan Privasi</a>
+        </p>
       </div>
     </div>
   );

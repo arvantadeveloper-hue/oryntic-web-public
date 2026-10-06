@@ -16,6 +16,7 @@ import { SummaryPrompt } from "../components/ConversationTools";
 import { ChatArchivesModal } from "../components/ChatArchives";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
 import { TaskContextCard, AddPersonaMenu, TaskOfferButtons, WorkspaceResults, ArchiveResults } from "../components/TaskChatTools";
+import { TaskCard, TaskSidePanel } from "../components/TaskPanel";
 
 function Avatar({ name, portrait, size = 32, moderator }) {
   if (moderator) return <span className="flex items-center justify-center rounded-full bg-[#0B132B] text-white" style={{ width: size, height: size }}><Gavel size={size * 0.5} /></span>;
@@ -65,6 +66,14 @@ export default function Chat() {
   const [showConvList, setShowConvList] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [showDrive, setShowDrive] = useState(false);
+  const [panelTask, setPanelTask] = useState(null);
+  // /workspace/<id> links inside messages open the side panel instead of leaving the chat
+  const onListClick = (e) => {
+    const a = e.target.closest && e.target.closest("a[href]");
+    if (!a) return;
+    const mt = (a.getAttribute("href") || "").match(/\/workspace\/([\w-]+)/);
+    if (mt && !a.getAttribute("href").includes("/api/")) { e.preventDefault(); e.stopPropagation(); setPanelTask(mt[1]); }
+  };
   const [driveOn, setDriveOn] = useState(false);
   useEffect(() => { api.get("/integrations/google/status").then((r) => setDriveOn(!!r.data.connected)).catch(() => setDriveOn(false)); }, []);
   const [convsLoading, setConvsLoading] = useState(true);
@@ -308,7 +317,8 @@ export default function Chat() {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col bg-[#F8FAFC]">
+      <div className="relative flex min-w-0 flex-1 flex-col bg-[#F8FAFC]">
+        {panelTask && <TaskSidePanel taskId={panelTask} onClose={() => setPanelTask(null)} />}
         <div className="flex items-center gap-2 border-b border-[#E7ECF3] bg-white px-3 py-3 sm:gap-3 sm:px-5">
           <button onClick={() => setShowConvList(true)} data-testid="mobile-conv-btn" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#E7ECF3] text-slate-500 md:hidden"><MessageSquare size={17} /></button>
           {conv ? (
@@ -329,7 +339,7 @@ export default function Chat() {
           )}
         </div>
 
-        <div ref={listRef} onScroll={(e) => { if (e.currentTarget.scrollTop < 60) loadOlder(); }} className="flex-1 space-y-5 overflow-y-auto p-5" data-testid="message-list">
+        <div ref={listRef} onClickCapture={onListClick} onScroll={(e) => { if (e.currentTarget.scrollTop < 60) loadOlder(); }} className="flex-1 space-y-5 overflow-y-auto p-5" data-testid="message-list">
           {msgsLoading && <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-400" data-testid="msgs-loading"><Loader2 size={18} className="animate-spin" /> Memuat percakapan…</div>}
           {conv && !msgsLoading && msgHasMore && <div className="flex items-center justify-center gap-2 text-xs text-slate-400" data-testid="msg-older-hint">{loadingOlder ? <><Loader2 size={13} className="animate-spin" /> Memuat pesan lama…</> : "Gulir ke atas untuk pesan lama"}</div>}
           {conv && archivedCount > 0 && <div className="text-center"><button onClick={() => setShowArchive(true)} data-testid="archive-btn" className="rounded-full border border-[#E7ECF3] bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">Arsip percakapan ({archivedCount})</button></div>}
@@ -368,6 +378,7 @@ export default function Chat() {
                   <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm ${m.is_moderator ? "border border-[#2F6BFF]/30 bg-[#EEF3FF] text-slate-700" : "aivora-card text-slate-700"}`} data-testid="msg-assistant">
                     <Markdown content={m.content} />
                     <MediaList media={m.media || []} />
+                    {m.task_id && <TaskCard m={m} onOpen={setPanelTask} />}
                     <ToolRequestCard m={m} cid={id} onDone={refreshMsgs} />
                     <TaskOfferButtons m={m} cid={id} onDone={refreshMsgs} isLast={i === messages.length - 1} />
                     <WorkspaceResults m={m} />

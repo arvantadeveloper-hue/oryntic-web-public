@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { HardDrive, Link2, Unplug, Loader2, CheckCircle2, AlertTriangle, Plug } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
+import { GitHubCard } from "../components/GitHubCard";
 
 const mb = (b) => (b / 1048576).toFixed(1);
 
@@ -70,6 +71,7 @@ export default function Integrations() {
                 : <button onClick={connect} disabled={!g.configured || busy} className="btn-grad flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold disabled:opacity-50" data-testid="gdrive-connect">{busy ? <Loader2 size={14} className="animate-spin" /> : <Plug size={14} />} {linked ? "Izinkan akses Drive" : "Hubungkan Google Drive"}</button>}
             </div>
           </div>
+          <GitHubCard item={data.items?.find((x) => x.id === "github")} onChange={load} />
           <p className="mt-8 text-xs font-semibold uppercase tracking-wider text-slate-400">Segera hadir</p>
           <div className="mt-2 grid gap-3 sm:grid-cols-4" data-testid="integrations-coming-soon">{(data.coming_soon || []).map((n) => <div key={n} className="rounded-2xl border border-dashed border-[#CBD5E1] px-4 py-3 text-sm font-semibold text-slate-400">{n}</div>)}</div>
         </>

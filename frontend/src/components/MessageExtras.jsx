@@ -45,7 +45,7 @@ export function ToolRequestCard({ m, cid, onDone, dark = false }) {
   };
   return (
     <div data-testid="tool-request-card" className={`mt-2 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
-      <ImageIcon size={14} /><span className="flex-1 font-semibold">Buat gambar · ±{m.pending_tool.credits} kredit</span>
+      <ImageIcon size={14} /><span className="flex-1 font-semibold">{m.pending_tool.count > 1 ? `Buat ${m.pending_tool.count} gambar (tugas Ruang Kerja)` : "Buat gambar"} · ±{m.pending_tool.credits} kredit</span>
       <button onClick={() => act("run")} disabled={!!busy} data-testid="tool-run-btn" className="flex items-center gap-1 rounded-lg bg-[#2F6BFF] px-3 py-1.5 font-bold text-white disabled:opacity-60">{busy === "run" ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Lanjutkan</button>
       <button onClick={() => act("cancel")} disabled={!!busy} data-testid="tool-cancel-btn" className={`rounded-lg px-3 py-1.5 font-semibold disabled:opacity-60 ${dark ? "bg-white/10" : "bg-white"}`}>Batal</button>
     </div>

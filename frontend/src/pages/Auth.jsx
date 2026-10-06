@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Mail, Lock, Eye, EyeOff, ArrowRight, Globe, BarChart3, FileText, Users, Sparkles, MessageSquare, Video, MailCheck, KeyRound, Loader2 } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Globe, BarChart3, FileText, Users, Sparkles, MessageSquare, Video, MailCheck, KeyRound, Loader2, Gift } from "lucide-react";
 import { Logo, BRAND_HERO, TAGLINE } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
@@ -55,7 +55,8 @@ export default function Auth() {
   const [busy, setBusy] = useState(false);
   const [googleOn, setGoogleOn] = useState(false);
   const [gBusy, setGBusy] = useState(false);
-  useEffect(() => { api.get("/auth/google/status").then((r) => setGoogleOn(!!r.data.enabled)).catch(() => setGoogleOn(false)); }, []);
+  useEffect(() => { api.get("/auth/google/status").then((r) => setGoogleOn(!!r.data.enabled)).catch(() => setGoogleOn(false)); api.get("/auth/trial-info").then((r) => setTrial(r.data)).catch(() => {}); }, []);
+  const [trial, setTrial] = useState(null);
   const googleLogin = async () => { setGBusy(true); try { await startGoogleLogin(); } catch (e) { toast.error(e?.response?.data?.detail || "Login Google gagal dimulai"); } finally { if (window.self !== window.top) setGBusy(false); } };
   const [pending, setPending] = useState(null); // {email, mail_sent, kind: verify|reset}
   const [unverified, setUnverified] = useState(false);
@@ -156,6 +157,7 @@ export default function Auth() {
 
           <h2 className="text-3xl font-bold tracking-tight text-slate-900" data-testid="auth-title">{TITLES[mode]}</h2>
           <p className="mt-1.5 text-sm text-slate-500">{SUBTITLES[mode]}</p>
+          {mode === "register" && trial && <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#EEF3FF] px-3 py-1.5 text-xs font-semibold text-[#2F6BFF]" data-testid="auth-trial-info"><Gift size={13} /> Gratis {trial.trial_credits} kredit · {trial.trial_days} hari percobaan · {trial.trial_daily_limit} kredit/hari</p>}
 
           {mode !== "forgot" && googleOn && (<>
             <button type="button" onClick={googleLogin} disabled={gBusy} className="mt-6 flex w-full items-center justify-center gap-3 rounded-xl border border-[#E7ECF3] bg-white py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60" data-testid="auth-google-btn">
@@ -222,7 +224,7 @@ export default function Auth() {
               </button>
             </>)}
           </p>
-          <p className="mt-4 text-center text-[11px] text-slate-400" data-testid="auth-legal-links">Dengan masuk atau mendaftar, Anda menyetujui <a href="/terms.html" target="_blank" rel="noreferrer" className="font-semibold text-[#2F6BFF] hover:underline">Ketentuan Layanan</a> dan <a href="/privacy.html" target="_blank" rel="noreferrer" className="font-semibold text-[#2F6BFF] hover:underline">Kebijakan Privasi</a>.</p>
+          <p className="mt-4 text-center text-[11px] text-slate-400" data-testid="auth-legal-links">Dengan masuk atau mendaftar, Anda menyetujui <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-[#2F6BFF] hover:underline" data-testid="auth-terms-link">Ketentuan Layanan</a> dan <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-[#2F6BFF] hover:underline" data-testid="auth-privacy-link">Kebijakan Privasi</a>.</p>
         </div>
       </div>
     </div>

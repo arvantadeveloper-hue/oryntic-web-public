@@ -12,23 +12,27 @@ import { useI18n } from "../i18n";
 const COLORS = ["#00D1FF", "#7C3AED", "#06B6D4", "#F59E0B", "#10B981", "#EF4444"];
 
 export default function Wallet() {
-  const { user, setCredits } = useAuth();
+  const { user, setCredits, refreshUser } = useAuth();
   const { t } = useI18n();
   const [shown, setShown] = useState(20);
   const [wallet, setWallet] = useState(null);
   const [packages, setPackages] = useState([]);
   const [busy, setBusy] = useState(null);
+  const highlight = typeof window !== "undefined" && window.location.hash === "#packages";
 
-  const load = () => api.get("/wallet").then((r) => setWallet(r.data)).catch(() => {});
-  useEffect(() => { load(); api.get("/wallet/packages").then((r) => setPackages(r.data)).catch(() => {}); }, []);
+  const load = () => api.get("/wallet").then((r) => { setWallet(r.data); setCredits(r.data.available); }).catch(() => {});
+  useEffect(() => { load(); refreshUser(); api.get("/wallet/packages").then((r) => setPackages(r.data)).catch(() => {}); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { if (highlight) setTimeout(() => document.getElementById("packages")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300); }, [highlight]);
 
   const topup = async (pkg) => {
     setBusy(pkg.id);
-    try { const r = await api.post("/wallet/topup", { package_id: pkg.id }); setCredits(r.data.credits); load(); toast.success(`+${r.data.added} kredit (simulasi)`); }
+    try { const r = await api.post("/wallet/topup", { package_id: pkg.id }); setCredits(r.data.credits); load(); refreshUser(); toast.success(`+${r.data.added} kredit (simulasi)`); }
     catch (e) { toast.error("Gagal"); } finally { setBusy(null); }
   };
 
   const chartData = (wallet?.breakdown || []).map((b, i) => ({ name: b.feature, credits: b.credits, fill: COLORS[i % COLORS.length] }));
+  const cap = Math.max(wallet?.credits_cap || user?.credits_cap || 1, 1);
+  const bal = wallet?.available ?? user?.credits ?? 0;
 
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="wallet-page">
@@ -39,8 +43,10 @@ export default function Wallet() {
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <div className="aivora-card overflow-hidden p-6" style={{ background: "linear-gradient(135deg, rgba(0,209,255,.14), rgba(124,58,237,.16))" }}>
           <p className="flex items-center gap-2 text-sm text-slate-600"><Sparkles size={16} className="text-[#2F6BFF]" /> {t("wallet.balance")}</p>
-          <p className="mt-2 text-5xl font-extrabold text-slate-900" data-testid="wallet-balance">{wallet?.available ?? user?.credits ?? 0}</p>
-          <p className="text-sm text-slate-500">tersedia · {wallet?.consumed ?? 0} terpakai</p>
+          <p className="mt-2 text-5xl font-extrabold text-slate-900" data-testid="wallet-balance">{bal}</p>
+          <p className="text-sm text-slate-500">tersedia dari {cap} kredit · {wallet?.consumed ?? 0} terpakai</p>
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/60"><div className="h-full rounded-full bg-[#2F6BFF]" style={{ width: `${Math.min(100, Math.round((bal / cap) * 100))}%` }} data-testid="wallet-gauge" /></div>
+          {wallet?.daily_limit > 0 && <p className="mt-2 text-xs text-slate-600" data-testid="wallet-daily">Kuota hari ini: <b>{Math.max(0, wallet.daily_limit - (wallet.daily_used || 0))}</b> dari {wallet.daily_limit} kredit tersisa</p>}
         </div>
         <div className="aivora-card p-6 lg:col-span-2">
           <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900"><TrendingUp size={15} className="text-[#7C3AED]" /> Penggunaan per fitur</p>
@@ -56,8 +62,8 @@ export default function Wallet() {
         </div>
       </div>
 
-      <h2 className="mt-10 text-lg font-bold text-slate-900">{t("wallet.topup")} <span className="text-sm font-normal text-slate-500">(simulasi — tanpa pembayaran nyata)</span></h2>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <h2 id="packages" className="mt-10 scroll-mt-6 text-lg font-bold text-slate-900">{t("wallet.topup")} <span className="text-sm font-normal text-slate-500">(simulasi — tanpa pembayaran nyata)</span></h2>
+      <div className={`mt-4 grid gap-4 rounded-3xl transition sm:grid-cols-2 lg:grid-cols-5 ${highlight ? "ring-2 ring-[#2F6BFF]/50 ring-offset-4" : ""}`} data-testid="packages-grid">
         {packages.map((p) => (
           <div key={p.id} className={`aivora-card aivora-card-hover relative p-5 ${p.best_value ? "ring-1 ring-[#00D1FF]" : ""}`} data-testid={`pkg-${p.id}`}>
             {p.best_value && <span className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-full btn-grad px-3 py-0.5 text-[10px] font-bold">BEST VALUE</span>}

@@ -77,7 +77,7 @@ export default function Onboarding() {
               <span className={`flex h-5 w-5 items-center justify-center rounded-md border ${agree ? "btn-grad border-transparent" : "border-slate-300"}`}>
                 {agree && <Check size={14} />}
               </span>
-              Saya menyetujui Syarat Layanan dan Kebijakan Privasi.
+              Saya menyetujui <a href="/terms" target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="font-semibold text-[#2F6BFF] hover:underline" data-testid="onboard-terms-link">Syarat Layanan</a> dan <a href="/privacy" target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="font-semibold text-[#2F6BFF] hover:underline" data-testid="onboard-privacy-link">Kebijakan Privasi</a>.
             </button>
           </div>
 

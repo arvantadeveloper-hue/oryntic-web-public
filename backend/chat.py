@@ -541,14 +541,61 @@ async def _emit_final(ctx, text: str, credits: int, extra: dict):
     yield credits
 
 
+async def _run_image_set(task_id: str, uid: str, prompts: list, cid: str, persona: dict):
+    """Background: generate each image of a multi-image request into a Workspace task (progress visible in the task panel)."""
+    from realtime import notify_user
+    media, total = [], 0
+    for i, prompt in enumerate(prompts):
+        await db.tasks.update_one({"id": task_id}, {"$set": {f"steps.{i}.status": "running", "updated_at": now_iso()}})
+        try:
+            out = await run_image_tool(uid, prompt)
+            out["media"][0]["name"] = f"gambar-{i + 1}.{out['media'][0]['name'].rsplit('.', 1)[-1]}"
+            media += out["media"]
+            total += out["credits"]
+            await record_usage(uid, "image_generation", out["credits"], {"conversation_id": cid, "persona_id": persona["id"], "task_id": task_id})
+            upd = {f"steps.{i}.status": "completed", f"steps.{i}.output": f"Gambar {i + 1} selesai ({out['credits']} kredit).", "media": media, "credits_used": total, "updated_at": now_iso()}
+        except Exception:
+            upd = {f"steps.{i}.status": "failed", f"steps.{i}.output": "Gambar ini gagal dibuat.", "updated_at": now_iso()}
+        await db.tasks.update_one({"id": task_id}, {"$set": upd})
+        await notify_user(uid, {"type": "task_update", "task_id": task_id, "status": "running"})
+    lines = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(prompts))
+    final = f"## {len(media)} dari {len(prompts)} gambar selesai\n\nPrompt yang dipakai:\n{lines}"
+    await db.tasks.update_one({"id": task_id}, {"$set": {"status": "completed" if media else "failed", "final_output": final, "error": None if media else "Semua gambar gagal dibuat", "updated_at": now_iso()}})
+    await notify_user(uid, {"type": "task_update", "task_id": task_id, "status": "completed" if media else "failed"})
+
+
+async def _start_image_set(ctx_user: dict, persona: dict, cid: str, prompts: list, title: str) -> dict:
+    task = {"id": new_id(), "user_id": ctx_user["id"], "workspace_id": workspace_id(ctx_user), "goal": title, "type": "image_set", "status": "running",
+            "steps": [{"id": new_id(), "role": "Visual", "title": f"Gambar {i + 1}: {p[:90]}", "status": "queued"} for i, p in enumerate(prompts)],
+            "summary": f"{len(prompts)} gambar diminta dari chat", "model": "gemini-image", "final_output": "", "media": [], "credits_used": 0,
+            "persona_id": persona["id"], "persona_name": persona["name"], "source": "chat", "conversation_ids": [cid], "image_prompts": prompts,
+            "version": 1, "created_at": now_iso(), "updated_at": now_iso()}
+    await db.tasks.insert_one(dict(task))
+    asyncio.create_task(_run_image_set(task["id"], ctx_user["id"], prompts, cid, persona))
+    return task
+
+
+def _image_set_text(task: dict, n: int) -> str:
+    return (f"Oke, {n} gambar sekaligus — aku kerjakan sebagai tugas **{task['goal']}** di Ruang Kerja supaya progresnya bisa kamu pantau. "
+            f"Klik kartu tugas di bawah untuk melihat hasilnya satu per satu — [buka di Ruang Kerja](/workspace/{task['id']}).")
+
+
 async def _image_turn(ctx, plan: dict, confirm_threshold: int):
     credits = tool_rate("image")
-    prompt = (plan.get("image_prompt") or "").strip() or "illustration"
+    prompts = plan.get("image_prompts") or [(plan.get("image_prompt") or "").strip() or "illustration"]
+    prompt = prompts[0]
+    n = len(prompts)
     yield ctx.sse(start=True)
-    if credits >= confirm_threshold:
-        text = f"Siap, aku bisa buatkan gambarnya! 🎨 Perkiraan biaya ±{credits} kredit. Lanjutkan?"
+    if credits * n >= confirm_threshold:
+        text = (f"Siap, aku bisa buatkan {n} gambarnya! 🎨 Perkiraan biaya ±{credits * n} kredit. Lanjutkan?" if n > 1
+                else f"Siap, aku bisa buatkan gambarnya! 🎨 Perkiraan biaya ±{credits} kredit. Lanjutkan?")
         yield ctx.sse(delta=text)
-        async for ev in _emit_final(ctx, text, 0, {"pending_tool": {"kind": "image", "prompt": prompt, "credits": credits}}):
+        async for ev in _emit_final(ctx, text, 0, {"pending_tool": {"kind": "image_set" if n > 1 else "image", "prompt": prompt, "prompts": prompts, "credits": credits * n, "count": n}}):
+            yield ev
+        return
+    if n > 1:
+        task = await _start_image_set(ctx.user, ctx.persona, ctx.cid, prompts, (plan.get("title") or f"{n} gambar: {ctx.user_text[:60]}").strip())
+        async for ev in _emit_final(ctx, _image_set_text(task, n), 0, {"tool": "image_set", "task_id": task["id"]}):
             yield ev
         return
     yield ctx.sse(status="Sedang membuat gambar...")
@@ -618,10 +665,91 @@ async def _drive_turn(ctx, plan: dict):
         yield ev
 
 
+async def _github_turn(ctx, plan: dict):
+    """GitHub Level 1 from chat: list repos, read tree/file, list issues, or author + open a pull request."""
+    from github import gh_connected, gh_repos, gh_tree, gh_read, gh_issues, gh_create_pr
+    tool = plan["tool"]
+    yield ctx.sse(start=True)
+    if not await gh_connected(ctx.user["id"]):
+        async for ev in _emit_final(ctx, "GitHub belum terhubung. Hubungkan dulu di menu [Integrasi](/integrations) (tempel Personal Access Token), lalu minta lagi ya.", 0, {"tool": tool, "error": True}):
+            yield ev
+        return
+    yield ctx.sse(status="Menghubungi GitHub...")
+    repo = (plan.get("repo") or (ctx.task or {}).get("github_repo") or "").strip()
+    credits = 0
+    try:
+        if tool == "github_repos":
+            rows = await gh_repos(ctx.user["id"], plan.get("query") or "")
+            text = ("Ini repositori kamu:\n\n" + "\n".join(f"- [{r['full_name']}]({r['url']}){' 🔒' if r['private'] else ''}{' — ' + r['description'][:80] if r['description'] else ''}" for r in rows)) if rows else "Belum ada repositori yang bisa aku lihat dengan token ini."
+            extra = {"tool": tool, "results": rows[:30]}
+        elif tool == "github_read":
+            path = (plan.get("path") or "").strip("/")
+            if not repo:
+                raise HTTPException(400, "Sebutkan nama repo-nya (owner/repo) ya.")
+            if not path:
+                t = await gh_tree(ctx.user["id"], repo)
+                listing = "\n".join(f"- `{p}`" for p in t["paths"][:120])
+                text = f"Struktur **{t['repo']}** (branch `{t['ref']}`, {t['count']} file{' — dipotong' if t['truncated'] or t['count'] > 120 else ''}):\n\n{listing}"
+            else:
+                f = await gh_read(ctx.user["id"], repo, path)
+                if f.get("dir"):
+                    text = f"Isi folder `{path}` di **{repo}**:\n\n" + "\n".join(f"- {'📁' if e['type'] == 'dir' else '📄'} `{e['path']}`" for e in f["entries"])
+                else:
+                    yield ctx.sse(status="Membaca & merangkum file...")
+                    summary = await llm_text(ctx.system, f"The user asked: {ctx.user_text}\n\nFile `{f['path']}` from repo {repo}:\n```\n{f['content'][:30000]}\n```\n\nAnswer their request about this file in their language (explain/summarize/review as asked). Be concrete and reference line-level details where useful.", ctx.model_key)
+                    credits = text_credits(f["content"][:30000], summary)
+                    text = f"{summary}\n\n[Lihat file di GitHub]({f['url']})"
+            extra = {"tool": tool}
+        elif tool == "github_issues":
+            if not repo:
+                raise HTTPException(400, "Sebutkan nama repo-nya (owner/repo) ya.")
+            rows = await gh_issues(ctx.user["id"], repo, plan.get("state") or "open")
+            text = (f"Issue/PR **{repo}** ({plan.get('state') or 'open'}):\n\n" + "\n".join(f"- [#{r['number']} {r['title']}]({r['url']}){' (PR)' if r['is_pr'] else ''} — {r['author']}" for r in rows)) if rows else f"Tidak ada issue {plan.get('state') or 'open'} di {repo}."
+            extra = {"tool": tool, "results": rows}
+        else:
+            if not repo:
+                raise HTTPException(400, "Sebutkan nama repo-nya (owner/repo) ya.")
+            files = [p.strip("/") for p in (plan.get("files") or []) if p]
+            tree = await gh_tree(ctx.user["id"], repo)
+            if not files:
+                yield ctx.sse(status="Memilih file yang perlu diubah...")
+                pick = await llm_json("Pick the repository files that must be edited or created to fulfil the request. Reply JSON {\"files\":[path,...]} (max 6, existing paths from the list or new paths).",
+                                      f"Request: {plan.get('instructions') or ctx.user_text}\n\nRepo files:\n" + "\n".join(tree["paths"][:400]))
+                files = [str(p).strip("/") for p in (pick.get("files") or [])][:6]
+            if not files:
+                raise HTTPException(400, "Aku belum bisa menentukan file mana yang harus diubah — sebutkan path file-nya.")
+            yield ctx.sse(status=f"Membaca {len(files)} file & menyusun perubahan...")
+            current = {}
+            for p in files:
+                try:
+                    f = await gh_read(ctx.user["id"], repo, p)
+                    current[p] = f["content"] if not f.get("dir") else ""
+                except HTTPException:
+                    current[p] = ""
+            ctx_files = "\n\n".join(f"=== {p} ({'NEW FILE' if not c else 'current content'}) ===\n{c[:25000]}" for p, c in current.items())
+            res = await llm_json("You are a senior engineer preparing a pull request. Return the COMPLETE new content of every file you change (no diffs, no placeholders, no truncation). "
+                                 "Reply JSON only: {\"title\":str,\"body\":str (markdown summary of changes),\"changes\":[{\"path\":str,\"content\":str}|{\"path\":str,\"delete\":true}]}. Keep unrelated code untouched.",
+                                 f"Request: {plan.get('instructions') or ctx.user_text}\nSuggested title: {plan.get('title') or ''}\n\n{ctx_files}", ctx.model_key)
+            changes = [c for c in (res.get("changes") or []) if isinstance(c, dict) and c.get("path")]
+            credits = text_credits(ctx_files, json.dumps(changes, ensure_ascii=False))
+            yield ctx.sse(status="Membuat branch, commit & pull request...")
+            pr = await gh_create_pr(ctx.user["id"], repo, (res.get("title") or plan.get("title") or "Perubahan dari Oryntix")[:200], res.get("body") or "", changes)
+            text = f"Pull request **#{pr['number']} {pr['title']}** sudah dibuka di **{repo}** — [lihat PR di GitHub]({pr['url']}).\n\nBranch `{pr['branch']}` → `{pr['base']}` · file: " + ", ".join(f"`{p}`" for p in pr["files"]) + f"\n\n{res.get('body') or ''}"
+            extra = {"tool": tool, "github_pr": pr}
+    except HTTPException as e:
+        text, extra = f"{e.detail}", {"tool": tool, "error": True}
+    if credits:
+        await record_usage(ctx.user["id"], "chat", credits, {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"], "model": ctx.model_key, "tool": tool})
+    async for ev in _emit_final(ctx, text, credits, extra):
+        yield ev
+
+
 async def _tool_turn(ctx, plan: dict):
-    """Create an image/document from chat, or run a Google Drive action. Expensive tools (≥ threshold) ask for confirmation first."""
+    """Create an image/document from chat, or run a Google Drive / GitHub action. Expensive tools (≥ threshold) ask for confirmation first."""
     if plan["tool"].startswith("drive_"):
         gen = _drive_turn(ctx, plan)
+    elif plan["tool"].startswith("github_"):
+        gen = _github_turn(ctx, plan)
     else:
         cfg = await get_routing()
         gen = _image_turn(ctx, plan, cfg["confirm_threshold"]) if plan["tool"] == "image" else _document_turn(ctx, plan)
@@ -1165,6 +1293,13 @@ async def run_tool(cid: str, mid: str, u: dict = Depends(current_user)):
     await rate_limit(u, "generation")
     pt = msg["pending_tool"]
     await db.messages.update_one({"id": mid}, {"$set": {"pending_tool.running": True}})
+    if pt.get("kind") == "image_set" and len(pt.get("prompts") or []) > 1:
+        persona = await db.personas.find_one({"id": msg.get("persona_id")}, {"_id": 0, "id": 1, "name": 1}) or {"id": msg.get("persona_id"), "name": msg.get("persona_name") or "Asisten"}
+        task = await _start_image_set(u, persona, cid, pt["prompts"], f"{len(pt['prompts'])} gambar")
+        upd = {"content": _image_set_text(task, len(pt["prompts"])), "tool": "image_set", "task_id": task["id"]}
+        await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
+        await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id")})
+        return {**msg, **upd, "pending_tool": None}
     try:
         out = await run_image_tool(u["id"], pt["prompt"])
     except Exception as exc:

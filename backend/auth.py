@@ -385,9 +385,30 @@ async def reset_password(x: ResetIn):
     return {"access_token": make_token(u["id"], u["role"]), "user": public_user(u)}
 
 
+@router.get("/trial-info")
+async def trial_info():
+    t = await get_trial()
+    return {"trial_credits": int(t["trial_credits"]), "trial_days": int(t["trial_days"]), "trial_daily_limit": int(t["trial_daily_limit"])}
+
+
+async def credit_meta(u: dict) -> dict:
+    """Numbers every credit widget must agree on: the cap the gauge is measured against + today's usage against the daily quota."""
+    from llm import user_today_usage
+    wid = u.get("owner_id") or u["id"]
+    owner = u if wid == u["id"] else (await db.users.find_one({"id": wid}, {"_id": 0, "plan": 1, "credits": 1}) or {})
+    if owner.get("plan") == "trial":
+        cap = int((await get_trial())["trial_credits"])
+    else:
+        rows = await db.credit_transactions.find({"user_id": wid, "type": {"$in": ["grant", "topup"]}}, {"_id": 0, "amount": 1}).to_list(2000)
+        cap = sum(int(r.get("amount") or 0) for r in rows)
+    credits = int(owner.get("credits") or 0)
+    limit = int(u.get("daily_credit_limit") or 0)
+    return {"credits": credits, "credits_cap": max(cap, credits, 1), "daily_used": (await user_today_usage(u["id"])) if limit else 0}
+
+
 @router.get("/me")
 async def me(u: dict = Depends(current_user)):
-    return public_user(u)
+    return {**public_user(u), **(await credit_meta(u))}
 
 
 class ChangePasswordIn(BaseModel):

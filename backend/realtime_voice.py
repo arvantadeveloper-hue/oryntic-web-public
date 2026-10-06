@@ -147,6 +147,17 @@ DRIVE_TOOLS = [
     {"type": "function", "name": "drive_link", "description": "Get the Google Drive link of a document by name (optionally make it viewable by anyone with the link).",
      "parameters": {"type": "object", "properties": {"file": {"type": "string"}, "share": {"type": "boolean"}}, "required": ["file"]}},
 ]
+GITHUB_TOOLS = [
+    {"type": "function", "name": "github_repos", "description": "List the user's GitHub repositories (optionally filtered). Links are posted to the chat panel.",
+     "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}},
+    {"type": "function", "name": "github_read", "description": "Read a GitHub repo: file tree (path empty), a folder listing, or a file's content. Use before discussing or changing code.",
+     "parameters": {"type": "object", "properties": {"repo": {"type": "string", "description": "owner/repo"}, "path": {"type": "string"}}, "required": ["repo"]}},
+    {"type": "function", "name": "github_issues", "description": "List issues / pull requests of a GitHub repo.",
+     "parameters": {"type": "object", "properties": {"repo": {"type": "string"}, "state": {"type": "string", "enum": ["open", "closed", "all"]}}, "required": ["repo"]}},
+    {"type": "function", "name": "github_pr", "description": "Create a branch, commit the given full file contents and open a pull request on the user's GitHub repo. Only after the user explicitly asked for a PR; read the files first and pass complete new contents.",
+     "parameters": {"type": "object", "properties": {"repo": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string", "description": "markdown summary of the changes"},
+                                                     "changes": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}, "delete": {"type": "boolean"}}, "required": ["path"]}}}, "required": ["repo", "title", "changes"]}},
+]
 UPDATE_TOOL = {"type": "function", "name": "update_task",
                "description": "Apply a revision the user asked for to the Workspace result currently being presented/discussed. Pass the full revision instruction. The result is saved as a new version.",
                "parameters": {"type": "object", "properties": {"instruction": {"type": "string", "description": "What to change, in detail"}}, "required": ["instruction"]}}
@@ -334,7 +345,8 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
     if role in ("moderator", "solo"):
         conv = await db.conversations.find_one({"id": call["conversation_id"]}, {"_id": 0, "task_id": 1}) or {}
         drive_on = bool(await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
-        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL] + (DRIVE_TOOLS if drive_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        gh_on = bool(await db.github_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
+        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL] + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:

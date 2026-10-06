@@ -55,11 +55,15 @@ async def assert_quota(uid: str, incoming: int) -> None:
 # ---------- OAuth ----------
 @router.get("")
 async def list_integrations(u: dict = Depends(current_user)):
+    from github import gh_status
     g = await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 0, "email": 1, "name": 1, "picture": 1, "connected_at": 1, "folder_id": 1})
+    gh = await gh_status(u["id"])
     return {"items": [{"id": "google_drive", "name": "Google Drive & Docs", "configured": configured(), "connected": bool(g),
                        "account_email": (g or {}).get("email"), "account_name": (g or {}).get("name"), "account_picture": (g or {}).get("picture"), "folder_link": f"https://drive.google.com/drive/folders/{g['folder_id']}" if (g or {}).get("folder_id") else None, "connected_at": (g or {}).get("connected_at"), "scope": "drive.file", "picker": bool(os.environ.get("GOOGLE_API_KEY")),
-                       "capabilities": ["Simpan dokumen/gambar ke Drive", "Update Google Docs & Sheets buatan Oryntix", "Kirim tautan Drive", "Lampirkan file Drive pilihan Anda di chat", "Pengetahuan asisten dari file Drive pilihan Anda"]}],
-            "coming_soon": ["Notion", "Slack", "GitHub", "WhatsApp Business"], "storage": await storage_usage(u["id"])}
+                       "capabilities": ["Simpan dokumen/gambar ke Drive", "Update Google Docs & Sheets buatan Oryntix", "Kirim tautan Drive", "Lampirkan file Drive pilihan Anda di chat", "Pengetahuan asisten dari file Drive pilihan Anda"]},
+                      {"id": "github", "name": "GitHub", "configured": True, "connected": gh["connected"], "account_name": gh.get("name"), "account_login": gh.get("login"), "account_picture": gh.get("avatar"), "connected_at": gh.get("connected_at"),
+                       "capabilities": ["Daftar & cari repositori Anda", "Baca struktur repo, isi file & issue", "Buat branch + commit perubahan", "Buka Pull Request lewat chat atau suara"]}],
+            "coming_soon": ["Notion", "Slack", "WhatsApp Business"], "storage": await storage_usage(u["id"])}
 
 
 @router.get("/google/connect")

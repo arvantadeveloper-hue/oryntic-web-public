@@ -8,6 +8,7 @@ import { useI18n } from "../i18n";
 import { IncomingCall } from "./IncomingCall";
 import { FriendCallRing } from "./FriendCallRing";
 import { TaskNotifier } from "./TaskChatTools";
+import { UpgradePlanDialog } from "./UpgradePlanDialog";
 
 export function AppLayout() {
   const { user, logout } = useAuth();
@@ -51,7 +52,8 @@ export function AppLayout() {
   const handleLogout = () => { logout(); nav("/"); };
   const doSearch = (e) => { if (e.key === "Enter" && q.trim()) { nav("/chat"); } };
   const credits = user?.credits ?? 0;
-  const pct = Math.min(100, Math.round((credits / 1000) * 100));
+  const pct = Math.min(100, Math.round((credits / Math.max(user?.credits_cap || credits || 1, 1)) * 100));
+  const [showUpgrade, setShowUpgrade] = useState(false);
 
   const SidebarInner = (
     <div className="flex h-full flex-col sidebar-dark text-white">
@@ -79,7 +81,7 @@ export function AppLayout() {
                 <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-[#2F6BFF]" style={{ width: `${pct}%` }} /></div>
               </div>
             </div>
-            <button onClick={() => nav("/wallet")} data-testid="upgrade-btn" className="mt-3 w-full rounded-lg bg-white/10 py-2 text-xs font-semibold transition hover:bg-white/15">Upgrade Plan</button>
+            <button type="button" onClick={() => { setOpen(false); setShowUpgrade(true); }} data-testid="upgrade-btn" className="mt-3 w-full rounded-lg bg-white/10 py-2 text-xs font-semibold transition hover:bg-white/15">{user?.plan === "trial" ? "Upgrade Plan" : "Tambah Kredit"}</button>
           </div>
         )}
         <div className="mt-3 flex items-center gap-2.5 rounded-xl px-2 py-2">
@@ -140,6 +142,7 @@ export function AppLayout() {
       <IncomingCall />
       <FriendCallRing />
       <TaskNotifier />
+      {showUpgrade && <UpgradePlanDialog onClose={() => setShowUpgrade(false)} />}
     </div>
   );
 }
