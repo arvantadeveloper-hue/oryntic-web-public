@@ -696,35 +696,29 @@ async def _run_video_bg(mid: str, cid: str, uid: str, persona_id: Optional[str],
         await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona_id, "message": msg})
 
 
-async def _video_turn(ctx, plan: dict, confirm_threshold: int):
+async def video_offer(user: dict, cid: str, plan: dict, user_text: str) -> tuple:
+    """Shared by typed chat and voice calls: returns (text, extra) — the Seedance 2.0/2.5 offer, or a Drive/credits/config notice."""
     from integrations import drive_connected
     duration = seedance.clamp_duration(plan.get("duration"))
-    prompt = (plan.get("video_prompt") or ctx.user_text).strip()
-    ref = await _latest_media(ctx.cid, "image") if plan.get("from_image") else None
+    prompt = (plan.get("video_prompt") or user_text).strip()
+    ref = await _latest_media(cid, "image") if plan.get("from_image") else None
     aspect = plan.get("aspect_ratio") if plan.get("aspect_ratio") in seedance.ASPECTS else "16:9"
-    yield ctx.sse(start=True)
     if not seedance.configured():
-        async for ev in _emit_final(ctx, "Fitur render video belum diaktifkan oleh admin platform (API key Seedance belum diatur). Coba lagi nanti ya.", 0, {"tool": "video", "error": True}):
-            yield ev
-        return
+        return "Fitur render video belum diaktifkan oleh admin platform (API key Seedance belum diatur). Coba lagi nanti ya.", {"tool": "video", "error": True}
     await pricing_refresh()
     opts = seedance.options(duration)
-    balance = await _owner_balance(ctx.user)
-    if not await drive_connected(ctx.user["id"]):
+    balance = await _owner_balance(user)
+    if not await drive_connected(user["id"]):
         est = " atau ".join(f"{o['label']} ±{_fmt_credits(o['credits'])} kredit" for o in opts if o["available"])
         text = (f"Siap bikin videonya ({duration} detik)! 🎬 Tapi video hasil render akan kusimpan langsung ke **Google Drive kamu**, bukan di server — "
                 f"jadi hubungkan Google Drive dulu ya, lalu minta lagi.\n\nPerkiraan biaya: {est}.")
-        async for ev in _emit_final(ctx, text, 0, {"tool": "video", "cta": {"label": "Hubungkan Google Drive", "href": "/integrations"}}):
-            yield ev
-        return
+        return text, {"tool": "video", "cta": {"label": "Hubungkan Google Drive", "href": "/integrations"}}
     avail = [o for o in opts if o["available"]]
     cheapest = min(o["credits"] for o in avail)
     if balance < cheapest:
         text = (f"Untuk video {duration} detik butuh " + " atau ".join(f"±{_fmt_credits(o['credits'])} kredit ({o['label']})" for o in avail)
                 + f", sedangkan saldo kredit kamu {_fmt_credits(balance)}. Tambah kredit dulu ya, nanti aku langsung render. 🙏")
-        async for ev in _emit_final(ctx, text, 0, {"tool": "video", "error": True, "cta": {"label": "Tambah Kredit", "href": "/wallet"}}):
-            yield ev
-        return
+        return text, {"tool": "video", "error": True, "cta": {"label": "Tambah Kredit", "href": "/wallet"}}
     lines = [f"**{o['label']}** ±{_fmt_credits(o['per_sec'])} kredit/detik → ±{_fmt_credits(o['credits'])} kredit untuk {duration} detik"
              + ("" if o["credits"] <= balance else " _(saldo tidak cukup)_") for o in avail]
     skipped = [o for o in opts if not o["available"]]
@@ -734,11 +728,18 @@ async def _video_turn(ctx, plan: dict, confirm_threshold: int):
     text = (f"{intro}\n\n" + "\n".join(f"- {l}" for l in lines)
             + (f"\n\n_{skipped[0]['label']} maksimal {skipped[0]['max_dur']} detik, jadi tidak tersedia untuk durasi ini._" if skipped else "")
             + f"\n\nSaldo kredit kamu: {_fmt_credits(balance)}. Pilih salah satu di bawah ya.")
-    yield ctx.sse(delta=text)
-    pt = {"kind": "video", "prompt": prompt, "duration": duration, "aspect_ratio": aspect, "options": opts, "balance": balance, "request": ctx.user_text[:300]}
+    pt = {"kind": "video", "prompt": prompt, "duration": duration, "aspect_ratio": aspect, "options": opts, "balance": balance, "request": user_text[:300]}
     if ref:
         pt["reference_path"] = ref["path"]
-    async for ev in _emit_final(ctx, text, 0, {"pending_tool": pt}):
+    return text, {"pending_tool": pt}
+
+
+async def _video_turn(ctx, plan: dict, confirm_threshold: int):
+    yield ctx.sse(start=True)
+    text, extra = await video_offer(ctx.user, ctx.cid, plan, ctx.user_text)
+    if "pending_tool" in extra:
+        yield ctx.sse(delta=text)
+    async for ev in _emit_final(ctx, text, 0, extra):
         yield ev
 
 
@@ -898,6 +899,57 @@ class SocialChatIn(BaseModel):
     caption: str = Field(default="", max_length=3000)
     kind: str = Field(default="image", pattern="^(text|image|video)$")
     app_url: str = Field(min_length=8, max_length=300)
+
+
+class VoiceImageIn(BaseModel):
+    prompt: str = Field(min_length=1, max_length=2000)
+    edit_previous: bool = False
+    request: str = Field(default="", max_length=300)
+
+
+class VoiceVideoIn(BaseModel):
+    prompt: str = Field(min_length=1, max_length=2000)
+    duration: int = Field(default=5, ge=3, le=30)
+    aspect_ratio: str = Field(default="16:9", max_length=8)
+    from_image: bool = False
+    request: str = Field(default="", max_length=300)
+
+
+async def _voice_persona(cid: str, u: dict) -> dict:
+    conv, personas = await _load_ai_conv(cid, u)
+    return personas[0] if personas else {"id": "__system__", "name": "Asisten", "portrait": None}
+
+
+@router.post("/conversations/{cid}/voice-image")
+async def voice_image(cid: str, x: VoiceImageIn, u: dict = Depends(current_user)):
+    """Voice-call tool: render an image (optionally editing the latest one) and post it to the chat panel."""
+    over = await quota_exceeded(u)
+    if over:
+        raise HTTPException(402, quota_message(over))
+    await rate_limit(u, "generation")
+    persona = await _voice_persona(cid, u)
+    ref = await _latest_media(cid, "image") if x.edit_previous else None
+    try:
+        out = await run_image_tool(u["id"], x.prompt, ref["path"] if ref else None)
+    except Exception as exc:
+        logging.getLogger("chat").warning("voice image failed: %s", exc)
+        raise HTTPException(502, "Gambar belum berhasil dibuat, coba lagi") from exc
+    await record_usage(u["id"], "image_generation", out["credits"], {"conversation_id": cid, "persona_id": persona["id"], "via": "realtime"})
+    out["media"][0]["request"] = (x.request or x.prompt)[:300]
+    msg = await _save_ai_msg(cid, persona, IMAGE_EDIT_DONE_TEXT if ref else IMAGE_DONE_TEXT, out["credits"], "text", {"media": out["media"], "tool": "image_edit" if ref else "image"})
+    await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"], "message": clean(msg)})
+    return {"ok": True, "credits": out["credits"], "edited": bool(ref), "message_id": msg["id"]}
+
+
+@router.post("/conversations/{cid}/voice-video")
+async def voice_video(cid: str, x: VoiceVideoIn, u: dict = Depends(current_user)):
+    """Voice-call tool: post the Seedance 2.0/2.5 choice card (or the Drive/credits notice) to the chat panel; the user taps a model there."""
+    persona = await _voice_persona(cid, u)
+    text, extra = await video_offer(u, cid, {"video_prompt": x.prompt, "duration": x.duration, "aspect_ratio": x.aspect_ratio, "from_image": x.from_image}, x.request or x.prompt)
+    msg = await _save_ai_msg(cid, persona, text, 0, "text", {**extra, "tool": extra.get("tool", "video")})
+    await notify(cid, {"type": "message", "role": "assistant", "persona_id": persona["id"], "message": clean(msg)})
+    pt = extra.get("pending_tool")
+    return {"ok": True, "needs_choice": bool(pt), "summary": re.sub(r"[*_]", "", text), "options": [{k: o[k] for k in ("tier", "label", "per_sec", "credits", "available")} for o in (pt or {}).get("options", [])]}
 
 
 @router.post("/conversations/{cid}/social-publish")

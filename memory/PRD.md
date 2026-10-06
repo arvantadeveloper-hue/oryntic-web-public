@@ -467,3 +467,7 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 ## Update 2026-06 — Rasio video
 - Planner `video.aspect_ratio` (9:16 untuk portrait/Reels/Shorts/TikTok/story, 1:1 feed, 21:9 sinematik, default 16:9; `seedance.ASPECTS`). Dibawa ke `pending_tool.aspect_ratio` → `seedance.generate(aspect_ratio=…)` → media `aspect_ratio`, nama file Drive, kartu pilihan & RenderingBox (bentuk portrait/persegi). Teruji: "versi portrait untuk Reels" → 9:16.
 - Isu "akun Google hilang setelah logout" dibatalkan user (tidak error).
+
+## Update 2026-06 — Gambar & video dari panggilan suara (Realtime)
+- Tool Realtime baru: `generate_image` → `POST /conversations/{cid}/voice-image` (render/edit gambar, kirim ke panel chat sebagai pesan media) dan `generate_video` → `POST /conversations/{cid}/voice-video` (posting kartu pilihan Seedance 2.0/2.5 atau pemberitahuan Drive/saldo; model menyebut harga lalu user tap). Instruksi sesi menegaskan asisten tidak boleh bilang tidak bisa membuat gambar/video.
+- Logika tawaran video dipindah ke `video_offer(user, cid, plan, user_text)` (dipakai chat teks & suara).

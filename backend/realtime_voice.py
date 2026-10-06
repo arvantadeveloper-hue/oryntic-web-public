@@ -167,6 +167,12 @@ GITHUB_TOOLS.append({"type": "function", "name": "github_review", "description":
 SOCIAL_TOOL = {"type": "function", "name": "social_publish", "description": "Publish the latest image/video of this conversation (or a text-only post) to the user's connected social accounts. Only after the user confirmed the caption and the target networks.",
                "parameters": {"type": "object", "properties": {"providers": {"type": "array", "items": {"type": "string", "enum": ["linkedin", "meta", "youtube"]}}, "caption": {"type": "string"}, "kind": {"type": "string", "enum": ["text", "image", "video"]}}, "required": ["providers", "caption"]}}
 GITLAB_TOOLS = [{**t, "name": t["name"].replace("github_", "gitlab_"), "description": t["description"].replace("GitHub", "GitLab").replace("pull request", "merge request")} for t in GITHUB_TOOLS]
+IMAGE_TOOL = {"type": "function", "name": "generate_image",
+              "description": "Create a picture (photo, photorealistic render, illustration, logo, poster, wallpaper) and show it in the chat panel. Also edits the latest generated image when edit_previous is true (restyle, change background, add/remove something). Call it whenever the user asks for any image — never say you cannot make images.",
+              "parameters": {"type": "object", "properties": {"prompt": {"type": "string", "description": "Detailed English prompt for the image model"}, "edit_previous": {"type": "boolean", "description": "true when the user wants the previously generated image changed"}, "request": {"type": "string", "description": "The user's request in their own words"}}, "required": ["prompt"]}}
+VIDEO_TOOL = {"type": "function", "name": "generate_video",
+              "description": "Offer a short AI video clip (Seedance). Posts a card to the chat panel where the user picks Seedance 2.0 or 2.5 (prices in credits/second come from the platform); rendering starts after they tap. Call it whenever the user asks for a video/clip/animation — never say you cannot make videos. Set from_image when they want the latest generated image animated.",
+              "parameters": {"type": "object", "properties": {"prompt": {"type": "string", "description": "Detailed English prompt: scene, motion, camera, mood"}, "duration": {"type": "integer", "description": "Seconds 4-30 (default 5)"}, "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "21:9"], "description": "9:16 for Reels/Shorts/portrait, 1:1 square, else 16:9"}, "from_image": {"type": "boolean"}, "request": {"type": "string", "description": "The user's request in their own words"}}, "required": ["prompt"]}}
 UPDATE_TOOL = {"type": "function", "name": "update_task",
                "description": "Apply a revision the user asked for to the Workspace result currently being presented/discussed. Pass the full revision instruction. The result is saved as a new version.",
                "parameters": {"type": "object", "properties": {"instruction": {"type": "string", "description": "What to change, in detail"}}, "required": ["instruction"]}}
@@ -237,6 +243,8 @@ async def _close_stale_calls(user_id: str):
 async def _session_instructions(persona: dict, u: dict, roster: list, history: str, opening, role: str, title: str = "", panel: str = "") -> str:
     """Static persona/style first (cacheable prefix), per-call context last."""
     text = await _persona_system(persona, u, None, voice_mode=True) + "\n\n" + SPEAKING_STYLE
+    text += ("\n\nMEDIA TOOLS: use generate_image for any picture request and generate_video for any video/clip request — they appear in the chat panel next to the call. "
+             "Say briefly that you are making it (or, for video, that the model picker is in the chat panel); never claim you cannot create images or videos.")
     uname = u.get("name") or "the user"
     if role == "moderator":
         text += "\n\n" + MODERATOR_STYLE.format(panel=panel) + "\n" + NO_REPEAT
@@ -357,7 +365,7 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         gh_on = bool(await db.github_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
         gl_on = bool(await db.gitlab_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
         social_on = bool(await db.social_accounts.find_one({"user_id": u["id"]}, {"_id": 1}))
-        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL] + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:

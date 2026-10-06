@@ -147,6 +147,14 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       await postCard(callId, `Tautan Drive: **${r.data.name}** — [buka di Drive](${r.data.webViewLink})${r.data.shared ? " · dapat dibuka siapa pun yang punya tautan" : ""}`);
       return { ok: true, name: r.data.name, link: r.data.webViewLink, shared: r.data.shared, note: "the clickable link was posted to the chat panel (no need to read the URL aloud)" };
     }
+    if (name === "generate_image") {
+      const r = await api.post(`/conversations/${cid}/voice-image`, { prompt: args.prompt, edit_previous: !!args.edit_previous, request: args.request || "" });
+      return { ok: true, credits: r.data.credits, edited: r.data.edited, note: "the image is now visible in the chat panel; tell the user it's there and ask if they want changes" };
+    }
+    if (name === "generate_video") {
+      const r = await api.post(`/conversations/${cid}/voice-video`, { prompt: args.prompt, duration: args.duration || 5, aspect_ratio: args.aspect_ratio || "16:9", from_image: !!args.from_image, request: args.request || "" });
+      return { ok: true, needs_choice: r.data.needs_choice, options: r.data.options, summary: r.data.summary, note: r.data.needs_choice ? "a card to pick Seedance 2.0 or 2.5 was posted to the chat panel — tell the user the prices briefly and ask them to tap one" : "a notice was posted to the chat panel — explain it briefly" };
+    }
     if (name === "search_workspace") { const r = await api.post(`/conversations/${cid}/workspace-search`, { query: args.query }); return { ok: true, ...r.data, note: "links were posted to the chat panel" }; }
     const gitProv = name.startsWith("gitlab_") ? "gitlab" : "github";
     const gitLabel = gitProv === "gitlab" ? "GitLab" : "GitHub";
