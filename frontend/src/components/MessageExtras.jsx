@@ -31,7 +31,7 @@ export function MediaList({ media = [], dark = false }) {
           {(x.path || x.drive_id) && <button type="button" onClick={() => openPublish(x, x.request || x.prompt || "")} data-testid="media-publish-btn" className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black/80"><Share2 size={11} /> Publikasikan</button>}
           {x.link && <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
             <a href={x.link} target="_blank" rel="noreferrer" data-testid="media-drive-link" className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition ${chip}`}><HardDrive size={12} /> Buka di Google Drive <ExternalLink size={10} className="opacity-60" /></a>
-            {x.tier && <span className={dark ? "text-white/50" : "text-slate-400"}>Seedance {x.tier} · {x.duration}s</span>}
+            {x.tier && <span className={dark ? "text-white/50" : "text-slate-400"} data-testid="media-video-meta">Seedance {x.tier} · {x.duration}s{x.aspect_ratio ? ` · ${ASPECT_LABEL[x.aspect_ratio] || x.aspect_ratio}` : ""}</span>}
           </div>}
         </div>
       ))}
@@ -51,10 +51,14 @@ export function MediaList({ media = [], dark = false }) {
 // "Buat gambar? ±25 kredit" confirmation for expensive tools.
 const RENDER_LABEL = { image: "Merender gambar…", video: "Merender video… (±2–5 menit)" };
 
-export function RenderingBox({ kind = "image", dark = false }) {
+const BOX_ASPECT = { "9:16": "aspect-[9/16] max-w-[240px]", "3:4": "aspect-[3/4] max-w-[320px]", "1:1": "aspect-square max-w-[320px]", "4:3": "aspect-[4/3] max-w-[420px]", "21:9": "aspect-[21/9] max-w-[480px]" };
+export const ASPECT_LABEL = { "16:9": "16:9", "9:16": "9:16 Portrait", "1:1": "1:1 Persegi", "4:3": "4:3", "3:4": "3:4", "21:9": "21:9 Sinematik" };
+
+export function RenderingBox({ kind = "image", dark = false, aspect = "" }) {
   const Icon = kind === "video" ? Clapperboard : ImageIcon;
+  const shape = kind === "video" ? (BOX_ASPECT[aspect] || "aspect-video max-w-[420px]") : "aspect-[4/3] max-w-[420px]";
   return (
-    <div data-testid={`rendering-box-${kind}`} className={`relative mt-2 w-full max-w-[420px] overflow-hidden rounded-xl border ${kind === "video" ? "aspect-video" : "aspect-[4/3]"} ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-100"}`}>
+    <div data-testid={`rendering-box-${kind}`} className={`relative mt-2 w-full overflow-hidden rounded-xl border ${shape} ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-100"}`}>
       <div className="render-shimmer absolute inset-0" />
       <div className={`relative flex h-full flex-col items-center justify-center gap-2 ${dark ? "text-white/70" : "text-slate-500"}`}>
         <span className={`flex h-11 w-11 items-center justify-center rounded-full ${dark ? "bg-white/10" : "bg-white shadow-sm"}`}><Icon size={20} className="animate-pulse text-[#2F6BFF]" /></span>
@@ -87,10 +91,10 @@ function VideoChoiceCard({ m, cid, onDone, dark }) {
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal memulai render video"); setBusy(""); }
   };
   const cancel = async () => { setBusy("cancel"); try { await api.post(`/conversations/${cid}/messages/${m.id}/cancel-tool`); await onDone?.(); } catch { setBusy(""); } };
-  if (busy && busy !== "cancel") return <RenderingBox kind="video" dark={dark} />;
+  if (busy && busy !== "cancel") return <RenderingBox kind="video" dark={dark} aspect={pt.aspect_ratio} />;
   return (
     <div data-testid="video-choice-card" className={`mt-2 rounded-xl border p-3 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-50" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
-      <p className="mb-2 flex items-center gap-1.5 font-semibold"><Clapperboard size={14} /> Video {pt.duration} detik · pilih model <span className={`ml-auto flex items-center gap-1 font-normal ${dark ? "text-white/60" : "text-amber-700"}`}><Coins size={11} /> saldo {fmtCredits(pt.balance)}</span></p>
+      <p className="mb-2 flex items-center gap-1.5 font-semibold"><Clapperboard size={14} /> Video {pt.duration} detik{pt.aspect_ratio && pt.aspect_ratio !== "16:9" ? ` · ${ASPECT_LABEL[pt.aspect_ratio] || pt.aspect_ratio}` : ""} · pilih model <span className={`ml-auto flex items-center gap-1 font-normal ${dark ? "text-white/60" : "text-amber-700"}`}><Coins size={11} /> saldo {fmtCredits(pt.balance)}</span></p>
       <div className="grid gap-2 sm:grid-cols-2">
         {(pt.options || []).map((o) => {
           const ok = o.available && o.credits <= pt.balance;

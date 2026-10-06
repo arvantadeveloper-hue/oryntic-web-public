@@ -676,13 +676,14 @@ async def _run_video_bg(mid: str, cid: str, uid: str, persona_id: Optional[str],
     tier, duration, prompt, request = pt["tier"], int(pt["duration"]), pt["prompt"], pt.get("request") or ""
     try:
         image_url = public_media_url(app_base, pt["reference_path"]) if pt.get("reference_path") and app_base else None
-        gen = await seedance.generate(prompt, tier, duration, image_url=image_url)
+        aspect = pt.get("aspect_ratio") if pt.get("aspect_ratio") in seedance.ASPECTS else "16:9"
+        gen = await seedance.generate(prompt, tier, duration, aspect_ratio=aspect, image_url=image_url)
         data = await seedance.download(gen["video_url"])
-        title = f"Oryntix video - {(request or prompt)[:50].strip()} ({seedance.TIERS[tier]['label']}, {duration}s).mp4"
+        title = f"Oryntix video - {(request or prompt)[:50].strip()} ({seedance.TIERS[tier]['label']}, {duration}s, {pt.get('aspect_ratio') or '16:9'}).mp4"
         f = await drive_save(uid, title, kind="file", data=data, mime="video/mp4", source={"kind": "video", "conversation_id": cid, "message_id": mid, "tier": tier})
         credits = seedance.quote(tier, duration)
         await record_usage(uid, "video_generation", credits, {"conversation_id": cid, "persona_id": persona_id, "tier": tier, "duration": duration, "provider_credits": gen.get("provider_credits")})
-        media = {"type": "video", "name": f["name"], "drive_id": f["drive_id"], "link": f.get("link"), "prompt": prompt[:400], "request": request[:300], "tier": tier, "duration": duration}
+        media = {"type": "video", "name": f["name"], "drive_id": f["drive_id"], "link": f.get("link"), "prompt": prompt[:400], "request": request[:300], "tier": tier, "duration": duration, "aspect_ratio": aspect}
         if pt.get("reference_path"):
             media["animated_from"] = pt["reference_path"]
         upd = {"content": VIDEO_DONE_TEXT, "media": [media], "tool": "video", "credits": credits, "rendering": None}
@@ -700,6 +701,7 @@ async def _video_turn(ctx, plan: dict, confirm_threshold: int):
     duration = seedance.clamp_duration(plan.get("duration"))
     prompt = (plan.get("video_prompt") or ctx.user_text).strip()
     ref = await _latest_media(ctx.cid, "image") if plan.get("from_image") else None
+    aspect = plan.get("aspect_ratio") if plan.get("aspect_ratio") in seedance.ASPECTS else "16:9"
     yield ctx.sse(start=True)
     if not seedance.configured():
         async for ev in _emit_final(ctx, "Fitur render video belum diaktifkan oleh admin platform (API key Seedance belum diatur). Coba lagi nanti ya.", 0, {"tool": "video", "error": True}):
@@ -726,12 +728,14 @@ async def _video_turn(ctx, plan: dict, confirm_threshold: int):
     lines = [f"**{o['label']}** ±{_fmt_credits(o['per_sec'])} kredit/detik → ±{_fmt_credits(o['credits'])} kredit untuk {duration} detik"
              + ("" if o["credits"] <= balance else " _(saldo tidak cukup)_") for o in avail]
     skipped = [o for o in opts if not o["available"]]
-    intro = f"Siap, aku animasikan gambar terakhir jadi video {duration} detik. 🎬 Mau pakai model yang mana?" if ref else f"Siap, videonya {duration} detik. 🎬 Mau pakai model yang mana?"
+    fmt = f" format {seedance.ASPECTS[aspect]}" if aspect != "16:9" else ""
+    intro = (f"Siap, aku animasikan gambar terakhir jadi video {duration} detik{fmt}. 🎬 Mau pakai model yang mana?" if ref
+             else f"Siap, videonya {duration} detik{fmt}. 🎬 Mau pakai model yang mana?")
     text = (f"{intro}\n\n" + "\n".join(f"- {l}" for l in lines)
             + (f"\n\n_{skipped[0]['label']} maksimal {skipped[0]['max_dur']} detik, jadi tidak tersedia untuk durasi ini._" if skipped else "")
             + f"\n\nSaldo kredit kamu: {_fmt_credits(balance)}. Pilih salah satu di bawah ya.")
     yield ctx.sse(delta=text)
-    pt = {"kind": "video", "prompt": prompt, "duration": duration, "options": opts, "balance": balance, "request": ctx.user_text[:300]}
+    pt = {"kind": "video", "prompt": prompt, "duration": duration, "aspect_ratio": aspect, "options": opts, "balance": balance, "request": ctx.user_text[:300]}
     if ref:
         pt["reference_path"] = ref["path"]
     async for ev in _emit_final(ctx, text, 0, {"pending_tool": pt}):
@@ -1597,7 +1601,7 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
         if not await drive_connected(u["id"]):
             await db.messages.update_one({"id": mid}, {"$unset": {"pending_tool.running": ""}})
             raise HTTPException(400, "Hubungkan Google Drive dulu — video disimpan ke Drive kamu")
-        upd = {"content": VIDEO_WAIT_TEXT.replace("render videonya", f"render videonya dengan {opt['label']}"), "tool": "video", "rendering": "video"}
+        upd = {"content": VIDEO_WAIT_TEXT.replace("render videonya", f"render videonya dengan {opt['label']}"), "tool": "video", "rendering": "video", "aspect_ratio": pt.get("aspect_ratio") or "16:9"}
         await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
         await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
         asyncio.create_task(_run_video_bg(mid, cid, u["id"], msg.get("persona_id"), {**pt, "tier": opt["tier"]}, (app_url or "").rstrip("/")))

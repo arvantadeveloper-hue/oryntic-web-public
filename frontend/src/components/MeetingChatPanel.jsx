@@ -64,7 +64,7 @@ function Bubble({ m, me, cid, onRefresh }) {
         ? <a key={k} href={a.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-md bg-white/20 px-1.5 py-0.5 text-[11px] hover:underline"><HardDrive size={10} />{a.name}<ExternalLink size={9} /></a>
         : <span key={k} className="flex items-center gap-1 rounded-md bg-white/20 px-1.5 py-0.5 text-[11px]">{a.type === "image" ? <ImageIcon size={10} /> : <FileText size={10} />}{a.name}</span>)}</div>}
       {me ? <p className="whitespace-pre-wrap break-words">{m.content}</p> : <div className={MD_DARK}><Markdown content={m.content} /></div>}
-      {!me && m.rendering && !mediaOf(m).length && <RenderingBox kind={m.rendering} dark />}
+      {!me && m.rendering && !mediaOf(m).length && <RenderingBox kind={m.rendering} dark aspect={m.aspect_ratio} />}
       {!me && <MediaList media={mediaOf(m)} dark />}
       {!me && <ToolRequestCard m={m} cid={cid} onDone={onRefresh} dark />}
       {!me && <MessageCta m={m} dark />}

@@ -430,7 +430,7 @@ export default function Chat() {
                   <p className="mb-1 text-xs font-semibold text-slate-500">{m.persona_name}{m.is_moderator && " · moderator"}</p>
                   <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm ${m.is_moderator ? "border border-[#2F6BFF]/30 bg-[#EEF3FF] text-slate-700" : "aivora-card text-slate-700"}`} data-testid="msg-assistant">
                     <Markdown content={m.content} />
-                    {m.rendering && !(m.media || []).length && <RenderingBox kind={m.rendering} />}
+                    {m.rendering && !(m.media || []).length && <RenderingBox kind={m.rendering} aspect={m.aspect_ratio} />}
                     <MediaList media={m.media || []} />
                     {m.task_id && <TaskCard m={m} onOpen={setPanelTask} />}
                     <ToolRequestCard m={m} cid={id} onDone={refreshMsgs} />

@@ -13,6 +13,7 @@ TIERS = {
     "2.5": {"model": "seedance-2.5", "label": "Seedance 2.5", "rate_key": "video_per_sec", "max_dur": 30},
 }
 MIN_DUR, DEFAULT_DUR = 4, 5
+ASPECTS = {"16:9": "Landscape 16:9 (YouTube)", "9:16": "Portrait 9:16 (Reels/Shorts/TikTok)", "1:1": "Persegi 1:1 (feed Instagram)", "4:3": "4:3", "3:4": "3:4", "21:9": "Sinematik 21:9"}
 
 
 def configured() -> bool:
