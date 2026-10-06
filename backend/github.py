@@ -129,6 +129,31 @@ async def gh_create_pr(uid: str, repo: str, title: str, body: str, changes: list
     return {"repo": repo, "number": pr["number"], "url": pr["html_url"], "branch": branch, "base": base, "title": pr["title"], "files": [c.get("path") for c in changes if c.get("path")]}
 
 
+async def gh_pr_diff(uid: str, repo: str, number: Optional[int] = None, max_chars: int = 45_000) -> dict:
+    """PR metadata + per-file patches for code review (latest open PR when number is omitted)."""
+    tok = await _token(uid)
+    repo = _repo(repo)
+    if not number:
+        rows = await _gh(tok, "GET", f"/repos/{repo}/pulls", params={"state": "open", "sort": "updated", "direction": "desc", "per_page": 1})
+        if not rows:
+            raise HTTPException(404, f"Tidak ada pull request terbuka di {repo}.")
+        number = rows[0]["number"]
+    pr = await _gh(tok, "GET", f"/repos/{repo}/pulls/{number}")
+    files = await _gh(tok, "GET", f"/repos/{repo}/pulls/{number}/files", params={"per_page": 100})
+    out, used = [], 0
+    for f in files:
+        patch = f.get("patch") or "(binary / tanpa diff)"
+        if used + len(patch) > max_chars:
+            patch = patch[: max(0, max_chars - used)] + "\n... (dipotong)"
+        used += len(patch)
+        out.append({"path": f["filename"], "status": f["status"], "additions": f["additions"], "deletions": f["deletions"], "patch": patch})
+        if used >= max_chars:
+            break
+    return {"repo": repo, "number": number, "title": pr["title"], "body": (pr.get("body") or "")[:3000], "author": (pr.get("user") or {}).get("login"), "url": pr["html_url"],
+            "base": pr["base"]["ref"], "head": pr["head"]["ref"], "state": pr["state"], "changed_files": pr.get("changed_files"), "additions": pr.get("additions"), "deletions": pr.get("deletions"),
+            "files": out, "truncated": len(out) < len(files) or used >= max_chars}
+
+
 # ---------- REST ----------
 class ConnectIn(BaseModel):
     token: str = Field(min_length=20, max_length=400)
@@ -195,3 +220,13 @@ async def issues(x: RepoIn, u: dict = Depends(current_user)):
 @router.post("/pr")
 async def create_pr(x: PrIn, u: dict = Depends(current_user)):
     return await gh_create_pr(u["id"], x.repo, x.title, x.body, x.changes, x.base)
+
+
+class ReviewIn(BaseModel):
+    repo: str = Field(max_length=200)
+    number: Optional[int] = None
+
+
+@router.post("/pr-diff")
+async def pr_diff(x: ReviewIn, u: dict = Depends(current_user)):
+    return await gh_pr_diff(u["id"], x.repo, x.number)

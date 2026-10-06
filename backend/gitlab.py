@@ -142,6 +142,33 @@ async def gl_create_mr(uid: str, project: str, title: str, body: str, changes: l
     return {"repo": project, "number": mr["iid"], "url": mr["web_url"], "branch": branch, "base": target, "title": mr["title"], "files": [a["file_path"] for a in actions]}
 
 
+async def gl_mr_diff(uid: str, project: str, number: Optional[int] = None, max_chars: int = 45_000) -> dict:
+    """MR metadata + per-file diffs for code review (latest open MR when number is omitted)."""
+    tok, base = await _cred(uid)
+    pid = _pid(project)
+    if not number:
+        rows = await _gl(tok, base, "GET", f"/projects/{pid}/merge_requests", params={"state": "opened", "order_by": "updated_at", "per_page": 1})
+        if not rows:
+            raise HTTPException(404, f"Tidak ada merge request terbuka di {project}.")
+        number = rows[0]["iid"]
+    mr = await _gl(tok, base, "GET", f"/projects/{pid}/merge_requests/{number}")
+    ch = await _gl(tok, base, "GET", f"/projects/{pid}/merge_requests/{number}/changes")
+    out, used = [], 0
+    changes = ch.get("changes") or []
+    for f in changes:
+        patch = f.get("diff") or "(binary / tanpa diff)"
+        if used + len(patch) > max_chars:
+            patch = patch[: max(0, max_chars - used)] + "\n... (dipotong)"
+        used += len(patch)
+        status = "added" if f.get("new_file") else "removed" if f.get("deleted_file") else "renamed" if f.get("renamed_file") else "modified"
+        out.append({"path": f.get("new_path") or f.get("old_path"), "status": status, "additions": None, "deletions": None, "patch": patch})
+        if used >= max_chars:
+            break
+    return {"repo": project, "number": number, "title": mr["title"], "body": (mr.get("description") or "")[:3000], "author": (mr.get("author") or {}).get("username"), "url": mr["web_url"],
+            "base": mr.get("target_branch"), "head": mr.get("source_branch"), "state": mr.get("state"), "changed_files": len(changes), "additions": None, "deletions": None,
+            "files": out, "truncated": len(out) < len(changes) or used >= max_chars}
+
+
 # ---------- REST ----------
 class ConnectIn(BaseModel):
     token: str = Field(min_length=10, max_length=400)
@@ -210,3 +237,13 @@ async def issues(x: RepoIn, u: dict = Depends(current_user)):
 @router.post("/pr")
 async def create_mr(x: MrIn, u: dict = Depends(current_user)):
     return await gl_create_mr(u["id"], x.repo, x.title, x.body, x.changes, x.base)
+
+
+class ReviewIn(BaseModel):
+    repo: str = Field(max_length=200)
+    number: Optional[int] = None
+
+
+@router.post("/pr-diff")
+async def mr_diff(x: ReviewIn, u: dict = Depends(current_user)):
+    return await gl_mr_diff(u["id"], x.repo, x.number)

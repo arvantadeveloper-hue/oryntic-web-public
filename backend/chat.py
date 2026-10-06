@@ -15,7 +15,7 @@ from auth import current_user, workspace_id, _lang_name
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit
-from tools import route_model, wants_tool, plan_tool, run_image_tool, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task
+from tools import route_model, wants_tool, plan_tool, GITHUB_RE, run_image_tool, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task
 from pricing import rate as tool_rate
 from llm import model_label
 
@@ -669,9 +669,53 @@ def _repo_provider(name: str) -> dict:
     """Git hosting providers share one chat flow; only the API module and wording differ."""
     if name == "gitlab":
         import gitlab as m
-        return {"label": "GitLab", "pr": "Merge request", "connected": m.gl_connected, "repos": m.gl_projects, "tree": m.gl_tree, "read": m.gl_read, "issues": m.gl_issues, "create": m.gl_create_mr}
+        return {"label": "GitLab", "pr": "Merge request", "connected": m.gl_connected, "repos": m.gl_projects, "tree": m.gl_tree, "read": m.gl_read, "issues": m.gl_issues, "create": m.gl_create_mr, "diff": m.gl_mr_diff}
     import github as m
-    return {"label": "GitHub", "pr": "Pull request", "connected": m.gh_connected, "repos": m.gh_repos, "tree": m.gh_tree, "read": m.gh_read, "issues": m.gh_issues, "create": m.gh_create_pr}
+    return {"label": "GitHub", "pr": "Pull request", "connected": m.gh_connected, "repos": m.gh_repos, "tree": m.gh_tree, "read": m.gh_read, "issues": m.gh_issues, "create": m.gh_create_pr, "diff": m.gh_pr_diff}
+
+
+REVIEW_SYS = ("You are a meticulous senior code reviewer. Review the pull/merge request below and answer in the user's language ({lang}), in markdown, spoken-friendly but precise:\n"
+              "1. **Ringkasan** — what the change does (2-4 sentences).\n2. **Risiko & bug potensial** — concrete issues with file + line hints from the diff (security, logic, error handling, performance, breaking changes).\n"
+              "3. **Saran perbaikan** — actionable, with short code snippets when useful.\n4. **Kualitas** — naming, tests, docs, style (brief).\n5. **Verdict** — one of: Siap merge / Merge dengan catatan / Perlu perbaikan, with one-line reason.\n"
+              "Only comment on what is in the diff; do not invent files. Be specific, skip generic advice.")
+
+
+def _pr_number(v) -> Optional[int]:
+    v = str(v or "").strip().lstrip("#!")
+    return int(v) if v.isdigit() else None
+
+
+async def git_review_text(prov: dict, d: dict, u: dict, model_key: str, request: str = "") -> tuple:
+    """LLM code review of a PR/MR diff → (markdown, credits). Shared by chat tool and voice endpoint."""
+    diff_text = "\n\n".join(f"--- {f['path']} ({f['status']}) ---\n{f['patch']}" for f in d["files"])
+    review = await llm_text(REVIEW_SYS.format(lang=_lang_name(u)), f"{prov['pr']} !{d['number']} — {d['title']} (by {d['author']}, {d['head']} → {d['base']})\nDescription:\n{d['body']}\n\nUser's request: {request or 'review this'}\n\nDIFF:\n{diff_text}", model_key)
+    text = f"### Review {prov['pr'].lower()} [!{d['number']} {d['title']}]({d['url']})\n`{d['head']}` → `{d['base']}` · {d['changed_files']} file{' (diff dipotong)' if d['truncated'] else ''}\n\n{review}"
+    return text, text_credits(diff_text, review)
+
+
+class GitReviewIn(BaseModel):
+    provider: str = Field(default="github", max_length=10)
+    repo: str = Field(max_length=200)
+    number: Optional[int] = None
+
+
+@router.post("/conversations/{cid}/git-review")
+async def conv_git_review(cid: str, x: GitReviewIn, u: dict = Depends(current_user)):
+    """Voice tool: review a PR/MR and drop the written review into the conversation as an assistant message."""
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not conv or not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    prov = _repo_provider(x.provider)
+    if not await prov["connected"](u["id"]):
+        raise HTTPException(400, f"{prov['label']} belum terhubung.")
+    d = await prov["diff"](u["id"], x.repo, x.number)
+    persona = (await _get_personas([conv.get("persona_id") or (conv.get("persona_ids") or [None])[0]]) or [None])[0]
+    text, credits = await git_review_text(prov, d, u, (persona or {}).get("model"))
+    if persona:
+        await _save_ai_msg(cid, persona, text, credits, "text", {"tool": f"{x.provider}_review", "review_of": {"repo": x.repo, "number": d["number"], "url": d["url"]}})
+        if credits:
+            await record_usage(u["id"], "chat", credits, {"conversation_id": cid, "persona_id": persona["id"], "tool": f"{x.provider}_review"})
+    return {"number": d["number"], "title": d["title"], "url": d["url"], "summary": text[:1200]}
 
 
 async def _github_turn(ctx, plan: dict):
@@ -717,6 +761,14 @@ async def _github_turn(ctx, plan: dict):
             rows = await gh_issues(ctx.user["id"], repo, plan.get("state") or "open")
             text = (f"Issue/PR **{repo}** ({plan.get('state') or 'open'}):\n\n" + "\n".join(f"- [#{r['number']} {r['title']}]({r['url']}){' (PR)' if r['is_pr'] else ''} — {r['author']}" for r in rows)) if rows else f"Tidak ada issue {plan.get('state') or 'open'} di {repo}."
             extra = {"tool": tool, "results": rows}
+        elif kind == "review":
+            if not repo:
+                raise HTTPException(400, "Sebutkan nama repo-nya (owner/repo) ya.")
+            yield ctx.sse(status=f"Mengambil diff {prov['pr'].lower()}...")
+            d = await prov["diff"](ctx.user["id"], repo, _pr_number(plan.get("number")))
+            yield ctx.sse(status=f"Meninjau {len(d['files'])} file...")
+            text, credits = await git_review_text(prov, d, ctx.user, ctx.model_key, ctx.user_text)
+            extra = {"tool": tool, "review_of": {"repo": repo, "number": d["number"], "url": d["url"]}}
         else:
             if not repo:
                 raise HTTPException(400, "Sebutkan nama repo-nya (owner/repo) ya.")
@@ -931,6 +983,14 @@ async def _typed_intercepts(ctx: ReplyCtx):
         async for ev in _search_turn(ctx):
             yield ev
         return
+    plan = None
+    if GITHUB_RE.search(ctx.user_text):
+        # repo/PR/MR requests are tool calls, never a "big task" offer
+        plan = await plan_tool(ctx.user_text, ctx.prompt)
+        if plan.get("tool", "none").startswith(("github_", "gitlab_")):
+            async for ev in _tool_turn(ctx, plan):
+                yield ev
+            return
     if not ctx.task:
         handled = False
         async for ev in _task_offer_turn(ctx):
@@ -943,7 +1003,7 @@ async def _typed_intercepts(ctx: ReplyCtx):
             yield ev
         return
     if wants_tool(ctx.user_text):
-        plan = await plan_tool(ctx.user_text, ctx.prompt)
+        plan = plan or await plan_tool(ctx.user_text, ctx.prompt)
         if plan.get("tool") != "none":
             async for ev in _tool_turn(ctx, plan):
                 yield ev

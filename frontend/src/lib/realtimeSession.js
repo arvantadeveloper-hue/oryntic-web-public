@@ -161,6 +161,10 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       return { ok: true, ...r.data };
     }
     if (name === "github_issues" || name === "gitlab_issues") { const r = await api.post(`/integrations/${gitProv}/issues`, { repo: args.repo, state: args.state || "open" }); return { ok: true, ...r.data }; }
+    if (name === "github_review" || name === "gitlab_review") {
+      const r = await api.post(`/conversations/${cid}/git-review`, { provider: gitProv, repo: args.repo, number: args.number || null });
+      return { ok: true, number: r.data.number, title: r.data.title, summary: r.data.summary, note: "the full written review was posted to the chat panel — speak only the key points" };
+    }
     if (name === "github_pr" || name === "gitlab_pr") {
       const r = await api.post(`/integrations/${gitProv}/pr`, { repo: args.repo, title: args.title, body: args.body || "", changes: args.changes || [] });
       await postCard(callId, `${gitProv === "gitlab" ? "Merge request" : "Pull request"} dibuka: **!${r.data.number} ${r.data.title}** di ${r.data.repo} — [lihat di ${gitLabel}](${r.data.url})`);

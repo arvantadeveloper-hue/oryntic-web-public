@@ -158,6 +158,8 @@ GITHUB_TOOLS = [
      "parameters": {"type": "object", "properties": {"repo": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string", "description": "markdown summary of the changes"},
                                                      "changes": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}, "delete": {"type": "boolean"}}, "required": ["path"]}}}, "required": ["repo", "title", "changes"]}},
 ]
+GITHUB_TOOLS.append({"type": "function", "name": "github_review", "description": "Fetch a pull request's diff (latest open PR when number omitted) so you can review it: summarize, point out risks and suggest fixes. The full written review is posted to the chat panel.",
+                     "parameters": {"type": "object", "properties": {"repo": {"type": "string"}, "number": {"type": "integer"}}, "required": ["repo"]}})
 GITLAB_TOOLS = [{**t, "name": t["name"].replace("github_", "gitlab_"), "description": t["description"].replace("GitHub", "GitLab").replace("pull request", "merge request")} for t in GITHUB_TOOLS]
 UPDATE_TOOL = {"type": "function", "name": "update_task",
                "description": "Apply a revision the user asked for to the Workspace result currently being presented/discussed. Pass the full revision instruction. The result is saved as a new version.",
