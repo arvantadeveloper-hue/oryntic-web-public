@@ -537,7 +537,7 @@ async def _emit_final(ctx, text: str, credits: int, extra: dict):
         if k in extra:
             payload[k] = extra[k]
     yield ctx.sse(final=True, **payload)
-    await notify(ctx.cid, {"type": "message", "role": "assistant", "persona_id": ctx.persona["id"]})
+    await notify(ctx.cid, {"type": "message", "role": "assistant", "persona_id": ctx.persona["id"], "message": clean(msg)})
     yield credits
 
 
@@ -953,7 +953,7 @@ async def _plain_reply(ctx: ReplyCtx):
     extra = {"model_key": ctx.model_key, "model_label": model_label(ctx.model_key), "routed": ctx.routed} if ctx.routed else {}
     ai_msg = await _save_ai_msg(ctx.cid, ctx.persona, full, used, ctx.via, extra)
     yield ctx.sse(final=True, message_id=ai_msg["id"], content=full)
-    await notify(ctx.cid, {"type": "message", "role": "assistant", "persona_id": ctx.persona["id"]})
+    await notify(ctx.cid, {"type": "message", "role": "assistant", "persona_id": ctx.persona["id"], "message": clean(ai_msg)})
     yield used
 
 
@@ -990,7 +990,7 @@ async def _store_user_message(cid: str, x: MsgIn, u: dict, attach_text: str, att
     if attach_text:
         user_msg["attachment_text"] = attach_text[:4000]
     await db.messages.insert_one(dict(user_msg))
-    await notify(cid, {"type": "message", "role": "user", "sender_name": user_msg["sender_name"]})
+    await notify(cid, {"type": "message", "role": "user", "sender_name": user_msg["sender_name"], "message": clean(user_msg)})
     await _fanout_message(cid, u["id"], user_msg["sender_name"], x.content)
     return user_msg
 
@@ -1155,7 +1155,7 @@ async def _moderator_text(cid: str, u: dict, roster: list, reason: str):
             "persona_id": "__moderator__", "persona_name": "Moderator", "is_moderator": True,
             "portrait": None, "credits": used, "created_at": now_iso()}
     await db.messages.insert_one(dict(imsg))
-    await notify(cid, {"type": "message", "role": "assistant", "persona_id": "__moderator__"})
+    await notify(cid, {"type": "message", "role": "assistant", "persona_id": "__moderator__", "message": clean(imsg)})
     return inter, used
 
 
@@ -1298,7 +1298,7 @@ async def run_tool(cid: str, mid: str, u: dict = Depends(current_user)):
         task = await _start_image_set(u, persona, cid, pt["prompts"], f"{len(pt['prompts'])} gambar")
         upd = {"content": _image_set_text(task, len(pt["prompts"])), "tool": "image_set", "task_id": task["id"]}
         await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
-        await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id")})
+        await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
         return {**msg, **upd, "pending_tool": None}
     try:
         out = await run_image_tool(u["id"], pt["prompt"])
@@ -1308,7 +1308,7 @@ async def run_tool(cid: str, mid: str, u: dict = Depends(current_user)):
     await record_usage(u["id"], "image_generation", out["credits"], {"conversation_id": cid, "persona_id": msg.get("persona_id")})
     upd = {"content": "Ini gambarnya! ✨ Kalau mau diubah gayanya, bilang saja.", "media": out["media"], "tool": "image", "credits": out["credits"]}
     await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
-    await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id")})
+    await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
     return {**msg, **upd, "pending_tool": None}
 
 
@@ -1317,7 +1317,7 @@ async def cancel_tool(cid: str, mid: str, u: dict = Depends(current_user)):
     msg = await _pending_msg(cid, mid, u)
     upd = {"content": "Oke, pembuatan gambar dibatalkan. Kalau berubah pikiran, tinggal bilang ya!", "tool_cancelled": True}
     await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
-    await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id")})
+    await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
     return {**msg, **upd, "pending_tool": None}
 
 

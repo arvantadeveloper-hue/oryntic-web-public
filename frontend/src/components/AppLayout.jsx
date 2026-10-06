@@ -9,6 +9,8 @@ import { IncomingCall } from "./IncomingCall";
 import { FriendCallRing } from "./FriendCallRing";
 import { TaskNotifier } from "./TaskChatTools";
 import { UpgradePlanDialog } from "./UpgradePlanDialog";
+import { NotificationBell } from "./NotificationBell";
+import { onUserEvent } from "../lib/userEvents";
 
 export function AppLayout() {
   const { user, logout } = useAuth();
@@ -22,11 +24,12 @@ export function AppLayout() {
     let alive = true;
     const pull = () => api.get("/notifications/badges").then((r) => alive && setBadges(r.data)).catch(() => {});
     pull();
-    const t = setInterval(pull, 20000);
+    const t = setInterval(pull, 120000); // fallback only — live updates arrive over the user WebSocket
+    const off = onUserEvent(["message_new", "friend_request", "notification"], pull);
     const onVis = () => { if (document.visibilityState === "visible") pull(); };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("oryntix:badges", pull);
-    return () => { alive = false; clearInterval(t); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("oryntix:badges", pull); };
+    return () => { alive = false; clearInterval(t); off(); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("oryntix:badges", pull); };
   }, [user?.id]); // eslint-disable-line
   const badgeOf = (id) => (id === "friends" ? badges.friend_requests : id === "chat" ? badges.unread_chats : 0);
 
@@ -128,9 +131,7 @@ export function AppLayout() {
               </button>
             )}
             <button className="hidden h-10 w-10 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 sm:flex" title="Bantuan"><HelpCircle size={19} /></button>
-            <button className="relative flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100" onClick={() => nav("/reminders")} data-testid="topbar-bell">
-              <Bell size={19} /><span className="absolute right-2.5 top-2 h-2 w-2 rounded-full bg-[#EF4444] ring-2 ring-white" />
-            </button>
+            <NotificationBell />
             <button onClick={() => nav("/chat")} className="btn-primary h-10 rounded-xl px-3.5 sm:px-4" data-testid="topbar-new"><Plus size={16} /> <span className="hidden sm:inline">New</span></button>
             <button onClick={() => nav("/profile")} className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#2F6BFF,#7C3AED)" }} data-testid="topbar-user">{(user?.name || "U")[0].toUpperCase()}</button>
           </div>

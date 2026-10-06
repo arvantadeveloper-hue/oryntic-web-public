@@ -79,6 +79,10 @@ async def invite(x: InviteIn, request: Request, u: dict = Depends(current_user))
     await db.friends.update_one({"requester_id": u["id"], "addressee_id": target["id"]}, {"$set": doc}, upsert=True)
     subject, html, text = friend_request_email(u.get("name") or u["email"], f"{base}/friends")
     sent = await send_email(target["email"], subject, html, text)
+    from push import send_push
+    from realtime import notify_user
+    await send_push(target["id"], f"Permintaan pertemanan dari {u.get('name') or u['email']}", "Terima atau tolak di halaman Teman.", {"link": "/friends", "tag": f"friend-{u['id']}"}, kind="friends")
+    await notify_user(target["id"], {"type": "friend_request", "from": u.get("name") or u["email"]})
     return {"status": "requested", "request_id": doc["id"], "mail_sent": sent}
 
 

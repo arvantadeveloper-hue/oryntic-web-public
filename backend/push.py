@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from auth import current_user
-from db import db, now_iso
+from db import db, now_iso, new_id
 from realtime import user_manager
 
 # Web push via Firebase Cloud Messaging (HTTP v1 through firebase-admin). Service account comes from FCM_SERVICE_ACCOUNT_B64 (base64 of the JSON key).
@@ -85,8 +85,22 @@ async def test_push(u: dict = Depends(current_user)):
     return {"sent": sent}
 
 
+async def log_notification(uid: str, title: str, body: str, data: Optional[dict], kind: Optional[str]) -> None:
+    """In-app notification log (feeds the bell panel). Same source as FCM pushes; tag → one entry per conversation/thread."""
+    from realtime import notify_user
+    data = data or {}
+    doc = {"user_id": uid, "title": title, "body": (body or "")[:300], "link": data.get("link") or "/home", "kind": kind or "system", "tag": data.get("tag"), "created_at": now_iso()}
+    if doc["tag"]:
+        await db.notifications.update_one({"user_id": uid, "tag": doc["tag"]}, {"$set": doc, "$setOnInsert": {"id": new_id()}}, upsert=True)
+    else:
+        await db.notifications.insert_one({"id": new_id(), **doc})
+    await notify_user(uid, {"type": "notification", "title": title, "kind": doc["kind"], "link": doc["link"]})
+
+
 async def send_push(uid: str, title: str, body: str, data: Optional[dict] = None, kind: Optional[str] = "messages", force: bool = False) -> int:
     """Push to all devices of a user. Skipped when the user is live on the per-user WebSocket (they already see it in-app), unless force."""
+    if kind:
+        await log_notification(uid, title, body, data, kind)
     if not configured() or not _firebase():
         return 0
     if kind and not (await _prefs(uid)).get(kind, True):

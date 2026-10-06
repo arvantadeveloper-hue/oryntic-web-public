@@ -45,6 +45,30 @@ async def badges(u: dict = Depends(current_user)):
     return {"friend_requests": friend_requests, "unread_chats": unread, "at": now_iso()}
 
 
+@router.get("/notifications/feed")
+async def notifications_feed(u: dict = Depends(current_user)):
+    """Bell panel: notification log (same source as FCM pushes) + live states (ringing reminders, pending friend requests)."""
+    seen = (u.get("notifications_seen_at") or "")
+    items = [dict(r, read=r["created_at"] <= seen) for r in await db.notifications.find({"user_id": u["id"]}, {"_id": 0}).sort("created_at", -1).to_list(30)]
+    for r in await db.reminders.find({"user_id": u["id"], "status": "ringing"}, {"_id": 0, "id": 1, "title": 1, "remind_at": 1}).to_list(5):
+        items.insert(0, {"id": f"rem-{r['id']}", "kind": "reminders", "title": f"Pengingat berbunyi: {r.get('title') or 'Agenda'}", "body": "Asisten siap menelepon Anda.", "link": "/reminders", "created_at": r.get("remind_at") or now_iso(), "read": False, "live": True})
+    reqs = await db.friends.find({"addressee_id": u["id"], "status": "pending"}, {"_id": 0, "id": 1, "requester_id": 1, "created_at": 1}).to_list(10)
+    if reqs:
+        people = {p["id"]: p async for p in db.users.find({"id": {"$in": [r["requester_id"] for r in reqs]}}, {"_id": 0, "id": 1, "name": 1, "email": 1})}
+        for r in reqs:
+            p = people.get(r["requester_id"]) or {}
+            items.insert(0, {"id": f"fr-{r['id']}", "kind": "friends", "title": f"Permintaan pertemanan dari {p.get('name') or p.get('email') or 'seseorang'}", "body": "Terima atau tolak di halaman Teman.", "link": "/friends", "created_at": r.get("created_at") or now_iso(), "read": False, "live": True})
+    return {"items": items, "unseen": sum(1 for i in items if not i["read"]), "seen_at": seen or None}
+
+
+@router.post("/notifications/seen")
+async def notifications_seen(u: dict = Depends(current_user)):
+    ts = now_iso()
+    await db.users.update_one({"id": u["id"]}, {"$set": {"notifications_seen_at": ts}})
+    await db.tasks.update_many({"user_id": u["id"], "notified": False, "type": "assigned"}, {"$set": {"notified": True}})
+    return {"ok": True, "seen_at": ts}
+
+
 CALL_TTL_SEC = 120
 
 

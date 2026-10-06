@@ -4,6 +4,7 @@ import { Send, Search, Trash2, Copy, RefreshCw, Bookmark, Users, X, Check, Bot, 
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { onUserEvent } from "../lib/userEvents";
 import { useI18n } from "../i18n";
 import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
@@ -39,7 +40,10 @@ export default function Chat() {
   const { t } = useI18n();
   const isAdmin = user?.role === "admin";
   const rt = useRealtimeStatus();
-  const [convs, setConvs] = useState([]);
+  const cacheKey = `oryntix_chatlist_${user?.id || "anon"}`;
+  const cached = useRef(null);
+  if (cached.current === null) { try { cached.current = JSON.parse(localStorage.getItem(cacheKey) || "null") || {}; } catch (e) { cached.current = {}; } }
+  const [convs, setConvs] = useState(cached.current.convs || []);
   const [msgHasMore, setMsgHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [archivedCount, setArchivedCount] = useState(0);
@@ -53,8 +57,14 @@ export default function Chat() {
   const [streaming, setStreaming] = useState(false);
   const [liveMap, setLiveMap] = useState({});
   const [liveOrder, setLiveOrder] = useState([]);
-  const [personas, setPersonas] = useState(null);
-  const [friends, setFriends] = useState([]);
+  const [personas, setPersonas] = useState(cached.current.personas || null);
+  const [friends, setFriends] = useState(cached.current.friends || []);
+  // persist the chat list (conversations, assistants, friends) so the page paints instantly on the next visit (long strings such as base64 portraits are dropped to stay within the storage quota)
+  useEffect(() => {
+    if (!user?.id) return;
+    const slim = (v) => Array.isArray(v) ? v.map(slim) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).filter(([, x]) => !(typeof x === "string" && x.length > 1500)).map(([k, x]) => [k, slim(x)])) : v;
+    try { localStorage.setItem(cacheKey, JSON.stringify({ convs: slim(convs.slice(0, 200)), personas: slim(personas), friends: slim(friends), at: Date.now() })); } catch (e) {}
+  }, [convs, personas, friends, cacheKey, user?.id]);
   const [pickedFriends, setPickedFriends] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [picked, setPicked] = useState([]);
@@ -76,7 +86,7 @@ export default function Chat() {
   };
   const [driveOn, setDriveOn] = useState(false);
   useEffect(() => { api.get("/integrations/google/status").then((r) => setDriveOn(!!r.data.connected)).catch(() => setDriveOn(false)); }, []);
-  const [convsLoading, setConvsLoading] = useState(true);
+  const [convsLoading, setConvsLoading] = useState(!(cached.current.convs || []).length);
   const [msgsLoading, setMsgsLoading] = useState(false);
   const streamingRef = useRef(false);
   const endRef = useRef(null);
@@ -118,19 +128,40 @@ export default function Chat() {
   const skipScroll = useRef(false);
   useEffect(() => { if (skipScroll.current) { skipScroll.current = false; return; } endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, liveMap]);
 
-  // realtime: other humans' and AI messages in shared meetings/groups
+  // realtime: messages arrive over the conversation WebSocket with their full payload → upsert locally (no GET per event)
+  const convWs = useRef(null);
+  const upsertMsg = (msg) => {
+    if (!msg || !msg.id) return;
+    setMessages((prev) => {
+      const i = prev.findIndex((m) => m.id === msg.id);
+      if (i >= 0) { const next = prev.slice(); next[i] = { ...prev[i], ...msg }; return next; }
+      if (msg.role === "user" && msg.sender_user_id === user?.id) {
+        const t = prev.findIndex((m) => String(m.id).startsWith("tmp-u-") && m.content === msg.content);
+        if (t >= 0) { const next = prev.slice(); next[t] = msg; return next; }
+      }
+      return [...prev, msg];
+    });
+    if (msg.role === "assistant" && msg.persona_id) {
+      setLiveMap((prev) => { if (!prev[msg.persona_id]) return prev; const { [msg.persona_id]: _gone, ...rest } = prev; return rest; });
+      setLiveOrder((o) => o.filter((p) => p !== msg.persona_id));
+    }
+  };
   useEffect(() => {
     if (!id) return;
     let ws;
     try {
       ws = openConvSocket(id, (ev) => {
+        if (ev.type === "message" && ev.message) { upsertMsg(ev.message); return; }
         if ((ev.type === "message" || ev.type === "participants") && !streamingRef.current) {
           api.get(`/conversations/${id}/messages`).then((r) => { setConv(r.data.conversation); setMessages(r.data.messages); }).catch(() => {});
         }
       });
+      convWs.current = ws;
     } catch (e) {}
-    return () => { try { ws && ws.close(); } catch (e) {} };
+    return () => { convWs.current = null; try { ws && ws.close(); } catch (e) {} };
+    /* eslint-disable-next-line */
   }, [id]);
+  useEffect(() => { const off = onUserEvent(["message_new"], () => loadConvs()); return off; /* eslint-disable-next-line */ }, []);
 
   const openModal = (m = "group") => {
     if (personas === null) return;
@@ -232,8 +263,8 @@ export default function Chat() {
         if (ev.summary_request) setSummaryRequest(true);
         if (ev.done) refreshUser();
       });
-      const r = await api.get(`/conversations/${id}/messages`);
-      setMessages(r.data.messages); setLiveMap({}); setLiveOrder([]); loadConvs();
+      if (!convWs.current || convWs.current.readyState !== 1) { const r = await api.get(`/conversations/${id}/messages`); setMessages(r.data.messages); }
+      setLiveMap({}); setLiveOrder([]); loadConvs();
     } catch (e) { toast.error(e?.detail || (e?.status === 429 ? "Terlalu banyak pesan, tunggu sebentar." : e?.status === 402 ? "Kuota kredit harian habis." : "Gagal mengirim pesan")); } finally { setStreaming(false); }
   };
 

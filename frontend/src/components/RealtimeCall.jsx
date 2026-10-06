@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { vadUpdate, reportUsage, ContextPruner, runVoiceTool } from "../lib/realtimeSession";
@@ -16,9 +16,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
   const [layout, setLayout] = useMeetingLayout();
   const [phase, setPhase] = useState("connecting"); // connecting|listening|user_speaking|thinking|speaking|ended
   const [muted, setMuted] = useState(false);
-  const [showCaption, setShowCaption] = useState(true);
-  const [captions, setCaptions] = useState([]); // [{role, text}]
-  const [live, setLive] = useState(""); // assistant transcript being spoken
+  const [, setLive] = useState(""); // assistant transcript being spoken (shown only in the chat panel)
   const [level, setLevel] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [cpm, setCpm] = useState(null);
@@ -54,7 +52,6 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
     const t = liveRef.current.trim();
     if (!t) return;
     liveRef.current = ""; setLive("");
-    setCaptions((c) => [...c.slice(-5), { role: "assistant", text: t }]);
     saveTranscript("assistant", t);
   };
 
@@ -87,7 +84,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
       case "input_audio_buffer.speech_stopped":
         setPhase("thinking"); break;
       case "conversation.item.input_audio_transcription.completed":
-        if (ev.transcript) { setCaptions((c) => [...c.slice(-5), { role: "user", text: ev.transcript }]); saveTranscript("user", ev.transcript); }
+        if (ev.transcript) saveTranscript("user", ev.transcript);
         break;
       case "response.output_audio.delta":
       case "response.audio.delta":
@@ -98,7 +95,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
       case "response.output_audio_transcript.done":
       case "response.audio_transcript.done": {
         const t = ev.transcript || liveRef.current;
-        if (t) { setCaptions((c) => [...c.slice(-5), { role: "assistant", text: t }]); saveTranscript("assistant", t); }
+        if (t) saveTranscript("assistant", t);
         liveRef.current = ""; setLive("");
         break;
       }
@@ -237,21 +234,12 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, ope
       <p className="mt-1 flex items-center gap-2 text-sm text-white/70" data-testid="rt-phase">{phase === "connecting" && <Loader2 size={14} className="animate-spin" />}{label}</p>
     </div>
   );
-  const captionEl = showCaption && (live || captions.length > 0) ? (
-    <div className={`${layout === "chat" ? "" : "mx-auto px-6 pb-4"} w-full max-w-2xl space-y-2`} data-testid="rt-captions">
-      {captions.slice(-2).map((c, i) => (
-        <p key={i} className={`text-center text-sm ${c.role === "user" ? "text-emerald-200/80" : "text-white/60"}`}><span className="mr-1 text-[10px] font-bold uppercase tracking-wider opacity-70">{c.role === "user" ? "Anda" : persona.name}</span>{c.text}</p>
-      ))}
-      {live && <p className="text-center text-base leading-relaxed text-white">{live}</p>}
-      {layout === "chat" && <p className="text-center text-xs text-white/60" data-testid="rt-phase-rail">{label}</p>}
-    </div>
-  ) : (layout === "chat" ? <p className="text-center text-xs text-white/60">{label}</p> : null);
+  const captionEl = layout === "chat" ? <p className="text-center text-xs text-white/60" data-testid="rt-phase-rail">{label}</p> : null;
   const controls = (
     <div className="flex items-center justify-center gap-3 px-4 py-8 sm:gap-4">
       <button onClick={toggleMute} data-testid="rt-mute" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
       <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
       <LayoutMenu layout={layout} onChange={setLayout} />
-      <button onClick={() => setShowCaption((s) => !s)} data-testid="rt-captions-toggle" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${showCaption ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}><Captions size={22} /></button>
       {layout !== "chat" && <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />}
       <button onClick={hangup} data-testid="rt-end" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-6 text-sm font-bold transition hover:brightness-105"><PhoneOff size={20} /> Akhiri</button>
     </div>
