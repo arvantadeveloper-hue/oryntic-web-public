@@ -164,6 +164,8 @@ GITHUB_TOOLS = [
 ]
 GITHUB_TOOLS.append({"type": "function", "name": "github_review", "description": "Fetch a pull request's diff (latest open PR when number omitted) so you can review it: summarize, point out risks and suggest fixes. The full written review is posted to the chat panel.",
                      "parameters": {"type": "object", "properties": {"repo": {"type": "string"}, "number": {"type": "integer"}}, "required": ["repo"]}})
+SOCIAL_TOOL = {"type": "function", "name": "social_publish", "description": "Publish the latest image/video of this conversation (or a text-only post) to the user's connected social accounts. Only after the user confirmed the caption and the target networks.",
+               "parameters": {"type": "object", "properties": {"providers": {"type": "array", "items": {"type": "string", "enum": ["linkedin", "meta", "youtube"]}}, "caption": {"type": "string"}, "kind": {"type": "string", "enum": ["text", "image", "video"]}}, "required": ["providers", "caption"]}}
 GITLAB_TOOLS = [{**t, "name": t["name"].replace("github_", "gitlab_"), "description": t["description"].replace("GitHub", "GitLab").replace("pull request", "merge request")} for t in GITHUB_TOOLS]
 UPDATE_TOOL = {"type": "function", "name": "update_task",
                "description": "Apply a revision the user asked for to the Workspace result currently being presented/discussed. Pass the full revision instruction. The result is saved as a new version.",
@@ -354,7 +356,8 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         drive_on = bool(await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
         gh_on = bool(await db.github_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
         gl_on = bool(await db.gitlab_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
-        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL] + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        social_on = bool(await db.social_accounts.find_one({"user_id": u["id"]}, {"_id": 1}))
+        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL] + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:

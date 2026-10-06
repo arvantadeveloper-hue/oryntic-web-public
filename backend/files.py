@@ -41,11 +41,16 @@ def _path_parts(path: str) -> list:
 
 
 @router.get("/{path:path}")
-async def serve_file(path: str, authorization: Optional[str] = Header(None), auth: Optional[str] = Query(None), download: int = Query(0)):
-    uid = await _verify(_bearer(authorization, auth))
+async def serve_file(path: str, authorization: Optional[str] = Header(None), auth: Optional[str] = Query(None), download: int = Query(0), sig: Optional[str] = Query(None)):
     parts = _path_parts(path)
-    if parts[2] != uid and not await _same_workspace(uid, parts[2]):
-        raise HTTPException(403, "Forbidden")
+    if sig:  # short-lived signed link (used so social networks can fetch media we publish)
+        from social import verify_file_sig
+        if not verify_file_sig(path, sig):
+            raise HTTPException(403, "Forbidden")
+    else:
+        uid = await _verify(_bearer(authorization, auth))
+        if parts[2] != uid and not await _same_workspace(uid, parts[2]):
+            raise HTTPException(403, "Forbidden")
     try:
         data, content_type = await asyncio.to_thread(get_object, path)
     except Exception as exc:

@@ -4,7 +4,8 @@ from db import db
 from auth import require_admin, require_platform_admin, require_platform_staff, workspace_id, public_user, member_ids
 from wallet import get_packages
 from llm import GPT_MODEL, IMAGE_MODEL, user_today_usage
-from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES, DEFAULT_PRICING, FEATURES, feature_table, build_packages
+from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES, DEFAULT_PRICING, FEATURES, feature_table, build_packages, model_table
+from llm import MODEL_CATALOG
 
 
 class PackageTierIn(BaseModel):
@@ -129,6 +130,8 @@ class PlatformPricingIn(BaseModel):
     vision_usd: float = Field(default=0.006, ge=0)
     bandwidth_usd_per_gb: float = Field(default=0.5, ge=0)
     margin_overrides: dict[str, float] = Field(default_factory=lambda: {"call_bandwidth": 50.0})
+    chars_per_token: float = Field(default=4.0, ge=1, le=10)
+    model_prices: dict[str, dict[str, float]] = Field(default_factory=lambda: dict(DEFAULT_PRICING["model_prices"]))
     package_margin_pct: float = Field(default=15.0, ge=0, le=500)
     package_round_idr: int = Field(default=1000, ge=1, le=1_000_000)
     packages: list[PackageTierIn] = Field(default_factory=lambda: [PackageTierIn(**t) for t in DEFAULT_PRICING["packages"]], min_length=1, max_length=12)
@@ -165,6 +168,7 @@ async def pricing(_: dict = Depends(require_platform_staff)):
         "pricing": p,
         "rates": compute_rates(p),
         "features": feature_table(p),
+        "models": model_table(p, MODEL_CATALOG),
         "trial": await get_trial(),
         "providers": [
             {"provider": "OpenAI", "model": GPT_MODEL, "capability": "text", "unit": "1k chars", "rate_credits_per_1k_chars": RATES["text_per_1k"], "status": "active"},
@@ -182,14 +186,14 @@ async def pricing(_: dict = Depends(require_platform_staff)):
 @router.put("/pricing")
 async def put_pricing(x: PlatformPricingIn, _: dict = Depends(require_platform_admin)):
     p = await set_pricing(x.model_dump())
-    return {"pricing": p, "rates": compute_rates(p), "features": feature_table(p), "packages": build_packages(p)}
+    return {"pricing": p, "rates": compute_rates(p), "features": feature_table(p), "models": model_table(p, MODEL_CATALOG), "packages": build_packages(p)}
 
 
 @router.post("/pricing/preview")
 async def preview_pricing(x: PlatformPricingIn, _: dict = Depends(require_platform_admin)):
     """What-if calculation for the admin platform: nothing is saved."""
     p = {**DEFAULT_PRICING, **x.model_dump()}
-    return {"rates": compute_rates(p), "features": feature_table(p), "packages": build_packages(p)}
+    return {"rates": compute_rates(p), "features": feature_table(p), "models": model_table(p, MODEL_CATALOG), "packages": build_packages(p)}
 
 
 @router.put("/trial")

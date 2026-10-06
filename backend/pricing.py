@@ -19,6 +19,15 @@ DEFAULT_PRICING = {
     # OpenAI gpt-realtime-2 list prices (USD per 1M tokens): audio in 32 / out 64, text in 4 / out 24, cached 0.40 — billed per response from the usage report
     "rt_audio_in_usd_1m": 32.0, "rt_audio_out_usd_1m": 64.0, "rt_text_in_usd_1m": 4.0, "rt_text_out_usd_1m": 24.0, "rt_cached_in_usd_1m": 0.4,
     "video_usd_per_sec": 0.062,
+    # per-model list prices (USD per 1M tokens, input/output) — each persona "brain" is billed at its own rate; ~4 chars per token
+    "chars_per_token": 4.0,
+    "model_prices": {
+        "gpt-astra": {"in": 10.0, "out": 50.0}, "gpt-luna": {"in": 0.10, "out": 0.50}, "gpt-terra": {"in": 1.0, "out": 5.0}, "gpt-5-5": {"in": 1.25, "out": 10.0},
+        "claude-opus-5-5": {"in": 4.0, "out": 20.0}, "claude-sonnet": {"in": 2.0, "out": 10.0}, "claude-opus-5": {"in": 5.0, "out": 25.0}, "claude-sonnet-5": {"in": 3.0, "out": 15.0},
+        "claude-opus-4-8": {"in": 5.0, "out": 25.0}, "claude-haiku": {"in": 1.0, "out": 5.0}, "claude-fable": {"in": 10.0, "out": 50.0},
+        "gemini-pro": {"in": 2.0, "out": 12.0}, "gemini-3-8-flash": {"in": 0.75, "out": 3.75}, "gemini-3-7-flash": {"in": 0.75, "out": 3.75}, "gemini-3-6-flash": {"in": 0.75, "out": 3.75},
+        "gemini-3-5-flash": {"in": 1.5, "out": 9.0}, "gemini-3-flash": {"in": 0.5, "out": 3.0},
+    },
     # credit packages: price_idr = usd × (1 + package_margin − discount) × (1 + tax) × fx, rounded to package_round_idr
     "package_margin_pct": 15.0, "package_round_idr": 1000,
     "packages": [
@@ -73,6 +82,32 @@ def realtime_usage_usd(p: dict, usage: dict) -> float:
     return (max(0, int(i.get("audio_tokens") or 0) - 0) * p["rt_audio_in_usd_1m"] + int(i.get("text_tokens") or 0) * p["rt_text_in_usd_1m"]
             + int(o.get("audio_tokens") or 0) * p["rt_audio_out_usd_1m"] + int(o.get("text_tokens") or 0) * p["rt_text_out_usd_1m"]
             + cached * p["rt_cached_in_usd_1m"]) / 1_000_000
+
+
+def model_price(p: dict, model_key: str | None) -> dict | None:
+    mp = {**DEFAULT_PRICING["model_prices"], **(p.get("model_prices") or {})}
+    return mp.get(model_key or "")
+
+
+def model_text_credits(p: dict, model_key: str | None, in_chars: int, out_chars: int) -> float | None:
+    """Exact credits for one exchange on a specific model (None when the model has no price → caller falls back to the flat text rate)."""
+    mp = model_price(p, model_key)
+    if not mp:
+        return None
+    cpt = max(1.0, float(p.get("chars_per_token") or 4.0))
+    usd = (in_chars / cpt) * float(mp["in"]) / 1_000_000 + (out_chars / cpt) * float(mp["out"]) / 1_000_000
+    return usd_to_credits(p, usd, "text")
+
+
+def model_table(p: dict, catalog: list) -> list:
+    """Admin platform view: per model → list price in/out, credits per 1k chars in/out and for a typical exchange (2k in + 600 out chars)."""
+    out = []
+    for m in catalog:
+        mp = model_price(p, m["id"]) or {"in": 0.0, "out": 0.0}
+        out.append({"id": m["id"], "label": m["label"], "provider": m["provider"], "in_usd_1m": mp["in"], "out_usd_1m": mp["out"],
+                    "credits_in_per_1k": round(model_text_credits(p, m["id"], 1000, 0) or 0, 3), "credits_out_per_1k": round(model_text_credits(p, m["id"], 0, 1000) or 0, 3),
+                    "credits_typical": max(1, math.ceil(model_text_credits(p, m["id"], 2000, 600) or 0))})
+    return out
 
 
 def compute_rates(p: dict) -> dict:

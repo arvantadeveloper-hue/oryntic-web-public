@@ -15,7 +15,7 @@ from auth import current_user, workspace_id, _lang_name
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit, throttle_message, inflight_start, inflight_end
-from tools import route_model, wants_tool, plan_tool, GITHUB_RE, run_image_tool, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task
+from tools import route_model, wants_tool, plan_tool, GITHUB_RE, SOCIAL_RE, run_image_tool, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task
 from pricing import rate as tool_rate
 from llm import model_label
 
@@ -690,7 +690,7 @@ async def git_review_text(prov: dict, d: dict, u: dict, model_key: str, request:
     diff_text = "\n\n".join(f"--- {f['path']} ({f['status']}) ---\n{f['patch']}" for f in d["files"])
     review = await llm_text(REVIEW_SYS.format(lang=_lang_name(u)), f"{prov['pr']} !{d['number']} — {d['title']} (by {d['author']}, {d['head']} → {d['base']})\nDescription:\n{d['body']}\n\nUser's request: {request or 'review this'}\n\nDIFF:\n{diff_text}", model_key)
     text = f"### Review {prov['pr'].lower()} [!{d['number']} {d['title']}]({d['url']})\n`{d['head']}` → `{d['base']}` · {d['changed_files']} file{' (diff dipotong)' if d['truncated'] else ''}\n\n{review}"
-    return text, text_credits(diff_text, review)
+    return text, text_credits(diff_text, review, model_key)
 
 
 class GitReviewIn(BaseModel):
@@ -716,6 +716,72 @@ async def conv_git_review(cid: str, x: GitReviewIn, u: dict = Depends(current_us
         if credits:
             await record_usage(u["id"], "chat", credits, {"conversation_id": cid, "persona_id": persona["id"], "tool": f"{x.provider}_review"})
     return {"number": d["number"], "title": d["title"], "url": d["url"], "summary": text[:1200]}
+
+SOCIAL_LABEL = {"linkedin": "LinkedIn", "meta": "Facebook/Instagram", "youtube": "YouTube"}
+
+
+async def _latest_media(cid: str, kind: str) -> Optional[dict]:
+    want = "video" if kind == "video" else "image"
+    async for m in db.messages.find({"conversation_id": cid, "media.0": {"$exists": True}}, {"_id": 0, "media": 1}).sort("created_at", -1).limit(30):
+        for x in reversed(m.get("media") or []):
+            if (x.get("type") or "").startswith(want) and x.get("path"):
+                return x
+    return None
+
+
+async def social_publish_from_chat(cid: str, u: dict, providers: list, caption: str, kind: str, app_url: str) -> dict:
+    """Resolve the latest image/video of the conversation and publish it (chat run-tool + voice tool)."""
+    from social import publish, PublishIn
+    media = await _latest_media(cid, kind) if kind in ("image", "video") else None
+    if kind in ("image", "video") and not media:
+        raise HTTPException(400, f"Belum ada {kind} di percakapan ini untuk diposting.")
+    res = await publish(u["id"], PublishIn(providers=providers, kind=kind, text=caption, title=(media or {}).get("name") or "", media_path=(media or {}).get("path"), app_url=app_url, source={"conversation_id": cid}))
+    lines = [f"- **{SOCIAL_LABEL.get(r['provider'], r['provider'])}**: " + (f"terkirim — [lihat post]({r.get('post_url')})" + (f" · [Instagram]({r['instagram_url']})" if r.get("instagram_url") else "") if r["status"] == "sent" else f"gagal — {r.get('error')}") for r in res]
+    return {"results": res, "text": "Hasil publikasi:\n" + "\n".join(lines) + "\n\nSemua riwayat ada di menu [Social Media](/social)."}
+
+
+async def _social_turn(ctx, plan: dict):
+    from social import accounts
+    yield ctx.sse(start=True)
+    accs = {a["id"]: a for a in await accounts(ctx.user["id"])}
+    providers = [p for p in (plan.get("providers") or []) if p in SOCIAL_LABEL] or [p for p, a in accs.items() if a["connected"]][:1]
+    missing = [SOCIAL_LABEL[p] for p in providers if not accs.get(p, {}).get("connected")]
+    if not providers or missing:
+        txt = (f"Akun {', '.join(missing)} belum terhubung." if missing else "Belum ada akun media sosial yang terhubung.") + " Hubungkan dulu di menu [Social Media](/social), lalu minta lagi ya."
+        async for ev in _emit_final(ctx, txt, 0, {"tool": "social_publish", "error": True}):
+            yield ev
+        return
+    kind = plan.get("content_kind") or "image"
+    media = await _latest_media(ctx.cid, kind) if kind in ("image", "video") else None
+    if kind in ("image", "video") and not media:
+        async for ev in _emit_final(ctx, f"Aku belum menemukan {kind} di percakapan ini. Buat dulu atau lampirkan, lalu minta posting lagi.", 0, {"tool": "social_publish", "error": True}):
+            yield ev
+        return
+    caption = (plan.get("caption") or "").strip() or (media or {}).get("name") or ""
+    text = f"Siap posting {'teks' if kind == 'text' else kind} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** dengan caption:\n\n> {caption}\n\nLanjutkan?"
+    yield ctx.sse(delta=text)
+    async for ev in _emit_final(ctx, text, 0, {"pending_tool": {"kind": "social", "providers": providers, "caption": caption, "content_kind": kind, "credits": 0, "media_path": (media or {}).get("path")}}):
+        yield ev
+
+
+class SocialChatIn(BaseModel):
+    providers: list[str] = Field(min_length=1, max_length=3)
+    caption: str = Field(default="", max_length=3000)
+    kind: str = Field(default="image", pattern="^(text|image|video)$")
+    app_url: str = Field(min_length=8, max_length=300)
+
+
+@router.post("/conversations/{cid}/social-publish")
+async def conv_social_publish(cid: str, x: SocialChatIn, u: dict = Depends(current_user)):
+    """Voice tool: publish the latest media of this conversation and drop the result card into the chat."""
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
+    if not conv or not _can_access(conv, u):
+        raise HTTPException(404, "Conversation not found")
+    out = await social_publish_from_chat(cid, u, x.providers, x.caption, x.kind, x.app_url)
+    persona = (await _get_personas([conv.get("persona_id") or (conv.get("persona_ids") or [None])[0]]) or [None])[0]
+    if persona:
+        await _save_ai_msg(cid, persona, out["text"], 0, "text", {"tool": "social_publish"})
+    return out
 
 
 async def _github_turn(ctx, plan: dict):
@@ -752,7 +818,7 @@ async def _github_turn(ctx, plan: dict):
                 else:
                     yield ctx.sse(status="Membaca & merangkum file...")
                     summary = await llm_text(ctx.system, f"The user asked: {ctx.user_text}\n\nFile `{f['path']}` from repo {repo}:\n```\n{f['content'][:30000]}\n```\n\nAnswer their request about this file in their language (explain/summarize/review as asked). Be concrete and reference line-level details where useful.", ctx.model_key)
-                    credits = text_credits(f["content"][:30000], summary)
+                    credits = text_credits(f["content"][:30000], summary, ctx.model_key)
                     text = f"{summary}\n\n[Lihat file di {prov['label']}]({f['url']})"
             extra = {"tool": tool}
         elif kind == "issues":
@@ -794,7 +860,7 @@ async def _github_turn(ctx, plan: dict):
                                  "Reply JSON only: {\"title\":str,\"body\":str (markdown summary of changes),\"changes\":[{\"path\":str,\"content\":str}|{\"path\":str,\"delete\":true}]}. Keep unrelated code untouched.",
                                  f"Request: {plan.get('instructions') or ctx.user_text}\nSuggested title: {plan.get('title') or ''}\n\n{ctx_files}", ctx.model_key)
             changes = [c for c in (res.get("changes") or []) if isinstance(c, dict) and c.get("path")]
-            credits = text_credits(ctx_files, json.dumps(changes, ensure_ascii=False))
+            credits = text_credits(ctx_files, json.dumps(changes, ensure_ascii=False), ctx.model_key)
             yield ctx.sse(status="Membuat branch, commit & pull request...")
             pr = await gh_create_pr(ctx.user["id"], repo, (res.get("title") or plan.get("title") or "Perubahan dari Oryntix")[:200], res.get("body") or "", changes)
             text = f"{prov['pr']} **!{pr['number']} {pr['title']}** sudah dibuka di **{repo}** — [lihat di {prov['label']}]({pr['url']}).\n\nBranch `{pr['branch']}` → `{pr['base']}` · file: " + ", ".join(f"`{p}`" for p in pr["files"]) + f"\n\n{res.get('body') or ''}"
@@ -813,6 +879,8 @@ async def _tool_turn(ctx, plan: dict):
         gen = _drive_turn(ctx, plan)
     elif plan["tool"].startswith(("github_", "gitlab_")):
         gen = _github_turn(ctx, plan)
+    elif plan["tool"] == "social_publish":
+        gen = _social_turn(ctx, plan)
     else:
         cfg = await get_routing()
         gen = _image_turn(ctx, plan, cfg["confirm_threshold"]) if plan["tool"] == "image" else _document_turn(ctx, plan)
@@ -984,10 +1052,10 @@ async def _typed_intercepts(ctx: ReplyCtx):
             yield ev
         return
     plan = None
-    if GITHUB_RE.search(ctx.user_text):
-        # repo/PR/MR requests are tool calls, never a "big task" offer
+    if GITHUB_RE.search(ctx.user_text) or SOCIAL_RE.search(ctx.user_text):
+        # repo/PR/MR and social-media requests are tool calls, never a "big task" offer
         plan = await plan_tool(ctx.user_text, ctx.prompt)
-        if plan.get("tool", "none").startswith(("github_", "gitlab_")):
+        if plan.get("tool", "none").startswith(("github_", "gitlab_", "social_")):
             async for ev in _tool_turn(ctx, plan):
                 yield ev
             return
@@ -1017,7 +1085,7 @@ async def _plain_reply(ctx: ReplyCtx):
     except Exception:
         full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
     yield ctx.sse(delta=full)  # whole reply at once — no word-by-word typing effect
-    used = text_credits(ctx.prompt, full)
+    used = text_credits(ctx.prompt, full, ctx.model_key)
     await record_usage(ctx.user["id"], "chat", used, {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"], "model": ctx.model_key, **ctx.meta_extra})
     extra = {"model_key": ctx.model_key, "model_label": model_label(ctx.model_key), "routed": ctx.routed} if ctx.routed else {}
     ai_msg = await _save_ai_msg(ctx.cid, ctx.persona, full, used, ctx.via, extra)
@@ -1356,7 +1424,7 @@ async def _pending_msg(cid: str, mid: str, u: dict) -> dict:
 
 
 @router.post("/conversations/{cid}/messages/{mid}/run-tool")
-async def run_tool(cid: str, mid: str, u: dict = Depends(current_user)):
+async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, u: dict = Depends(current_user)):
     msg = await _pending_msg(cid, mid, u)
     over = await quota_exceeded(u)
     if over:
@@ -1364,6 +1432,15 @@ async def run_tool(cid: str, mid: str, u: dict = Depends(current_user)):
     await rate_limit(u, "generation")
     pt = msg["pending_tool"]
     await db.messages.update_one({"id": mid}, {"$set": {"pending_tool.running": True}})
+    if pt.get("kind") == "social":
+        try:
+            out = await social_publish_from_chat(cid, u, pt["providers"], pt.get("caption") or "", pt.get("content_kind") or "image", app_url or "")
+            upd = {"content": out["text"], "tool": "social_publish"}
+        except HTTPException as e:
+            upd = {"content": f"Gagal memposting: {e.detail}", "tool": "social_publish", "error": True}
+        await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
+        await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
+        return {**msg, **upd, "pending_tool": None}
     if pt.get("kind") == "image_set" and len(pt.get("prompts") or []) > 1:
         persona = await db.personas.find_one({"id": msg.get("persona_id")}, {"_id": 0, "id": 1, "name": 1}) or {"id": msg.get("persona_id"), "name": msg.get("persona_name") or "Asisten"}
         task = await _start_image_set(u, persona, cid, pt["prompts"], f"{len(pt['prompts'])} gambar")

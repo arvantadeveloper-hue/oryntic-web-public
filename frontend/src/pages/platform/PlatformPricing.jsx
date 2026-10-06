@@ -37,6 +37,29 @@ export default function PlatformPricing({ readOnly }) {
           </tbody>
         </table>
       </div>
+      <div className="mt-6 aivora-card overflow-hidden" data-testid="pp-model-table">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#E7ECF3] p-4">
+          <div><p className="text-sm font-bold text-slate-900">Harga per model (otak persona) — USD / 1M token</p><p className="text-xs text-slate-500">Setiap model ditagih dengan harga list-nya sendiri × margin fitur "Teks / chat". Kolom kredit dihitung dari ~{draft.chars_per_token || 4} karakter per token.</p></div>
+          <NumField label="Karakter per token" value={draft.chars_per_token ?? 4} onChange={(v) => update({ chars_per_token: v })} step={0.5} testid="pp-chars-per-token" disabled={readOnly} />
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500"><tr><th className="px-4 py-2.5 text-left">Model</th><th className="px-3 py-2.5 text-left">Input $/1M</th><th className="px-3 py-2.5 text-left">Output $/1M</th><th className="px-3 py-2.5 text-right">Kredit / 1k karakter (in · out)</th><th className="px-3 py-2.5 text-right">Pesan tipikal</th></tr></thead>
+          <tbody className="divide-y divide-slate-100">
+            {(preview.models || []).map((m) => (
+              <tr key={m.id} data-testid={`pp-model-${m.id}`}>
+                <td className="px-4 py-2"><p className="font-semibold text-slate-800">{m.label}</p><p className="text-[11px] uppercase text-slate-400">{m.provider}</p></td>
+                {["in", "out"].map((k) => (
+                  <td key={k} className="px-3 py-2"><input type="number" step="0.01" min="0" disabled={readOnly} value={(draft.model_prices || {})[m.id]?.[k] ?? m[`${k}_usd_1m`]} data-testid={`pp-model-${m.id}-${k}`}
+                    onChange={(e) => update((d) => ({ ...d, model_prices: { ...(d.model_prices || {}), [m.id]: { in: m.in_usd_1m, out: m.out_usd_1m, ...((d.model_prices || {})[m.id] || {}), [k]: Number(e.target.value) } } }))}
+                    className="w-24 rounded-lg border border-[#E7ECF3] px-2 py-1.5 text-sm outline-none focus:border-[#2F6BFF] disabled:bg-slate-50" /></td>
+                ))}
+                <td className="px-3 py-2 text-right text-xs text-slate-600">{m.credits_in_per_1k} · {m.credits_out_per_1k}</td>
+                <td className="px-3 py-2 text-right font-black text-slate-900" data-testid={`pp-model-${m.id}-typical`}>{m.credits_typical} kredit</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <div className="mt-6 aivora-card p-5" data-testid="pp-realtime">
         <p className="text-sm font-bold text-slate-900">Harga token OpenAI Realtime — gpt-realtime-2.1 (USD / 1M token)</p>
         <p className="text-xs text-slate-500">Ditagih per respons dari laporan pemakaian OpenAI, memakai margin fitur "Koneksi Realtime". Harga resmi gpt-realtime-2.1: audio masuk $32, audio keluar $64, teks masuk $4, teks keluar $24, cache $0,40.</p>

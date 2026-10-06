@@ -13,7 +13,7 @@ export function usePricingDraft() {
   const load = useCallback(async () => {
     const r = await api.get("/admin/pricing");
     setSaved(r.data.pricing); setDraft(r.data.pricing);
-    setPreview({ rates: r.data.rates, features: r.data.features, packages: r.data.packages });
+    setPreview({ rates: r.data.rates, features: r.data.features, packages: r.data.packages, models: r.data.models });
   }, []);
   useEffect(() => { load().catch(() => toast.error("Gagal memuat tarif")); }, [load]);
   const update = (patch) => {
@@ -26,7 +26,7 @@ export function usePricingDraft() {
   };
   const save = async () => {
     setBusy(true);
-    try { const r = await api.put("/admin/pricing", draft); setSaved(r.data.pricing); setDraft(r.data.pricing); setPreview({ rates: r.data.rates, features: r.data.features, packages: r.data.packages }); toast.success("Tarif disimpan"); }
+    try { const r = await api.put("/admin/pricing", draft); setSaved(r.data.pricing); setDraft(r.data.pricing); setPreview({ rates: r.data.rates, features: r.data.features, packages: r.data.packages, models: r.data.models }); toast.success("Tarif disimpan"); }
     catch (e) { const d = e?.response?.data?.detail; toast.error(Array.isArray(d) ? d.map((x) => x.msg).join(", ") : d || "Gagal menyimpan"); } finally { setBusy(false); }
   };
   const reset = () => { setDraft(saved); api.post("/admin/pricing/preview", saved).then((r) => setPreview(r.data)).catch(() => {}); };

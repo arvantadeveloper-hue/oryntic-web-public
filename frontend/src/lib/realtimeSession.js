@@ -161,6 +161,10 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       return { ok: true, ...r.data };
     }
     if (name === "github_issues" || name === "gitlab_issues") { const r = await api.post(`/integrations/${gitProv}/issues`, { repo: args.repo, state: args.state || "open" }); return { ok: true, ...r.data }; }
+    if (name === "social_publish") {
+      const r = await api.post(`/conversations/${cid}/social-publish`, { providers: args.providers || [], caption: args.caption || "", kind: args.kind || "image", app_url: window.location.origin });
+      return { ok: true, results: r.data.results.map((x) => ({ provider: x.provider, status: x.status, error: x.error })), note: "a result card with links was posted to the chat panel" };
+    }
     if (name === "github_review" || name === "gitlab_review") {
       const r = await api.post(`/conversations/${cid}/git-review`, { provider: gitProv, repo: args.repo, number: args.number || null });
       return { ok: true, number: r.data.number, title: r.data.title, summary: r.data.summary, note: "the full written review was posted to the chat panel — speak only the key points" };

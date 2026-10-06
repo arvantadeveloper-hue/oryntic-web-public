@@ -104,7 +104,7 @@ export default function PersonaDetail() {
             <select className="input-dark py-2.5" value={p.model} onChange={(e) => changeModel(e.target.value)} data-testid="persona-model-select">
               {["openai", "anthropic", "gemini"].filter((p) => models.some((m) => m.provider === p)).map((p) => (
                 <optgroup key={p} label={models.find((m) => m.provider === p)?.provider_label || p}>
-                  {models.filter((m) => m.provider === p).map((m) => <option key={m.id} value={m.id}>{m.label} — {m.tagline}</option>)}
+                  {models.filter((m) => m.provider === p).map((m) => <option key={m.id} value={m.id}>{m.label} — {m.tagline}{m.credits_typical != null ? ` (≈${m.credits_typical} kredit/pesan)` : ""}</option>)}
                 </optgroup>
               ))}
             </select>

@@ -28,6 +28,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Calendar from "./pages/Calendar";
 import PlatformApp, { PLATFORM_MODE } from "./pages/platform/PlatformApp";
 import Integrations from "./pages/Integrations";
+import SocialMedia from "./pages/SocialMedia";
 import { PrivacyPolicy, TermsOfService } from "./pages/Legal";
 import GoogleCallback from "./pages/GoogleCallback";
 
@@ -92,6 +93,7 @@ function App() {
                 <Route path="/calendar" element={<Calendar />} />
                 <Route path="/gallery" element={<Gallery />} />
                 <Route path="/integrations" element={<Integrations />} />
+                <Route path="/social" element={<SocialMedia />} />
                 <Route path="/archives" element={<Archives />} />
                 <Route path="/friends" element={<Friends />} />
                 <Route path="/wallet" element={<AdminOnly><WalletPage /></AdminOnly>} />

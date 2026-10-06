@@ -177,7 +177,7 @@ export default function CreatePersona() {
                       <button key={m.id} type="button" onClick={() => setModelKey(m.id)} data-testid={`model-${m.id}`}
                         className={`flex items-start gap-3 rounded-xl border p-3 text-left transition ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3] hover:bg-slate-50"}`}>
                         <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: m.accent }} />
-                        <span><span className="block text-sm font-bold text-slate-900">{m.label}</span>
+                        <span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2 text-sm font-bold text-slate-900">{m.label}{m.credits_typical != null && <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500" data-testid={`model-cost-${m.id}`}>≈{m.credits_typical} kredit/pesan</span>}</span>
                           <span className="block text-xs text-slate-400">{m.tagline}</span></span>
                       </button>
                     );

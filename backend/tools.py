@@ -71,18 +71,19 @@ async def route_model(persona_model: Optional[str], text: str, extra_len: int, o
 
 
 DRIVE_RE = re.compile(r"\b(google ?drive|drive|gdrive|google ?docs?|spreadsheet|google ?sheets?)\b", re.I)
+SOCIAL_RE = re.compile(r"\b(linkedin|instagram|facebook|youtube|sosmed|social media|medsos|posting|post(kan)?|unggah ke)\b", re.I)
 GITHUB_RE = re.compile(r"\b(github|gitlab|repo|repository|repositori|pull ?request|merge ?request|PR|MR|issues?|branch|commit|review|diff)\b", re.I)
 
 
 def wants_tool(text: str) -> bool:
-    return bool(text) and ((bool(TOOL_RE.search(text)) and bool(CREATE_RE.search(text))) or bool(DRIVE_RE.search(text)) or bool(GITHUB_RE.search(text)))
+    return bool(text) and ((bool(TOOL_RE.search(text)) and bool(CREATE_RE.search(text))) or bool(DRIVE_RE.search(text)) or bool(GITHUB_RE.search(text)) or bool(SOCIAL_RE.search(text)))
 
 
 async def plan_tool(text: str, history: str) -> dict:
     sys = ('Decide if the user\'s LAST message explicitly asks the assistant to CREATE a deliverable or act on an external service. Reply JSON only: '
-           '{"tool":"image"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"github_review"|"gitlab_repos"|"gitlab_read"|"gitlab_issues"|"gitlab_pr"|"gitlab_review"|"none",'
+           '{"tool":"image"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"github_review"|"gitlab_repos"|"gitlab_read"|"gitlab_issues"|"gitlab_pr"|"gitlab_review"|"social_publish"|"none",'
            '"image_prompt":str,"image_prompts":[str],"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet",'
-           '"repo":str,"path":str,"query":str,"state":"open"|"closed"|"all","files":[str],"number":int}. '
+           '"repo":str,"path":str,"query":str,"state":"open"|"closed"|"all","files":[str],"number":int,"providers":[str],"caption":str,"content_kind":"text"|"image"|"video"}. '
            '"image" = the user wants a picture/illustration/logo/poster generated. If they ask for MORE THAN ONE image (e.g. "3 variasi", "beberapa poster", '
            '"gambar A dan gambar B"), put one detailed English prompt PER image in image_prompts (max 6) and the first one in image_prompt; for a single image image_prompts has exactly one item. '
            '"document" = the user wants a written file '
@@ -100,13 +101,14 @@ async def plan_tool(text: str, history: str) -> dict:
            '"github_pr" = user asks to change code/files in a repo and open a pull request / make a PR / fix something in the repo (repo; instructions = what to change; files = file paths they mentioned, may be empty; title = short PR title). '
            '"github_review" = user asks to review/check/evaluate/summarize a pull request or MR, its changes or diff (repo; number = PR/MR number if mentioned, e.g. "#12" or "!12", else omit → latest open one). '
            'Use gitlab_* (same meanings; gitlab_pr = open a Merge Request, gitlab_review = review an MR) when the user says GitLab / merge request / MR or the project is known to be on GitLab; otherwise github_*. '
-           'Only use github_*/gitlab_* when a code repository, PR/MR or issue is clearly meant.')
+           'Only use github_*/gitlab_* when a code repository, PR/MR or issue is clearly meant. '
+           '"social_publish" = user asks to post/publish/share content to social media (providers from: linkedin, meta (Facebook Page/Instagram), youtube — map Instagram/Facebook→meta; content_kind: image = the latest generated image, video = the latest video, text = a text-only post; caption = the caption they gave, or write a fitting one in their language).')
     plan: dict = {}
     try:
         plan = await llm_json(sys, f"Recent conversation:\n{history[-2500:]}\n\nLAST MESSAGE: {text}")
     except Exception:
         plan = {}
-    if plan.get("tool") not in ("image", "document", "drive_save", "drive_update", "drive_link", "github_repos", "github_read", "github_issues", "github_pr", "github_review", "gitlab_repos", "gitlab_read", "gitlab_issues", "gitlab_pr", "gitlab_review"):
+    if plan.get("tool") not in ("image", "document", "drive_save", "drive_update", "drive_link", "github_repos", "github_read", "github_issues", "github_pr", "github_review", "gitlab_repos", "gitlab_read", "gitlab_issues", "gitlab_pr", "gitlab_review", "social_publish"):
         return {"tool": "none"}
     if plan["tool"] == "image":
         prompts = [str(p).strip() for p in (plan.get("image_prompts") or []) if str(p).strip()][:6]
@@ -274,7 +276,7 @@ async def run_document_tool(uid: str, system: str, title: str, instructions: str
         await asyncio.to_thread(put_object, path, data, ctype)
         await add_storage(uid, len(data))
         media.append({"type": "file", "path": path, "name": f"{base}.{ext}", "format": ext})
-    return {"media": media, "credits": text_credits(prompt, md), "markdown": md, "model_label": model_label(model_key)}
+    return {"media": media, "credits": text_credits(prompt, md, model_key), "markdown": md, "model_label": model_label(model_key)}
 
 
 # ---------- workspace tasks: shared context & revisions ----------
@@ -309,7 +311,7 @@ async def revise_with_llm(task: dict, request: str, system: str, model_key: Opti
     summary = ""
     if "RINGKASAN PERUBAHAN:" in out:
         out, summary = out.rsplit("RINGKASAN PERUBAHAN:", 1)
-    return out.strip(), summary.strip(), text_credits(prompt, out)
+    return out.strip(), summary.strip(), text_credits(prompt, out, model_key)
 
 
 

@@ -93,9 +93,14 @@ def _extract_text(resp) -> str:
     return getattr(resp, "text", None) or getattr(resp, "content", None) or str(resp)
 
 
-def text_credits(input_text: str, output_text: str) -> int:
-    chars = len(input_text or "") + len(output_text or "")
-    return max(MIN_CREDITS, math.ceil(chars / 1000 * RATES["text_per_1k"]))
+def text_credits(input_text: str, output_text: str, model_key: str | None = None) -> int:
+    """Credits for one text exchange. Per-model list price when model_key is known; otherwise the flat text rate."""
+    from pricing import model_text_credits, _cache as _pricing_cache
+    exact = model_text_credits(_pricing_cache["pricing"], model_key, len(input_text or ""), len(output_text or "")) if model_key else None
+    if exact is None:
+        chars = len(input_text or "") + len(output_text or "")
+        exact = chars / 1000 * RATES["text_per_1k"]
+    return max(MIN_CREDITS, math.ceil(exact))
 
 
 async def record_usage(user_id: str, feature: str, credits: int, meta: dict | None = None):
