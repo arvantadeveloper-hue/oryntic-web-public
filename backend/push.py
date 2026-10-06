@@ -120,7 +120,7 @@ async def send_push(uid: str, title: str, body: str, data: Optional[dict] = None
         tokens=tokens,
         data={k: str(v) for k, v in {**(data or {}), "title": title, "body": body, "kind": kind or "system", "silent": "1" if muted else "0"}.items()},
         notification=messaging.Notification(title=title, body=body[:300]) if any_native else None,  # Android/iOS system tray; web uses webpush below
-        android=messaging.AndroidConfig(priority="high", notification=messaging.AndroidNotification(tag=(data or {}).get("tag"), click_action="FLUTTER_NOTIFICATION_CLICK", **({"sound": None, "default_sound": False, "default_vibrate_timings": False} if muted else {}))) if any_native else None,
+        android=messaging.AndroidConfig(priority="high", notification=messaging.AndroidNotification(tag=(data or {}).get("tag"), click_action="FLUTTER_NOTIFICATION_CLICK", **({"default_sound": False, "default_vibrate_timings": False} if muted else {"default_sound": True, "default_vibrate_timings": True}))) if any_native else None,
         apns=messaging.APNSConfig(payload=messaging.APNSPayload(aps=messaging.Aps(sound=None if muted else "default", thread_id=(data or {}).get("tag")))) if any_native else None,
         webpush=messaging.WebpushConfig(
             notification=messaging.WebpushNotification(title=title, body=body[:300], icon="/brand/mark-512.png", badge="/brand/mark-512.png", tag=(data or {}).get("tag"), renotify=bool((data or {}).get("tag")) and not muted, silent=muted, vibrate=[] if muted else None),

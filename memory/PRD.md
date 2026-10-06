@@ -508,3 +508,6 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 
 ## Update 2026-06 — Prompt "REALTIME AVATAR CONVERSATION BEHAVIOR" (verbatim)
 - `assistant_persona.py` → `REALTIME_SECTIONS` (16 aturan: backchannel ≠ interupsi, deteksi interupsi nyata, hesitasi, respons cepat, tidak menjelaskan diri, tidak mengulang, pemulihan setelah interupsi, dll.) disisipkan **hanya pada sesi suara** (`persona_block(voice=True)`: CORE → SPOKEN → REALTIME → CLOSING). Dipakai otomatis oleh `_session_instructions` Realtime (privat, grup, pengingat). Teks disimpan verbatim dari pemilik platform.
+
+## Update 2026-06 — Code review (read-only) + perbaikan
+- Review: 0 HIGH/CRITICAL, 1 MEDIUM, 2 LOW. Diperbaiki: `add_members` kini memakai `$addToSet $each` untuk persona_ids/members/participants + `humans` dihitung ulang dari dokumen segar (uji 3 permintaan serentak members/personas/members → union 3 asisten + 2 manusia utuh); `FriendCallRing` selalu mematikan nada dering saat unmount; push Android memakai `default_sound/default_vibrate_timings=True` saat tidak di-mute (False saat mute).

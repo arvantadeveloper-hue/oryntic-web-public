@@ -242,16 +242,23 @@ async def add_members(cid: str, x: AddMembersIn, u: dict = Depends(current_user)
     new_humans = [h async for h in db.users.find({"id": {"$in": new_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "avatar": 1})]
     if not personas and not new_humans:
         raise HTTPException(400, "Tidak ada teman atau asisten baru untuk diundang")
-    members = (conv.get("members") or []) + [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")} for p in personas]
+    new_members = [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")} for p in personas]
+    members = (conv.get("members") or []) + new_members
     participants = (conv.get("participants") or [u["id"]]) + [h["id"] for h in new_humans]
-    humans = [h async for h in db.users.find({"id": {"$in": participants}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "avatar": 1})] if len(participants) > 1 else []
-    upd = {"members": members, "persona_ids": [m["id"] for m in members], "participants": participants, "humans": humans, "updated_at": now_iso()}
+    upd = {"updated_at": now_iso()}
     if not conv.get("persona_id") and members:
         upd["persona_id"] = members[0]["id"]
     if conv.get("type") in ("private", "dm"):
         upd["type"] = "group"
-        upd["title"] = _conv_title("group", members) if members else "Grup " + ", ".join(h["name"] for h in humans if h["id"] != u["id"])
-    await db.conversations.update_one({"id": cid}, {"$set": upd, "$unset": {"titles": ""}})
+        upd["title"] = _conv_title("group", members) if members else "Grup " + ", ".join(h["name"] for h in new_humans)
+    # atomic merges so a concurrent add_persona/add_members cannot clobber each other's roster
+    await db.conversations.update_one({"id": cid}, {"$set": upd, "$unset": {"titles": ""},
+                                                     "$addToSet": {"persona_ids": {"$each": [p["id"] for p in personas]}, "members": {"$each": new_members},
+                                                                   "participants": {"$each": [h["id"] for h in new_humans]}}})
+    fresh = await db.conversations.find_one({"id": cid}, {"_id": 0, "participants": 1}) or {}
+    all_parts = fresh.get("participants") or participants
+    humans = [h async for h in db.users.find({"id": {"$in": all_parts}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "avatar": 1})] if len(all_parts) > 1 else []
+    await db.conversations.update_one({"id": cid}, {"$set": {"humans": humans}})
     names = ", ".join([f"**{h['name']}**" for h in new_humans] + [f"**{p['name']}**" for p in personas])
     text = f"👋 {u.get('name') or 'Host'} mengundang {names} ke percakapan."
     await db.messages.insert_one({"id": new_id(), "conversation_id": cid, "role": "assistant", "content": text, "persona_id": "__system__", "persona_name": "Sistem",

@@ -51,8 +51,8 @@ export function FriendCallRing() {
   useEffect(() => {
     if (call && !muted && !stopRef.current) stopRef.current = startRing();
     if ((!call || muted) && stopRef.current) { stopRef.current(); stopRef.current = null; }
-    return () => { if (!call && stopRef.current) { stopRef.current(); stopRef.current = null; } };
   }, [call, muted]);
+  useEffect(() => () => { if (stopRef.current) { stopRef.current(); stopRef.current = null; } }, []); // unmount: never leave the ringtone playing
 
   if (!call) return null;
   const decline = () => { dismissed.current.add(call.conversation_id); setCall(null); };
