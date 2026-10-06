@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from auth import current_user, current_user_q, workspace_id
+from auth import current_user, current_user_q, workspace_id, lang_rule
 from chat import _conv_title
 from db import db, now_iso, new_id, clean
 from llm import record_usage
@@ -107,10 +107,24 @@ async def revise_task(tid: str, x: ReviseIn, u: dict = Depends(current_user)):
     """Direct revision from the Workspace page (no chat)."""
     t = await get_task_for(tid, u)
     persona = await db.personas.find_one({"id": t.get("persona_id")}, {"_id": 0}) if t.get("persona_id") else None
-    new_md, summary, used = await revise_with_llm(t, x.instruction, "You are a careful editor.", t.get("model"))
+    new_md, summary, used = await revise_with_llm(t, x.instruction, "You are a careful editor.\n\n" + lang_rule(u), t.get("model"))
     ver = await save_revision(t, new_md, summary or x.instruction, persona)
     await record_usage(u["id"], "task_revision", used, {"task_id": tid})
     return {"version": ver, "summary": summary, "credits_used": used}
+
+
+@router.post("/tasks/{tid}/versions/{ver}/restore")
+async def restore_version(tid: str, ver: int, u: dict = Depends(current_user)):
+    """Non-destructive rollback: the old content is saved as a NEW version, history stays intact."""
+    t = await get_task_for(tid, u)
+    if ver == int(t.get("version") or 1):
+        raise HTTPException(400, "Versi ini sudah yang terbaru")
+    v = next((x for x in t.get("versions") or [] if int(x.get("version")) == ver), None)
+    if not v:
+        raise HTTPException(404, "Versi tidak ditemukan")
+    persona = await db.personas.find_one({"id": t.get("persona_id")}, {"_id": 0}) if t.get("persona_id") else None
+    new_ver = await save_revision(t, v.get("content") or "", f"Dikembalikan ke v{ver} oleh {u.get('name') or 'pengguna'}", persona)
+    return {"version": new_ver, "restored_from": ver}
 
 
 async def _task_personas(t: dict, u: dict) -> list:

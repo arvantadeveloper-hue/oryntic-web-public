@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { onUserEvent, isWsConnected } from "../lib/userEvents";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Download, Copy, CheckCircle2, Loader2, Clock, XCircle, MessageSquare, Phone, X, History, GitCompareArrows, FileText, FileSpreadsheet, FileType, Bot, PencilLine } from "lucide-react";
+import { ArrowLeft, Download, Copy, CheckCircle2, Loader2, Clock, XCircle, MessageSquare, Phone, X, History, GitCompareArrows, RotateCcw, FileText, FileSpreadsheet, FileType, Bot, PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { Markdown } from "../components/Markdown";
@@ -138,6 +138,7 @@ export default function TaskDetail() {
   const [task, setTask] = useState(null);
   const [viewVer, setViewVer] = useState(null); // {version, content}
   const [compare, setCompare] = useState(null); // {version, content} base version shown as a diff against the one being viewed
+  const [restoring, setRestoring] = useState(false);
 
   const load = () => api.get(`/tasks/${id}`).then((r) => { setTask(r.data); setViewVer(null); setCompare(null); }).catch(() => {});
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
@@ -169,6 +170,12 @@ export default function TaskDetail() {
     const base = [...allVersions].filter((v) => v < curVer).pop() ?? allVersions.find((v) => v !== curVer);
     if (base === undefined) return;
     try { setCompare(await fetchVer(base)); } catch (e) { toast.error("Versi tidak ditemukan"); }
+  };
+  const restoreVersion = async () => {
+    if (!viewVer || !window.confirm(`Kembalikan dokumen ke v${viewVer.version}? Isi v${viewVer.version} akan disimpan sebagai versi baru (v${task.version + 1}); riwayat tetap utuh.`)) return;
+    setRestoring(true);
+    try { const r = await api.post(`/tasks/${id}/versions/${viewVer.version}/restore`); toast.success(`Dikembalikan ke v${r.data.restored_from} → tersimpan sebagai v${r.data.version}`); await load(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengembalikan versi"); } finally { setRestoring(false); }
   };
   const setBase = async (v) => { try { setCompare(await fetchVer(v)); } catch (e) { toast.error("Versi tidak ditemukan"); } };
 
@@ -231,6 +238,11 @@ export default function TaskDetail() {
                     {allVersions.map((v) => <option key={v} value={v}>v{v}{v === task.version ? " (terbaru)" : ""}</option>)}
                   </select>
                 </label>
+              )}
+              {viewVer && (
+                <button onClick={restoreVersion} disabled={restoring} className="flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-60" data-testid="restore-version" title="Jadikan versi lama ini sebagai versi terbaru (riwayat tetap tersimpan)">
+                  {restoring ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Kembalikan ke versi ini
+                </button>
               )}
               {allVersions.length > 1 && (
                 <button onClick={toggleCompare} className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs ${compare ? "border-[#2F6BFF] bg-[#EEF3FF] font-semibold text-[#2F6BFF]" : "border-slate-200 text-slate-600"}`} data-testid="compare-toggle" title="Tampilkan perbedaan dengan versi lain"><GitCompareArrows size={13} /> {compare ? "Tutup perbandingan" : "Bandingkan"}</button>
