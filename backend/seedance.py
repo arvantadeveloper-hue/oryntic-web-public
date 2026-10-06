@@ -3,6 +3,7 @@ import asyncio
 import math
 import os
 import httpx
+from typing import Optional
 from db import new_id
 from pricing import RATES
 
@@ -46,11 +47,13 @@ def options(duration: int) -> list:
              "max_dur": c["max_dur"], "available": duration <= c["max_dur"]} for t, c in TIERS.items()]
 
 
-async def generate(prompt: str, tier: str, duration: int, aspect_ratio: str = "16:9", resolution: str = "720p", timeout: int = 900) -> dict:
-    """Submit and poll until done. Returns {video_url, provider_credits, generation_id}."""
+async def generate(prompt: str, tier: str, duration: int, aspect_ratio: str = "16:9", resolution: str = "720p", timeout: int = 900, image_url: Optional[str] = None) -> dict:
+    """Submit and poll until done. image_url (public HTTPS on a Key-approved host) switches to image-to-video. Returns {video_url, provider_credits, generation_id}."""
     cfg = TIERS[tier]
-    body = {"model": cfg["model"], "mode": "text-to-video", "prompt": prompt[:7000],
+    body = {"model": cfg["model"], "mode": "image-to-video" if image_url else "text-to-video", "prompt": prompt[:7000],
             "parameters": {"aspect_ratio": aspect_ratio, "resolution": resolution, "duration_seconds": int(duration)}}
+    if image_url:
+        body["inputs"] = [{"type": "image", "url": image_url}]
     async with httpx.AsyncClient(timeout=90) as c:
         r = await c.post(f"{BASE}/videos", json=body, headers=_headers({"Idempotency-Key": new_id()}))
         if r.status_code >= 400:

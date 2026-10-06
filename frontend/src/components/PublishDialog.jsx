@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { X, Share2, Loader2, Sparkles, CheckCircle2, XCircle, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { fileUrl } from "./MessageExtras";
+import { fileUrl, mediaSrc } from "./MessageExtras";
 
 // Listens for `oryntix:publish` (fired by the "Publikasikan" button on any media) and walks the user through account → caption → send.
 export function PublishHost() {
@@ -27,14 +27,14 @@ export function PublishDialog({ media, context = "", onClose }) {
   }, [kind]);
   const genCaption = async () => {
     setBusy("caption");
-    try { const r = await api.post("/social/caption", { context: context || "", providers: picked, kind, media_path: media?.path || null }); setCaption(r.data.caption); }
+    try { const r = await api.post("/social/caption", { context: context || "", providers: picked, kind, media_path: media?.path || null, drive_id: media?.drive_id || null }); setCaption(r.data.caption); }
     catch (e) { toast.error("Gagal membuat caption"); } finally { setBusy(""); }
   };
   const send = async () => {
     if (!picked.length) { toast.error("Pilih minimal satu akun"); return; }
     setBusy("send");
     try {
-      const r = await api.post("/social/publish", { providers: picked, kind, text: caption, title: media?.name || "", media_path: media?.path || null, app_url: window.location.origin });
+      const r = await api.post("/social/publish", { providers: picked, kind, text: caption, title: media?.name || "", media_path: media?.path || null, drive_id: media?.drive_id || null, app_url: window.location.origin });
       setResults(r.data.results);
       if (r.data.results.every((x) => x.status === "sent")) toast.success("Terkirim ke media sosial");
     } catch (e) { toast.error(e?.response?.data?.detail || "Gagal memposting"); } finally { setBusy(""); }
@@ -49,7 +49,7 @@ export function PublishDialog({ media, context = "", onClose }) {
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700" data-testid="publish-close"><X size={18} /></button>
         </div>
         <div className="space-y-4 p-5">
-          {media && (media.type === "video" ? <video src={fileUrl(media.path)} className="max-h-40 w-full rounded-xl bg-black" controls /> : <img src={fileUrl(media.path)} alt="" className="max-h-40 w-full rounded-xl object-cover" />)}
+          {media && (media.type === "video" ? <video src={mediaSrc(media)} className="max-h-40 w-full rounded-xl bg-black" controls /> : <img src={fileUrl(media.path)} alt="" className="max-h-40 w-full rounded-xl object-cover" />)}
           <div>
             <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Akun tujuan</p>
             {accounts === null ? <Loader2 size={14} className="animate-spin text-slate-400" /> : eligible.length === 0 ? <p className="text-xs text-slate-500">Belum ada akun yang mendukung {kind}. <a href="/social" className="font-semibold text-[#2F6BFF]">Hubungkan di menu Social Media →</a></p> : (

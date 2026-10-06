@@ -28,7 +28,7 @@ export function MediaList({ media = [], dark = false }) {
       {media.filter((x) => x.type === "video").map((x, i) => (
         <div key={`v${i}`} className="group relative">
           <video src={mediaSrc(x)} controls preload="metadata" className="max-h-56 w-full rounded-xl bg-black" data-testid="media-video" />
-          {x.path && <button type="button" onClick={() => openPublish(x)} data-testid="media-publish-btn" className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black/80"><Share2 size={11} /> Publikasikan</button>}
+          {(x.path || x.drive_id) && <button type="button" onClick={() => openPublish(x, x.request || x.prompt || "")} data-testid="media-publish-btn" className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black/80"><Share2 size={11} /> Publikasikan</button>}
           {x.link && <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
             <a href={x.link} target="_blank" rel="noreferrer" data-testid="media-drive-link" className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition ${chip}`}><HardDrive size={12} /> Buka di Google Drive <ExternalLink size={10} className="opacity-60" /></a>
             {x.tier && <span className={dark ? "text-white/50" : "text-slate-400"}>Seedance {x.tier} · {x.duration}s</span>}
@@ -83,7 +83,7 @@ function VideoChoiceCard({ m, cid, onDone, dark }) {
   const pt = m.pending_tool;
   const pick = async (tier) => {
     setBusy(tier);
-    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: tier } }); await onDone?.(); }
+    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: tier, app_url: window.location.origin } }); await onDone?.(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal memulai render video"); setBusy(""); }
   };
   const cancel = async () => { setBusy("cancel"); try { await api.post(`/conversations/${cid}/messages/${m.id}/cancel-tool`); await onDone?.(); } catch { setBusy(""); } };

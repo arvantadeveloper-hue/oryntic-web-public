@@ -36,14 +36,21 @@ async def archive_conversation(conv: dict, u: dict, reason: str) -> Optional[dic
     await db.messages.update_many({"id": {"$in": ids}}, {"$set": {"archived": True, "archive_id": aid}})
     hours = archive_hours(u)
     why = f"diarsipkan otomatis setelah {hours} jam tidak aktif" if reason == "auto" else "diarsipkan"
-    note = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": f"📝 **Rangkuman percakapan sebelumnya**\n\n{summary}\n\n_{len(ids)} pesan {why} — cari & pulihkan di menu Arsip._",
+    note = {"id": new_id(), "conversation_id": cid, "role": "assistant", "content": f"📝 **Rangkuman percakapan sebelumnya**\n\n{summary}\n\n*{len(ids)} pesan {why} — cari & pulihkan di menu Arsip.*",
             "persona_id": "__system__", "persona_name": "Rangkuman", "is_summary": True, "archive_id": aid, "portrait": None, "credits": used, "created_at": now_iso()}
     await db.messages.insert_one(dict(note))
     entry = {"id": aid, "user_id": conv.get("user_id") or u["id"], "conversation_id": cid, "title": conv.get("title") or "Percakapan", "conversation_type": conv.get("type"),
              "persona_names": [m["name"] for m in conv.get("members") or []], "period_start": live[0]["created_at"], "period_end": live[-1]["created_at"],
              "summary": summary, "core": core, "message_ids": ids, "message_count": len(ids), "reason": reason, "restored": False, "created_at": now_iso()}
     await db.chat_archives.insert_one(dict(entry))
-    await db.conversations.update_one({"id": cid}, {"$set": {"memory_summary": core, "summary_snoozed_at_count": 0, "archive_checked_at": now_iso()}})
+    stamp = now_iso()
+    await db.conversations.update_one({"id": cid}, {"$set": {"memory_summary": core, "summary_snoozed_at_count": 0, "archive_checked_at": stamp, "archived_at": stamp}})
+    from realtime import notify, notify_user
+    ev = {"type": "archived", "conversation_id": cid, "archive_id": aid, "archived_at": stamp, "reason": reason}
+    await notify(cid, ev)
+    for uid in {conv.get("user_id"), u["id"], *((conv.get("participants") or []) if isinstance(conv.get("participants"), list) else [])}:
+        if isinstance(uid, str) and uid:
+            await notify_user(uid, ev)
     return clean(entry)
 
 

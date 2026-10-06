@@ -91,7 +91,7 @@ def is_media_refusal(user_text: str, reply: str) -> bool:
 async def plan_tool(text: str, history: str) -> dict:
     sys = ('Decide if the user\'s LAST message explicitly asks the assistant to CREATE a deliverable or act on an external service. Reply JSON only: '
            '{"tool":"image"|"image_edit"|"video"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"github_review"|"gitlab_repos"|"gitlab_read"|"gitlab_issues"|"gitlab_pr"|"gitlab_review"|"social_publish"|"none",'
-           '"image_prompt":str,"image_prompts":[str],"video_prompt":str,"duration":int,"edit_prompt":str,"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet",'
+           '"image_prompt":str,"image_prompts":[str],"video_prompt":str,"duration":int,"from_image":bool,"edit_prompt":str,"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet",'
            '"repo":str,"path":str,"query":str,"state":"open"|"closed"|"all","files":[str],"number":int,"providers":[str],"caption":str,"content_kind":"text"|"image"|"video"}. '
            '"image" = the user wants ANY still visual generated, shown or rendered: photo, photorealistic/realistic picture, render, illustration, logo, poster, banner, wallpaper, thumbnail, sketch, painting, visualization ("tunjukkan", "tampilkan", "render", "visualisasikan", "gambarkan" count as a request). If they ask for MORE THAN ONE image (e.g. "3 variasi", "beberapa poster", '
            '"gambar A dan gambar B"), put one detailed English prompt PER image in image_prompts (max 6) and the first one in image_prompt; for a single image image_prompts has exactly one item. '
@@ -99,7 +99,7 @@ async def plan_tool(text: str, history: str) -> dict:
            'recolor, change background/lighting/time of day, add or remove an object, make it brighter/darker, crop, make a variation that keeps the same subject. '
            'edit_prompt: a precise English editing instruction for an image model that receives the previous image as reference (describe what to change and what must stay the same). '
            'Use "image" (not image_edit) when they clearly want a brand-new picture of something else. '
-           '"video" = the user wants a short video/clip/animation/reel/footage generated or rendered (video_prompt: detailed English prompt describing scene, motion, camera, mood; duration: whole seconds the user asked for, 4–30, else 5). '
+           '"video" = the user wants a short video/clip/animation/reel/footage generated or rendered (video_prompt: detailed English prompt describing scene, motion, camera, mood; duration: whole seconds the user asked for, 4–30, else 5; from_image: true when they want the image the assistant generated earlier to be animated / turned into a video — "animasikan gambar ini", "jadikan video", "gerakkan gambarnya", "buat videonya dari gambar tadi"). '
            '"document" = the user wants a written file '
            '(report, proposal, letter, article, notulen, template) they can download. Otherwise "none" (questions, explanations, '
            'tables shown inline, code snippets are NOT documents). image_prompt: detailed English prompt for an image model. '
@@ -134,6 +134,7 @@ async def plan_tool(text: str, history: str) -> dict:
         plan["video_prompt"] = (plan.get("video_prompt") or plan.get("image_prompt") or "").strip() or "cinematic short clip"
         from seedance import clamp_duration
         plan["duration"] = clamp_duration(plan.get("duration"))
+        plan["from_image"] = bool(plan.get("from_image"))
     return plan
 
 

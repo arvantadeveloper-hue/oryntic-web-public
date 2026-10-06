@@ -61,6 +61,31 @@ def public_media_url(base: str, path: str) -> str:
     return f"{base}/api/files/{path}?sig={file_sig(path)}"
 
 
+def drive_sig(uid: str, file_id: str, ttl: int = 3600) -> str:
+    return jwt.encode({"purpose": "drive", "uid": uid, "file_id": file_id, "exp": int(time.time()) + ttl}, JWT_SECRET, algorithm="HS256")
+
+
+def verify_drive_sig(file_id: str, sig: str) -> Optional[str]:
+    """Returns the owning user id when the signed Drive link is valid."""
+    try:
+        d = jwt.decode(sig, JWT_SECRET, algorithms=["HS256"])
+        return d.get("uid") if d.get("purpose") == "drive" and d.get("file_id") == file_id else None
+    except Exception:
+        return None
+
+
+def public_drive_url(base: str, uid: str, file_id: str) -> str:
+    return f"{base}/api/integrations/google/public/{file_id}?sig={drive_sig(uid, file_id)}"
+
+
+async def media_bytes(uid: str, x) -> tuple:
+    """(bytes, content_type) of the media to publish — platform storage path or the user's Google Drive file."""
+    if getattr(x, "drive_id", None):
+        from integrations import drive_bytes
+        return await drive_bytes(uid, x.drive_id)
+    return await asyncio.to_thread(get_object, x.media_path)
+
+
 # ---------- accounts ----------
 async def accounts(uid: str) -> list:
     rows = {r["provider"]: r async for r in db.social_accounts.find({"user_id": uid}, {"_id": 0, "access_token": 0, "refresh_token": 0})}
@@ -152,13 +177,14 @@ class PublishIn(BaseModel):
     text: str = Field(default="", max_length=3000)
     title: str = Field(default="", max_length=100)
     media_path: Optional[str] = Field(default=None, max_length=500)
+    drive_id: Optional[str] = Field(default=None, max_length=200)
     page_id: Optional[str] = None
     to_instagram: bool = True
     app_url: str = Field(min_length=8, max_length=300)
     source: Optional[dict] = None
 
 
-async def _publish_linkedin(acc: dict, x: PublishIn) -> dict:
+async def _publish_linkedin(acc: dict, x: PublishIn, uid: str) -> dict:
     h = {"Authorization": f"Bearer {acc['token']}", "X-Restli-Protocol-Version": "2.0.0", "LinkedIn-Version": "202409", "Content-Type": "application/json"}
     author = f"urn:li:person:{acc['account_id']}"
     body = {"author": author, "commentary": x.text or x.title, "visibility": "PUBLIC", "distribution": {"feedDistribution": "MAIN_FEED", "targetEntities": [], "thirdPartyDistributionChannels": []}, "lifecycleState": "PUBLISHED"}
@@ -166,7 +192,7 @@ async def _publish_linkedin(acc: dict, x: PublishIn) -> dict:
         if x.kind == "image" and x.media_path:
             init = await c.post("https://api.linkedin.com/rest/images?action=initializeUpload", headers=h, json={"initializeUploadRequest": {"owner": author}})
             v = init.json().get("value") or {}
-            data, ctype = await asyncio.to_thread(get_object, x.media_path)
+            data, ctype = await media_bytes(uid, x)
             await c.put(v["uploadUrl"], content=data, headers={"Content-Type": ctype})
             body["content"] = {"media": {"id": v["image"], "altText": x.title or "image"}}
         r = await c.post("https://api.linkedin.com/rest/posts", headers=h, json=body)
@@ -176,13 +202,13 @@ async def _publish_linkedin(acc: dict, x: PublishIn) -> dict:
     return {"post_id": pid, "post_url": f"https://www.linkedin.com/feed/update/{pid}" if pid else "https://www.linkedin.com/feed/"}
 
 
-async def _publish_meta(acc: dict, x: PublishIn, base: str) -> dict:
+async def _publish_meta(acc: dict, x: PublishIn, base: str, uid: str) -> dict:
     pages = acc.get("pages") or []
     page = next((p for p in pages if p["id"] == x.page_id), pages[0] if pages else None)
     if not page:
         raise HTTPException(400, "Tidak ada Halaman Facebook pada akun ini (Instagram memerlukan akun Business yang terhubung ke Halaman).")
     ptok = _dec(page["token"])
-    url = public_media_url(base, x.media_path) if x.media_path else None
+    url = public_drive_url(base, uid, x.drive_id) if x.drive_id else public_media_url(base, x.media_path) if x.media_path else None
     out = {}
     async with httpx.AsyncClient(timeout=120) as c:
         if x.kind == "text":
@@ -211,10 +237,12 @@ async def _publish_meta(acc: dict, x: PublishIn, base: str) -> dict:
     return out
 
 
-async def _publish_youtube(acc: dict, x: PublishIn) -> dict:
-    if not x.media_path:
+async def _publish_youtube(acc: dict, x: PublishIn, uid: str) -> dict:
+    if not (x.media_path or x.drive_id):
         raise HTTPException(400, "YouTube memerlukan file video.")
-    data, ctype = await asyncio.to_thread(get_object, x.media_path)
+    data, ctype = await media_bytes(uid, x)
+    if not (ctype or "").startswith("video/"):
+        ctype = "video/mp4"
     meta = {"snippet": {"title": (x.title or x.text or "Video Oryntix")[:100], "description": x.text[:5000]}, "status": {"privacyStatus": "public"}}
     async with httpx.AsyncClient(timeout=300) as c:
         init = await c.post("https://www.googleapis.com/upload/youtube/v3/videos", params={"uploadType": "resumable", "part": "snippet,status"},
@@ -234,13 +262,13 @@ async def publish(uid: str, x: PublishIn) -> list:
     for p in x.providers:
         if p not in PROVIDERS:
             continue
-        rec = {"id": new_id(), "user_id": uid, "provider": p, "kind": x.kind, "text": x.text, "title": x.title, "media_path": x.media_path, "status": "sent", "source": x.source, "created_at": now_iso()}
+        rec = {"id": new_id(), "user_id": uid, "provider": p, "kind": x.kind, "text": x.text, "title": x.title, "media_path": x.media_path, "drive_id": x.drive_id, "status": "sent", "source": x.source, "created_at": now_iso()}
         try:
             if x.kind not in PROVIDERS[p]["kinds"]:
                 raise HTTPException(400, f"{PROVIDERS[p]['label']} tidak mendukung konten {x.kind}.")
             acc = await _token(uid, p)
             rec["account_name"] = acc.get("account_name")
-            res = await (_publish_linkedin(acc, x) if p == "linkedin" else _publish_meta(acc, x, x.app_url) if p == "meta" else _publish_youtube(acc, x))
+            res = await (_publish_linkedin(acc, x, uid) if p == "linkedin" else _publish_meta(acc, x, x.app_url, uid) if p == "meta" else _publish_youtube(acc, x, uid))
             rec.update(res)
         except HTTPException as e:
             rec.update(status="failed", error=str(e.detail))

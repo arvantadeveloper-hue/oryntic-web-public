@@ -587,6 +587,7 @@ def _image_set_text(task: dict, n: int) -> str:
             f"Klik kartu tugas di bawah untuk melihat hasilnya satu per satu — [buka di Ruang Kerja](/workspace/{task['id']}).")
 
 
+ANIMATE_RE = re.compile(r"\b(animasikan|animasi|gerakkan|hidupkan|jadikan video|bikin video|buat video|animate|turn .* into (a )?video)\b", re.I)
 IMAGE_DONE_TEXT = "Ini gambarnya! ✨ Kalau mau diubah gayanya, bilang saja."
 IMAGE_EDIT_DONE_TEXT = "Ini versi barunya! ✨ Mau diubah lagi? Tinggal bilang."
 
@@ -655,22 +656,39 @@ async def video_pricing_text() -> str:
     return " · ".join(f"{o['label']} ±{_fmt_credits(o['per_sec'])} kredit/detik" for o in seedance.options(seedance.DEFAULT_DUR))
 
 
-async def _run_video_bg(mid: str, cid: str, uid: str, persona_id: Optional[str], pt: dict):
+def _video_fail_text(err: str, app_base: str) -> str:
+    e = err.lower()
+    if "hostname approved" in e or "approved for this api" in e:
+        host = app_base.split("//")[-1].split("/")[0] or "domain aplikasi ini"
+        return (f"Videonya belum bisa dirender dari gambar: host gambar referensi **{host}** belum disetujui di akun seedance2video.io. "
+                "Admin perlu mendaftarkan host itu di *Settings → API Keys* (atau hubungi support@seedance2video.io). Kredit kamu tidak dipotong.")
+    if "paid" in e and "account" in e:
+        return "Videonya belum bisa dirender: akun seedance2video.io yang dipakai platform belum berlangganan paket berbayar (API hanya untuk akun berbayar). Admin platform perlu mengaktifkan paketnya dulu. Kredit kamu tidak dipotong."
+    if "insufficient" in e or " 402" in e or ("credit" in e and "seedance" in e):
+        return "Videonya belum bisa dirender: saldo kredit akun seedance2video.io (provider) habis — admin platform perlu menambah kredit di sana. Kredit kamu tidak dipotong."
+    return VIDEO_FAIL_TEXT
+
+
+async def _run_video_bg(mid: str, cid: str, uid: str, persona_id: Optional[str], pt: dict, app_base: str = ""):
     """Background: render at seedance2video.io, upload the file to the user's Google Drive (never platform storage), then swap the placeholder message."""
     from integrations import drive_save
+    from social import public_media_url
     tier, duration, prompt, request = pt["tier"], int(pt["duration"]), pt["prompt"], pt.get("request") or ""
     try:
-        gen = await seedance.generate(prompt, tier, duration)
+        image_url = public_media_url(app_base, pt["reference_path"]) if pt.get("reference_path") and app_base else None
+        gen = await seedance.generate(prompt, tier, duration, image_url=image_url)
         data = await seedance.download(gen["video_url"])
         title = f"Oryntix video - {(request or prompt)[:50].strip()} ({seedance.TIERS[tier]['label']}, {duration}s).mp4"
         f = await drive_save(uid, title, kind="file", data=data, mime="video/mp4", source={"kind": "video", "conversation_id": cid, "message_id": mid, "tier": tier})
         credits = seedance.quote(tier, duration)
         await record_usage(uid, "video_generation", credits, {"conversation_id": cid, "persona_id": persona_id, "tier": tier, "duration": duration, "provider_credits": gen.get("provider_credits")})
         media = {"type": "video", "name": f["name"], "drive_id": f["drive_id"], "link": f.get("link"), "prompt": prompt[:400], "request": request[:300], "tier": tier, "duration": duration}
+        if pt.get("reference_path"):
+            media["animated_from"] = pt["reference_path"]
         upd = {"content": VIDEO_DONE_TEXT, "media": [media], "tool": "video", "credits": credits, "rendering": None}
     except Exception as exc:
         logging.getLogger("chat").warning("video render failed: %s", exc)
-        upd = {"content": VIDEO_FAIL_TEXT, "tool": "video", "error": True, "rendering": None}
+        upd = {"content": _video_fail_text(str(exc), app_base), "tool": "video", "error": True, "rendering": None}
     await db.messages.update_one({"id": mid}, {"$set": upd})
     msg = await db.messages.find_one({"id": mid}, {"_id": 0})
     if msg:
@@ -681,6 +699,7 @@ async def _video_turn(ctx, plan: dict, confirm_threshold: int):
     from integrations import drive_connected
     duration = seedance.clamp_duration(plan.get("duration"))
     prompt = (plan.get("video_prompt") or ctx.user_text).strip()
+    ref = await _latest_media(ctx.cid, "image") if plan.get("from_image") else None
     yield ctx.sse(start=True)
     if not seedance.configured():
         async for ev in _emit_final(ctx, "Fitur render video belum diaktifkan oleh admin platform (API key Seedance belum diatur). Coba lagi nanti ya.", 0, {"tool": "video", "error": True}):
@@ -707,11 +726,14 @@ async def _video_turn(ctx, plan: dict, confirm_threshold: int):
     lines = [f"**{o['label']}** ±{_fmt_credits(o['per_sec'])} kredit/detik → ±{_fmt_credits(o['credits'])} kredit untuk {duration} detik"
              + ("" if o["credits"] <= balance else " _(saldo tidak cukup)_") for o in avail]
     skipped = [o for o in opts if not o["available"]]
-    text = (f"Siap, videonya {duration} detik. 🎬 Mau pakai model yang mana?\n\n" + "\n".join(f"- {l}" for l in lines)
+    intro = f"Siap, aku animasikan gambar terakhir jadi video {duration} detik. 🎬 Mau pakai model yang mana?" if ref else f"Siap, videonya {duration} detik. 🎬 Mau pakai model yang mana?"
+    text = (f"{intro}\n\n" + "\n".join(f"- {l}" for l in lines)
             + (f"\n\n_{skipped[0]['label']} maksimal {skipped[0]['max_dur']} detik, jadi tidak tersedia untuk durasi ini._" if skipped else "")
             + f"\n\nSaldo kredit kamu: {_fmt_credits(balance)}. Pilih salah satu di bawah ya.")
     yield ctx.sse(delta=text)
     pt = {"kind": "video", "prompt": prompt, "duration": duration, "options": opts, "balance": balance, "request": ctx.user_text[:300]}
+    if ref:
+        pt["reference_path"] = ref["path"]
     async for ev in _emit_final(ctx, text, 0, {"pending_tool": pt}):
         yield ev
 
@@ -827,7 +849,7 @@ async def _latest_media(cid: str, kind: str) -> Optional[dict]:
     want = "video" if kind == "video" else "image"
     async for m in db.messages.find({"conversation_id": cid, "media.0": {"$exists": True}}, {"_id": 0, "media": 1}).sort("created_at", -1).limit(30):
         for x in reversed(m.get("media") or []):
-            if (x.get("type") or "").startswith(want) and x.get("path"):
+            if (x.get("type") or "").startswith(want) and (x.get("path") or (want == "video" and x.get("drive_id"))):
                 return x
     return None
 
@@ -838,7 +860,7 @@ async def social_publish_from_chat(cid: str, u: dict, providers: list, caption: 
     media = await _latest_media(cid, kind) if kind in ("image", "video") else None
     if kind in ("image", "video") and not media:
         raise HTTPException(400, f"Belum ada {kind} di percakapan ini untuk diposting.")
-    res = await publish(u["id"], PublishIn(providers=providers, kind=kind, text=caption, title=(media or {}).get("name") or "", media_path=(media or {}).get("path"), app_url=app_url, source={"conversation_id": cid}))
+    res = await publish(u["id"], PublishIn(providers=providers, kind=kind, text=caption, title=(media or {}).get("name") or "", media_path=(media or {}).get("path"), drive_id=(media or {}).get("drive_id"), app_url=app_url, source={"conversation_id": cid}))
     lines = [f"- **{SOCIAL_LABEL.get(r['provider'], r['provider'])}**: " + (f"terkirim — [lihat post]({r.get('post_url')})" + (f" · [Instagram]({r['instagram_url']})" if r.get("instagram_url") else "") if r["status"] == "sent" else f"gagal — {r.get('error')}") for r in res]
     return {"results": res, "text": "Hasil publikasi:\n" + "\n".join(lines) + "\n\nSemua riwayat ada di menu [Social Media](/social)."}
 
@@ -1173,7 +1195,7 @@ async def _typed_intercepts(ctx: ReplyCtx):
         async for ev in _revise_turn(ctx):
             yield ev
         return
-    if wants_tool(ctx.user_text) or (EDIT_RE.search(ctx.user_text) and await _latest_media(ctx.cid, "image")):
+    if wants_tool(ctx.user_text) or ((EDIT_RE.search(ctx.user_text) or ANIMATE_RE.search(ctx.user_text)) and await _latest_media(ctx.cid, "image")):
         plan = plan or await plan_tool(ctx.user_text, ctx.prompt)
         if plan.get("tool") != "none":
             async for ev in _tool_turn(ctx, plan):
@@ -1578,7 +1600,7 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
         upd = {"content": VIDEO_WAIT_TEXT.replace("render videonya", f"render videonya dengan {opt['label']}"), "tool": "video", "rendering": "video"}
         await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
         await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
-        asyncio.create_task(_run_video_bg(mid, cid, u["id"], msg.get("persona_id"), {**pt, "tier": opt["tier"]}))
+        asyncio.create_task(_run_video_bg(mid, cid, u["id"], msg.get("persona_id"), {**pt, "tier": opt["tier"]}, (app_url or "").rstrip("/")))
         return {**msg, **upd, "pending_tool": None}
     if pt.get("kind") == "image_set" and len(pt.get("prompts") or []) > 1:
         persona = await db.personas.find_one({"id": msg.get("persona_id")}, {"_id": 0, "id": 1, "name": 1}) or {"id": msg.get("persona_id"), "name": msg.get("persona_name") or "Asisten"}

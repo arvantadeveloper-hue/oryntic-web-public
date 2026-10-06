@@ -403,10 +403,18 @@ async def content(file_id: str, u: dict = Depends(current_user)):
     return {**out, "text": (out.get("text") or "")[:20000]}
 
 
-@router.get("/google/media/{file_id}")
-async def media(file_id: str, u: dict = Depends(current_user_q)):
-    """Stream a Drive file (e.g. a rendered video) through the API so <video> can play it without making the file public."""
-    tk = await access_token(u["id"])
+async def drive_bytes(uid: str, file_id: str) -> tuple:
+    """Full content of a Drive file (used when publishing a Drive-hosted video)."""
+    tk = await access_token(uid)
+    async with httpx.AsyncClient(timeout=300) as c:
+        r = await c.get(f"{DRIVE}/files/{file_id}", params={"alt": "media"}, headers={"Authorization": f"Bearer {tk}"})
+    if r.status_code >= 400:
+        raise HTTPException(400, f"Berkas Drive tidak dapat diunduh ({r.status_code})")
+    return r.content, r.headers.get("Content-Type", "application/octet-stream")
+
+
+async def _stream_drive(uid: str, file_id: str):
+    tk = await access_token(uid)
     client = httpx.AsyncClient(timeout=300)
     req = client.build_request("GET", f"{DRIVE}/files/{file_id}", params={"alt": "media"}, headers={"Authorization": f"Bearer {tk}"})
     r = await client.send(req, stream=True)
@@ -422,6 +430,22 @@ async def media(file_id: str, u: dict = Depends(current_user_q)):
             await r.aclose(); await client.aclose()
     headers = {k: v for k, v in r.headers.items() if k.lower() in ("content-length", "content-type", "accept-ranges")}
     return StreamingResponse(body(), status_code=200, headers=headers, media_type=r.headers.get("content-type", "video/mp4"))
+
+
+@router.get("/google/media/{file_id}")
+async def media(file_id: str, u: dict = Depends(current_user_q)):
+    """Stream a Drive file (e.g. a rendered video) through the API so <video> can play it without making the file public."""
+    return await _stream_drive(u["id"], file_id)
+
+
+@router.get("/google/public/{file_id}")
+async def public_media(file_id: str, sig: str):
+    """Short-lived signed link so social networks can fetch a Drive-hosted video we publish."""
+    from social import verify_drive_sig
+    uid = verify_drive_sig(file_id, sig)
+    if not uid:
+        raise HTTPException(403, "Tautan tidak valid atau kedaluwarsa")
+    return await _stream_drive(uid, file_id)
 
 
 @router.post("/google/save")

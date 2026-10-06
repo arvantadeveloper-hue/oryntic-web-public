@@ -74,6 +74,7 @@ export function GalleryCard({ item, selectable = false, selected = false, onSele
             </>) : item.drive_id ? (<>
               <a href={item.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-[#EEF3FF] px-2 py-1 text-[11px] font-semibold text-[#2F6BFF] hover:bg-[#E0E9FF]" data-testid="gallery-open-drive"><HardDrive size={11} /> Buka di Google Drive</a>
               {item.conversation_id && <a href={`/chat/${item.conversation_id}`} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-open-chat"><MessageSquare size={11} /> Chat</a>}
+              <button onClick={() => openPublish({ type: item.kind, drive_id: item.drive_id, name: item.name }, item.title || "")} className="flex items-center gap-1 rounded-lg bg-[#2F6BFF] px-2 py-1 text-[11px] font-semibold text-white hover:bg-[#2558d6]" data-testid="gallery-publish"><Send size={11} /> Publikasikan</button>
             </>) : (<>
               <a href={fileUrl(item.path)} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-[#EEF3FF] px-2 py-1 text-[11px] font-semibold text-[#2F6BFF] hover:bg-[#E0E9FF]" data-testid="gallery-open"><ExternalLink size={11} /> Buka</a>
               <a href={downloadUrl(item.path)} download={item.name} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200" data-testid="gallery-dl-file"><Download size={11} /> Unduh</a>

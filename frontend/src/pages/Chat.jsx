@@ -156,6 +156,7 @@ export default function Chat() {
     try {
       ws = openConvSocket(id, (ev) => {
         if (ev.type === "message" && ev.message) { upsertMsg(ev.message); return; }
+        if (ev.type === "archived") { reloadAfterArchive(); return; }
         if ((ev.type === "message" || ev.type === "participants") && !streamingRef.current) {
           api.get(`/conversations/${id}/messages`).then((r) => { setConv(r.data.conversation); setMessages(r.data.messages); }).catch(() => {});
         }
@@ -166,6 +167,15 @@ export default function Chat() {
     /* eslint-disable-next-line */
   }, [id]);
   useEffect(() => { const off = onUserEvent(["message_new"], () => loadConvs()); return off; /* eslint-disable-next-line */ }, []);
+  // background auto-archive finished → the server copy is the truth: refetch messages + conversation list and overwrite the local cache
+  const reloadAfterArchive = () => { setMessages([]); setMsgsLoading(true); api.get(`/conversations/${id}/messages?limit=50`).then((r) => { setConv(r.data.conversation); applyPage(r.data); }).catch(() => {}).finally(() => setMsgsLoading(false)); loadConvs(); };
+  useEffect(() => { const off = onUserEvent(["archived"], (ev) => { if (ev.conversation_id === id) reloadAfterArchive(); else loadConvs(); }); return off; /* eslint-disable-next-line */ }, [id]);
+  // marker: the list says this chat was archived after the messages we loaded → reload instead of trusting what we have
+  useEffect(() => {
+    const row = convs.find((c) => c.id === id);
+    if (row?.archived_at && conv && (conv.archived_at || "") < row.archived_at) reloadAfterArchive();
+    /* eslint-disable-next-line */
+  }, [convs, id]);
 
   const openModal = (m = "group") => {
     if (personas === null) return;
@@ -451,7 +461,7 @@ export default function Chat() {
               </div>
             );
           })}
-          {conv && summaryRequest && !streaming && <SummaryPrompt cid={id} onDone={refreshMsgs} onLater={() => setSummaryRequest(false)} />}
+          {conv && summaryRequest && !streaming && <SummaryPrompt cid={id} onDone={reloadAfterArchive} onLater={() => setSummaryRequest(false)} />}
           <div ref={endRef} />
         </div>
 
