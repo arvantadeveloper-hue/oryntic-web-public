@@ -1,5 +1,5 @@
 import { LoadMore } from "../components/ConversationTools";
-import { onUserEvent, isWsConnected } from "../lib/userEvents";
+import { onUserEvent, coalesce } from "../lib/userEvents";
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sparkles, Search, Trash2 } from "lucide-react";
@@ -33,10 +33,9 @@ export default function Workspace() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [filter, q]);
   useEffect(() => {
-    const iv = setInterval(() => { if (!isWsConnected() && tasks.some((x) => ["queued", "running"].includes(x.status))) load(); }, 20000);
-    const off = onUserEvent(["task_update", "ws_state"], load);
-    return () => { clearInterval(iv); off(); }; /* eslint-disable-next-line */
-  }, [tasks, filter, q]);
+    const off = onUserEvent(["task_update", "ws_state"], () => coalesce("workspace-list", load)); // trigger → GET /workspace/search
+    return off; /* eslint-disable-next-line */
+  }, [filter, q]);
 
   const delegate = async () => {
     if (!goal.trim()) return;

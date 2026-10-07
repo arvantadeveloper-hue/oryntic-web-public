@@ -4,7 +4,7 @@ import { Send, Search, Trash2, RefreshCw, Users, X, Check, Bot, Paperclip, Mic, 
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { onUserEvent } from "../lib/userEvents";
+import { onUserEvent, coalesce } from "../lib/userEvents";
 import { useI18n } from "../i18n";
 import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
@@ -167,7 +167,7 @@ export default function Chat() {
     /* eslint-disable-next-line */
   }, [id]);
   // message_new carries the updated conversation row → upsert locally; GET only when the row is missing
-  useEffect(() => { const off = onUserEvent(["message_new"], (ev) => { if (ev.conversation) setConvs((prev) => [ev.conversation, ...prev.filter((c) => c.id !== ev.conversation.id)]); else loadConvs(); }); return off; /* eslint-disable-next-line */ }, []);
+  useEffect(() => onUserEvent(["message_new", "participants"], () => coalesce("convs", loadConvs)), []); // trigger → GET /conversations
   useEffect(() => onUserEvent(["ws_state"], (e) => { if (e.connected) loadConvs(); }), []); // resync list after a reconnect
   // background auto-archive finished → the server copy is the truth: refetch messages + conversation list and overwrite the local cache
   const reloadAfterArchive = () => { setMessages([]); setMsgsLoading(true); api.get(`/conversations/${id}/messages?limit=50`).then((r) => { setConv(r.data.conversation); applyPage(r.data); }).catch(() => {}).finally(() => setMsgsLoading(false)); loadConvs(); };

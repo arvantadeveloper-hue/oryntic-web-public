@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { onUserEvent, isWsConnected } from "../lib/userEvents";
+import { onUserEvent, coalesce } from "../lib/userEvents";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Download, Copy, CheckCircle2, Loader2, Clock, XCircle, MessageSquare, Phone, X, History, GitCompareArrows, RotateCcw, FileText, FileSpreadsheet, FileType, Bot, PencilLine } from "lucide-react";
 import { toast } from "sonner";
@@ -144,8 +144,7 @@ export default function TaskDetail() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
   useEffect(() => {
     if (!task) return;
-    const off = onUserEvent(["task_update"], (e) => { if (!e.task_id || e.task_id === id) load(); });
-    if (["queued", "running"].includes(task.status)) { const iv = setInterval(() => { if (!isWsConnected()) load(); }, 15000); return () => { clearInterval(iv); off(); }; }
+    const off = onUserEvent(["task_update", "ws_state"], (e) => { if (e.type === "ws_state" ? e.connected : (!e.task_id || e.task_id === id)) coalesce(`task-${id}`, load); }); // trigger → GET /tasks/{id}
     return off;
     /* eslint-disable-next-line */
   }, [task]);

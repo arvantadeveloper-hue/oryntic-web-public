@@ -14,9 +14,8 @@ export function NotificationBell() {
   const [feed, setFeed] = useState(null);
   const box = useRef(null);
   const load = () => api.get("/notifications/feed").then((r) => setFeed(r.data)).catch(() => {});
-  // feed snapshot rides on the event (ev.feed) → no GET; "push" (FCM foreground) has no snapshot → GET; interval only while the socket is down
-  useEffect(() => onUserEvent(["notification", "reminder_due", "friend_request", "task_update", "incoming_call", "push"], (ev) => { if (ev.feed) setFeed(ev.feed); else load(); }), []);
-  useLiveSync(load, [], 90000, []);
+  // WS event = trigger → GET /notifications/feed (coalesced)
+  useLiveSync(load, ["notification", "reminder_due", "friend_request", "task_update", "incoming_call", "push"], 0, []);
   useEffect(() => {
     if (!open) return undefined;
     load();

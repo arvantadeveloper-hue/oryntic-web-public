@@ -24,9 +24,9 @@ export function AppLayout() {
   const [q, setQ] = useState("");
   const [badges, setBadges] = useState({ friend_requests: 0, unread_chats: 0 });
   useEffect(() => { registerAssetWorker(); }, []);
-  // badges ride on every WebSocket event (ev.badges); GET only while the socket is down / after resume
-  useEffect(() => { if (!user) return undefined; return onUserEvent(["message_new", "friend_request", "notification", "reminder_due", "incoming_call", "task_update", "archived"], (ev) => { if (ev.badges) setBadges(ev.badges); }); }, [user]);
-  useLiveSync(() => { if (!user) return; api.get("/notifications/badges").then((r) => setBadges(r.data)).catch(() => {}); }, [], 60000, [user?.id]);
+  // WS event = trigger → GET /notifications/badges (coalesced); also on mount, reconnect and tab resume
+  useLiveSync(() => { if (!user) return; api.get("/notifications/badges").then((r) => setBadges(r.data)).catch(() => {}); },
+    ["message_new", "friend_request", "notification", "reminder_due", "incoming_call", "task_update", "archived", "push"], 0, [user?.id]);
   useEffect(() => {
     if (!user) return undefined;
     const pull = () => api.get("/notifications/badges").then((r) => setBadges(r.data)).catch(() => {});

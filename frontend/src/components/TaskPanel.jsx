@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, ExternalLink, Loader2, CheckCircle2, Clock, XCircle, ClipboardList, Images, FileText } from "lucide-react";
 import { api } from "../lib/api";
-import { onUserEvent, isWsConnected } from "../lib/userEvents";
+import { onUserEvent, coalesce } from "../lib/userEvents";
 import { Markdown } from "./Markdown";
 import { MediaList } from "./MessageExtras";
 
@@ -16,9 +16,8 @@ function useTask(taskId) {
     let alive = true;
     const load = () => api.get(`/tasks/${taskId}`).then((r) => alive && setTask(r.data)).catch(() => {});
     load();
-    const off = onUserEvent(["task_update"], (e) => { if (!e.task_id || e.task_id === taskId) load(); });
-    const iv = setInterval(() => { if (isWsConnected()) return; setTask((t) => { if (t && ["queued", "running"].includes(t.status)) load(); return t; }); }, 6000);
-    return () => { alive = false; off(); clearInterval(iv); };
+    const off = onUserEvent(["task_update", "ws_state"], (e) => { if (e.type === "ws_state" ? e.connected : (!e.task_id || e.task_id === taskId)) coalesce(`task-${taskId}`, load); }); // trigger → GET
+    return () => { alive = false; off(); };
   }, [taskId]);
   return task;
 }

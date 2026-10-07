@@ -16,23 +16,36 @@ export function useWsConnected() {
   return c;
 }
 
-// Run `fn` on mount, then: on every listed push event; on a GET interval ONLY while the WebSocket is down;
-// once when the socket reconnects and once when the tab becomes visible again (resync after background).
-export function useLiveSync(fn, events, intervalMs, deps = []) {
+// Coalesce bursts: many events within `ms` → ONE call (trailing edge), and never two in flight for the same key.
+const pending = new Map();
+export function coalesce(key, fn, ms = 300) {
+  const cur = pending.get(key) || { timer: null, busy: false, again: false };
+  pending.set(key, cur);
+  const fire = async () => {
+    cur.timer = null;
+    if (cur.busy) { cur.again = true; return; }
+    cur.busy = true;
+    try { await fn(); } catch (e) {} finally { cur.busy = false; if (cur.again) { cur.again = false; coalesce(key, fn, ms); } }
+  };
+  clearTimeout(cur.timer); cur.timer = setTimeout(fire, ms);
+}
+
+// WS = trigger, GET = data. Run `fn` on mount, on every listed event (coalesced), once when the socket reconnects
+// and once when the tab becomes visible again (gap fill). No polling interval — like Slack/WhatsApp Web.
+export function useLiveSync(fn, events, _intervalMs, deps = []) {
   useEffect(() => {
-    let timer = null, alive = true;
-    const run = (...a) => { if (alive) fn(...a); };
-    const arm = () => { clearInterval(timer); timer = null; if (!wsConnected && intervalMs) timer = setInterval(run, intervalMs); };
-    run(); arm();
+    let alive = true;
+    const key = `ls:${Math.random().toString(36).slice(2)}`;
+    const run = () => { if (alive) coalesce(key, fn); };
+    fn();
     const offEv = events && events.length ? onUserEvent(events, run) : () => {};
-    const offWs = onUserEvent(["ws_state"], (e) => { arm(); if (e.connected) run(); });
+    const offWs = onUserEvent(["ws_state"], (e) => { if (e.connected) run(); });
     const onVis = () => { if (document.visibilityState === "visible") run(); };
     document.addEventListener("visibilitychange", onVis);
-    return () => { alive = false; clearInterval(timer); offEv(); offWs(); document.removeEventListener("visibilitychange", onVis); };
+    return () => { alive = false; offEv(); offWs(); document.removeEventListener("visibilitychange", onVis); };
     /* eslint-disable-next-line */
   }, deps);
 }
-
 // Subscribe to per-user realtime events (reminder_due, incoming_call, task_update, message_new, push). Returns unsubscribe.
 export function onUserEvent(types, cb) {
   const set = types ? new Set([].concat(types)) : null;
