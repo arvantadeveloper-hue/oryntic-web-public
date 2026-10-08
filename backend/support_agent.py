@@ -2,6 +2,7 @@
 + interactive video avatar (LiveAvatar LITE mode, lip-synced to our own OpenAI Realtime audio) with per-second credit billing."""
 import os
 import math
+import time
 import logging
 from typing import Optional
 import httpx
@@ -29,12 +30,17 @@ DEFAULT_CONFIG = {
     "video_credits_per_sec": 2, "video_max_minutes": 20, "video_warn_minutes": 2,
 }
 _cache: dict = {}
+_cache_at = 0.0
+CACHE_TTL = 30  # seconds — the platform-admin (separate process) writes the same document, so never cache forever
 
 
-async def get_config() -> dict:
-    if not _cache:
+async def get_config(fresh: bool = False) -> dict:
+    global _cache_at
+    if fresh or not _cache or time.monotonic() - _cache_at > CACHE_TTL:
         doc = await db.config.find_one({"id": "support_agent"}, {"_id": 0, "id": 0}) or {}
+        _cache.clear()
         _cache.update({**DEFAULT_CONFIG, **doc})
+        _cache_at = time.monotonic()
     return dict(_cache)
 
 
@@ -109,7 +115,7 @@ async def _own_call(call_id: str, u: dict) -> dict:
 @router.post("/realtime/calls/{call_id}/video/start")
 async def video_start(call_id: str, u: dict = Depends(current_user)):
     call = await _own_call(call_id, u)
-    c = await get_config()
+    c = await get_config(fresh=True)
     if not (c.get("video_enabled") and c.get("avatar_id")):
         raise HTTPException(503, "Video interaktif belum diaktifkan oleh admin platform")
     cps = int(c["video_credits_per_sec"])
