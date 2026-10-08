@@ -5,6 +5,7 @@ import { RealtimePricingCard } from "../components/RealtimePricingCard";
 import { RateLimitsCard } from "../components/RateLimitsCard";
 import { ModelRoutingCard } from "../components/ModelRoutingCard";
 import { PlatformPricingCard, TrialCard } from "../components/PlatformPricingCards";
+import { SupportAgentCard } from "../components/SupportAgentCard";
 
 export default function Admin() {
   const [tab, setTab] = useState("overview");
@@ -34,7 +35,7 @@ export default function Admin() {
       <h1 className="text-3xl font-extrabold text-slate-900">Admin Console</h1>
 
       <div className="mt-5 flex gap-2 border-b border-slate-200">
-        {[["overview", "Overview"], ["users", "Users"], ["tasks", "Tasks"], ["pricing", "Pricing"]].map(([k, l]) => (
+        {[["overview", "Overview"], ["users", "Users"], ["tasks", "Tasks"], ["pricing", "Pricing"], ["support", "Asisten Oryntix"]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} data-testid={`admin-tab-${k}`}
             className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium ${tab === k ? "border-[#00D1FF] text-slate-900" : "border-transparent text-slate-500"}`}>{l}</button>
         ))}
@@ -84,6 +85,10 @@ export default function Admin() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {tab === "support" && (
+        <div className="mt-6" data-testid="admin-support-tab"><SupportAgentCard /></div>
       )}
 
       {tab === "pricing" && pricing && (
