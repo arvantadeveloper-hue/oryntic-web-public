@@ -574,3 +574,6 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Suara: `CALENDAR_TOOL` `add_calendar_event` (selalu aktif) → `runVoiceTool` POST /events (+conversation_id) → kartu di chat panel, toast "Tercatat di kalender".
 - Frontend: `components/RemindOptions.jsx` (mode Panggilan/Chat, chip offset, pilih asisten; `RemindSummary`), `Reminders.jsx` (form baru, badge "Dari kalender", status Indonesia), `Calendar.jsx` EventForm toggle "Ingatkan saya" + ringkasan pengingat pada item.
 - Uji: `tests/manual_reminders_calendar.py`, `tests/manual_calendar_followup.py`, `tests/test_iter38_reminders.py` (testing agent).
+
+## Update 2026-06 — Ubah pengingat inline
+- `Reminders.jsx`: tombol ✏️ (`rem-edit-btn-{id}`) membuka `ReminderEditor` inline (judul, catatan, waktu `datetime-local`, RemindOptions mode/offset, asisten; `rem-edit-save` / `rem-edit-cancel`) → `PUT /api/reminders/{id}`. Backend `update_reminder` kini juga menyinkronkan event tertaut: title, start_at, notes (dari description) dan `remind {mode, offsets, persona_id}`. Diuji via curl (PUT → alerts dihitung ulang, event ikut berubah) + UI (edit → simpan → daftar diperbarui).

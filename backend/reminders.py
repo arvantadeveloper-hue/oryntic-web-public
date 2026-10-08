@@ -107,8 +107,15 @@ async def update_reminder(rid: str, body: dict, u: dict = Depends(current_user))
         fields.update({"start_at": start.isoformat(), "offsets": offsets, "remind_minutes": min(offsets), "remind_at": (start - timedelta(minutes=min(offsets))).isoformat(),
                        "alerts": build_alerts(start, offsets), "status": "scheduled"})
     await db.reminders.update_one({"id": rid}, {"$set": fields})
-    if r.get("event_id") and ("title" in fields or "start_at" in fields):
-        await db.events.update_one({"id": r["event_id"]}, {"$set": {k: v for k, v in fields.items() if k in ("title", "start_at")}})
+    if r.get("event_id"):
+        ev_fields = {k: v for k, v in fields.items() if k in ("title", "start_at")}
+        if "description" in fields:
+            ev_fields["notes"] = fields["description"]
+        if "mode" in fields or "offsets" in fields or "persona_id" in fields:
+            ev_fields["remind"] = {"mode": fields.get("mode", r.get("mode", "call")), "offsets": fields.get("offsets", r.get("offsets") or [r.get("remind_minutes", 30)]),
+                                   "persona_id": fields.get("persona_id", r.get("persona_id"))}
+        if ev_fields:
+            await db.events.update_one({"id": r["event_id"]}, {"$set": ev_fields})
     return await db.reminders.find_one({"id": rid}, {"_id": 0})
 
 
