@@ -16,7 +16,7 @@ from auth import current_user, workspace_id, _lang_name, lang_rule
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit, throttle_message, inflight_start, inflight_end
-from tools import route_model, wants_tool, plan_tool, GITHUB_RE, SOCIAL_RE, run_image_tool, norm_image_opts, is_media_refusal, EDIT_RE, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task, CAL_RE
+from tools import route_model, wants_tool, plan_tool, GITHUB_RE, SOCIAL_RE, run_image_tool, norm_image_opts, IMAGE_PRESETS, is_media_refusal, EDIT_RE, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task, CAL_RE
 from pricing import rate as tool_rate, refresh as pricing_refresh
 import seedance
 from llm import model_label
@@ -610,10 +610,11 @@ async def _image_turn(ctx, plan: dict, confirm_threshold: int):
                 else "Siap, aku bisa buatkan gambarnya! 🎨 Mau pakai model yang mana?")
         yield ctx.sse(delta=text)
         pt = {"kind": "image_edit" if ref else "image_set" if n > 1 else "image", "prompt": prompt, "prompts": prompts, "credits": credits * n, "count": n, "request": ctx.user_text[:300],
-              "aspect_ratio": plan.get("aspect_ratio") or "1:1", "quality": plan.get("quality") or "standar"}
+              "aspect_ratio": plan.get("aspect_ratio") or "1:1", "quality": plan.get("quality") or "standar", "preset": plan.get("preset")}
         if n == 1:
-            from tools import image_model_options
+            from tools import image_model_options, image_presets
             pt["options"] = await image_model_options()
+            pt["presets"] = image_presets()
         if ref:
             pt["reference_path"] = ref["path"]
         async for ev in _emit_final(ctx, text, 0, {"pending_tool": pt}):
@@ -627,7 +628,7 @@ async def _image_turn(ctx, plan: dict, confirm_threshold: int):
     yield ctx.sse(status="Mengedit gambar..." if ref else "Merender gambar...", rendering="image")
     out = None
     try:
-        out = await run_image_tool(ctx.user["id"], prompt, ref["path"] if ref else None, "gemini-image", plan.get("aspect_ratio") or "1:1", plan.get("quality") or "standar")
+        out = await run_image_tool(ctx.user["id"], prompt, ref["path"] if ref else None, "gemini-image", plan.get("aspect_ratio") or "1:1", plan.get("quality") or "standar", plan.get("preset"))
     except Exception as exc:
         logging.getLogger("chat").warning("image turn failed: %s", exc)
         out = None
@@ -1734,7 +1735,7 @@ async def _pending_msg(cid: str, mid: str, u: dict) -> dict:
 
 @router.post("/conversations/{cid}/messages/{mid}/run-tool")
 async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Optional[str] = None, resolution: Optional[str] = None, real_person: bool = False, with_audio: bool = False,
-                   aspect: Optional[str] = None, quality: Optional[str] = None, u: dict = Depends(current_user)):
+                   aspect: Optional[str] = None, quality: Optional[str] = None, preset: Optional[str] = None, u: dict = Depends(current_user)):
     msg = await _pending_msg(cid, mid, u)
     over = await quota_exceeded(u)
     if over:
@@ -1754,6 +1755,8 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
     if pt.get("kind") == "video":
         duration = int(pt["duration"])
         res = resolution if resolution in seedance.RESOLUTIONS else (pt.get("resolution") or "720p")
+        vaspect = aspect if aspect in seedance.ASPECTS else (pt.get("aspect_ratio") or "16:9")
+        pt = {**pt, "aspect_ratio": vaspect}
         rp = bool(real_person) and bool(pt.get("reference_path"))
         au = bool(with_audio)
         opt = next((o for o in pt.get("options") or [] if o["tier"] == choice and seedance.supports(o["tier"], duration, res, rp, au)), None)
@@ -1769,7 +1772,7 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
         if not await drive_connected(u["id"]):
             await db.messages.update_one({"id": mid}, {"$unset": {"pending_tool.running": ""}})
             raise HTTPException(400, "Hubungkan Google Drive dulu — video disimpan ke Drive kamu")
-        upd = {"content": VIDEO_WAIT_TEXT.replace("render videonya", f"render videonya dengan {opt['label']} {res}{' mode real person' if rp else ''}{' + suara' if au else ''}"), "tool": "video", "rendering": "video", "aspect_ratio": pt.get("aspect_ratio") or "16:9"}
+        upd = {"content": VIDEO_WAIT_TEXT.replace("render videonya", f"render videonya dengan {opt['label']} {res}{' mode real person' if rp else ''}{' + suara' if au else ''}"), "tool": "video", "rendering": "video", "aspect_ratio": vaspect}
         await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
         await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
         asyncio.create_task(_run_video_bg(mid, cid, u["id"], msg.get("persona_id"), {**pt, "tier": opt["tier"], "resolution": res, "real_person": rp, "with_audio": au, "credits": need}, (app_url or "").rstrip("/")))
@@ -1782,9 +1785,10 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
         await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
         return {**msg, **upd, "pending_tool": None}
     model = choice if choice in {o["id"] for o in pt.get("options") or [] if o.get("available")} else "gemini-image"
-    aspect, quality = norm_image_opts(aspect or pt.get("aspect_ratio"), quality or pt.get("quality"))
+    preset = preset if preset in IMAGE_PRESETS else None
+    aspect, quality = norm_image_opts(aspect or (IMAGE_PRESETS[preset]["aspect"] if preset else pt.get("aspect_ratio")), quality or pt.get("quality"))
     try:
-        out = await run_image_tool(u["id"], pt["prompt"], pt.get("reference_path"), model, aspect, quality)
+        out = await run_image_tool(u["id"], pt["prompt"], pt.get("reference_path"), model, aspect, quality, preset)
     except Exception as exc:
         logging.getLogger("chat").warning("run-tool image failed: %s", exc)
         await db.messages.update_one({"id": mid}, {"$unset": {"pending_tool.running": ""}})

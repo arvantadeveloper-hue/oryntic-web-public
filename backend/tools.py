@@ -92,11 +92,12 @@ def is_media_refusal(user_text: str, reply: str) -> bool:
 async def plan_tool(text: str, history: str) -> dict:
     sys = ('Decide if the user\'s LAST message explicitly asks the assistant to CREATE a deliverable or act on an external service. Reply JSON only: '
            '{"tool":"image"|"image_edit"|"video"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"github_review"|"gitlab_repos"|"gitlab_read"|"gitlab_issues"|"gitlab_pr"|"gitlab_review"|"social_publish"|"none",'
-           '"image_prompt":str,"image_prompts":[str],"quality":"hemat"|"standar"|"tinggi","video_prompt":str,"duration":int,"aspect_ratio":"16:9"|"9:16"|"1:1"|"4:3"|"3:4"|"21:9","resolution":"480p"|"720p"|"1080p","real_person":bool,"with_audio":bool,"from_image":bool,"edit_prompt":str,"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet",'
+           '"image_prompt":str,"image_prompts":[str],"quality":"hemat"|"standar"|"tinggi","preset":"ig_story"|"ig_feed"|"yt_thumb"|"li_banner","video_prompt":str,"duration":int,"aspect_ratio":"16:9"|"9:16"|"1:1"|"4:3"|"3:4"|"21:9","resolution":"480p"|"720p"|"1080p","real_person":bool,"with_audio":bool,"from_image":bool,"edit_prompt":str,"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet",'
            '"repo":str,"path":str,"query":str,"state":"open"|"closed"|"all","files":[str],"number":int,"providers":[str],"caption":str,"content_kind":"text"|"image"|"video"}. '
            '"image" = the user wants ANY still visual generated, shown or rendered: photo, photorealistic/realistic picture, render, illustration, logo, poster, banner, wallpaper, thumbnail, sketch, painting, visualization ("tunjukkan", "tampilkan", "render", "visualisasikan", "gambarkan" count as a request). If they ask for MORE THAN ONE image (e.g. "3 variasi", "beberapa poster", '
            '"gambar A dan gambar B"), put one detailed English prompt PER image in image_prompts (max 6) and the first one in image_prompt; for a single image image_prompts has exactly one item. '
-           'For image/image_edit also set aspect_ratio: "9:16" for portrait/vertical/story/poster/phone wallpaper ("potret", "vertikal", "tegak"), "16:9" for landscape/wide/banner/desktop wallpaper/thumbnail/presentation ("lanskap", "melebar", "horizontal"), "4:3"/"3:4" only when explicitly asked, else "1:1"; '
+           'For image/image_edit also set aspect_ratio: "9:16" for portrait/vertical/story/poster/phone wallpaper ("potret", "vertikal", "tegak"), "16:9" for landscape/wide/banner/desktop wallpaper/thumbnail/presentation ("lanskap", "melebar", "horizontal"), "21:9" for ultra-wide/LinkedIn or website banner/header/cover, "4:3"/"3:4" only when explicitly asked, else "1:1"; '
+           'preset: "ig_story" when they mention Instagram/WhatsApp story, "ig_feed" for an Instagram feed post, "yt_thumb" for a YouTube thumbnail, "li_banner" for a LinkedIn banner/cover/header, else omit; '
            'and quality: "hemat" when they ask for cheap/quick/draft ("hemat", "murah", "cepat", "draf"), "tinggi" for high quality/HD/detailed/print/4K ("kualitas tinggi", "tajam", "detail", "HD", "4K", "cetak"), else "standar". '
            '"image_edit" = the user asks to CHANGE the image the assistant generated earlier in this conversation — restyle ("ubah jadi gaya kartun/anime/lukisan cat air"), '
            'recolor, change background/lighting/time of day, add or remove an object, make it brighter/darker, crop, make a variation that keeps the same subject. '
@@ -134,7 +135,8 @@ async def plan_tool(text: str, history: str) -> dict:
     if plan["tool"] == "image_edit":
         plan["edit_prompt"] = (plan.get("edit_prompt") or plan.get("image_prompt") or text).strip()
     if plan["tool"] in ("image", "image_edit"):
-        plan["aspect_ratio"], plan["quality"] = norm_image_opts(plan.get("aspect_ratio"), plan.get("quality"))
+        plan["preset"] = plan.get("preset") if plan.get("preset") in IMAGE_PRESETS else None
+        plan["aspect_ratio"], plan["quality"] = norm_image_opts(plan.get("aspect_ratio"), plan.get("quality"), plan["preset"])
     if plan["tool"] == "video":
         plan["video_prompt"] = (plan.get("video_prompt") or plan.get("image_prompt") or "").strip() or "cinematic short clip"
         from seedance import clamp_duration
@@ -282,15 +284,24 @@ IMAGE_MODELS = {
 }
 
 
-IMAGE_ASPECTS = {"1:1": "Persegi", "16:9": "Lanskap", "9:16": "Potret", "4:3": "Lanskap 4:3", "3:4": "Potret 3:4"}
+IMAGE_ASPECTS = {"1:1": "Persegi", "16:9": "Lanskap", "9:16": "Potret", "4:3": "Lanskap 4:3", "3:4": "Potret 3:4", "21:9": "Ultra-lebar"}
 IMAGE_QUALITIES = ("hemat", "standar", "tinggi")
+# social presets → aspect + composition hint appended to the prompt
+IMAGE_PRESETS = {
+    "ig_story": {"label": "Story IG", "aspect": "9:16", "hint": "Composed as a vertical Instagram Story: main subject centered, clean top and bottom margins for UI overlays."},
+    "ig_feed": {"label": "Feed IG", "aspect": "1:1", "hint": "Composed as a square Instagram feed post with a strong, centered focal point."},
+    "yt_thumb": {"label": "Thumbnail YouTube", "aspect": "16:9", "hint": "Composed as a bold YouTube thumbnail: high contrast, one clear focal subject, uncluttered space on one side for title text."},
+    "li_banner": {"label": "Banner LinkedIn", "aspect": "21:9", "hint": "Composed as a wide professional LinkedIn banner: calm, clean, subject kept away from the lower-left corner where the profile photo sits."},
+}
 # quality → (provider setting, price multiplier vs. the model's base price); gpt-image non-square sizes cost ×1.5
 _QUALITY = {"gemini-image": {"hemat": ("1K", 1.0), "standar": ("2K", 1.5), "tinggi": ("4K", 2.25)},
             "gpt-image": {"hemat": ("low", 0.27), "standar": ("medium", 1.0), "tinggi": ("high", 4.0)}}
-_GPT_SIZE = {"1:1": "1024x1024", "16:9": "1536x1024", "4:3": "1536x1024", "9:16": "1024x1536", "3:4": "1024x1536"}
+_GPT_SIZE = {"1:1": "1024x1024", "16:9": "1536x1024", "4:3": "1536x1024", "21:9": "1536x1024", "9:16": "1024x1536", "3:4": "1024x1536"}
 
 
-def norm_image_opts(aspect: Optional[str], quality: Optional[str]) -> tuple:
+def norm_image_opts(aspect: Optional[str], quality: Optional[str], preset: Optional[str] = None) -> tuple:
+    if preset in IMAGE_PRESETS and aspect not in IMAGE_ASPECTS:
+        aspect = IMAGE_PRESETS[preset]["aspect"]
     return (aspect if aspect in IMAGE_ASPECTS else "1:1", quality if quality in IMAGE_QUALITIES else "standar")
 
 
@@ -312,6 +323,10 @@ async def image_model_options() -> list:
              "prices": {q: {a: image_quote(m, base[m], a, q) for a in IMAGE_ASPECTS} for q in IMAGE_QUALITIES}} for m in IMAGE_MODELS]
 
 
+def image_presets() -> list:
+    return [{"id": k, "label": v["label"], "aspect": v["aspect"]} for k, v in IMAGE_PRESETS.items()]
+
+
 async def _gpt_image(prompt: str, ref_b64: Optional[str], size: str, quality: str) -> str:
     """OpenAI gpt-image-1 (BYOK) → data URL. With a reference → edit, else generate."""
     from openai import AsyncOpenAI
@@ -325,14 +340,16 @@ async def _gpt_image(prompt: str, ref_b64: Optional[str], size: str, quality: st
     return "data:image/png;base64," + r.data[0].b64_json
 
 
-async def run_image_tool(uid: str, prompt: str, reference_path: Optional[str] = None, model: str = "gemini-image", aspect: str = "1:1", quality: str = "standar") -> dict:
+async def run_image_tool(uid: str, prompt: str, reference_path: Optional[str] = None, model: str = "gemini-image", aspect: str = "1:1", quality: str = "standar", preset: Optional[str] = None) -> dict:
     ref_b64 = None
     if reference_path:
         from storage import get_object
         raw_ref, _ct = await asyncio.to_thread(get_object, reference_path)
         ref_b64 = base64.b64encode(raw_ref).decode()
     model = model if model in IMAGE_MODELS else "gemini-image"
-    aspect, quality = norm_image_opts(aspect, quality)
+    aspect, quality = norm_image_opts(aspect, quality, preset)
+    if preset in IMAGE_PRESETS:
+        prompt = f"{prompt.rstrip('. ')}. {IMAGE_PRESETS[preset]['hint']}"
     setting = _QUALITY[model][quality][0]
     if model == "gpt-image":
         data_url = await _gpt_image(prompt, ref_b64, _GPT_SIZE[aspect], setting)
@@ -351,6 +368,8 @@ async def run_image_tool(uid: str, prompt: str, reference_path: Optional[str] = 
     await asyncio.to_thread(put_object, path, raw, mime)
     await add_storage(uid, len(raw))
     media = {"type": "image", "path": path, "name": f"gambar.{ext}", "prompt": prompt[:400], "model": IMAGE_MODELS[model]["label"], "aspect_ratio": aspect, "quality": quality}
+    if preset in IMAGE_PRESETS:
+        media["preset"] = IMAGE_PRESETS[preset]["label"]
     if reference_path:
         media["edited_from"] = reference_path
     return {"media": [media], "credits": credits}

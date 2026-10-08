@@ -20,9 +20,9 @@ for line in r.iter_lines():
             final = ev
 pt = (final or {}).get("pending_tool")
 print("pending_tool:", json.dumps({k: v for k, v in (pt or {}).items() if k != "options"}, ensure_ascii=False))
-print("options:", [(o["id"], o["available"], o["prices"]["standar"]["9:16"]) for o in (pt or {}).get("options", [])])
+print("options:", [(o["id"], o["available"], o["prices"]["standar"]["21:9"]) for o in (pt or {}).get("options", [])]); print("presets:", (pt or {}).get("presets"))
 if pt and len(sys.argv) > 2:
     mid = final["message_id"]
-    aspect, quality = sys.argv[2], sys.argv[3]
-    rr = requests.post(f"{API}/conversations/{cid}/messages/{mid}/run-tool", params={"choice": "gemini-image", "aspect": aspect, "quality": quality, "app_url": "http://x"}, headers=H, timeout=180)
+    aspect, quality = sys.argv[2], sys.argv[3]; preset = sys.argv[4] if len(sys.argv) > 4 else None
+    rr = requests.post(f"{API}/conversations/{cid}/messages/{mid}/run-tool", params={"choice": "gemini-image", "aspect": aspect, "quality": quality, "preset": preset, "app_url": "http://x"}, headers=H, timeout=180)
     print("run-tool", rr.status_code, json.dumps({k: rr.json().get(k) for k in ("content", "credits", "media")}, ensure_ascii=False)[:600])

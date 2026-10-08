@@ -42,7 +42,7 @@ export function MediaList({ media = [], dark = false }) {
           <button type="button" onClick={() => setZoom(x)} data-testid="media-image" className={`block w-full min-h-[80px] cursor-zoom-in overflow-hidden rounded-xl text-left ${dark ? "bg-black/20" : "bg-slate-100"}`}>
             <img src={x.url || fileUrl(x.path)} alt={x.name || ""} className="max-h-72 w-full object-cover transition group-hover:scale-[1.01]" />
           </button>
-          {x.quality && <span className={`mt-1 block text-[11px] ${dark ? "text-white/50" : "text-slate-400"}`} data-testid="media-image-meta">{x.model} · {ASPECT_LABEL[x.aspect_ratio] || x.aspect_ratio} · kualitas {x.quality}</span>}
+          {x.quality && <span className={`mt-1 block text-[11px] ${dark ? "text-white/50" : "text-slate-400"}`} data-testid="media-image-meta">{x.model}{x.preset ? ` · ${x.preset}` : ""} · {ASPECT_LABEL[x.aspect_ratio] || x.aspect_ratio} · kualitas {x.quality}</span>}
           {x.path && <button type="button" onClick={() => openPublish(x)} data-testid="media-publish-btn" className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black/80"><Share2 size={11} /> Publikasikan</button>}
         </div>
       ))}
@@ -73,7 +73,7 @@ export function MediaList({ media = [], dark = false }) {
 const RENDER_LABEL = { image: "Merender gambar…", video: "Merender video… (±2–5 menit)" };
 
 const BOX_ASPECT = { "9:16": "aspect-[9/16] max-w-[240px]", "3:4": "aspect-[3/4] max-w-[320px]", "1:1": "aspect-square max-w-[320px]", "4:3": "aspect-[4/3] max-w-[420px]", "21:9": "aspect-[21/9] max-w-[480px]" };
-export const ASPECT_LABEL = { "16:9": "16:9 Lanskap", "9:16": "9:16 Potret", "1:1": "1:1 Persegi", "4:3": "4:3", "3:4": "3:4", "21:9": "21:9 Sinematik" };
+export const ASPECT_LABEL = { "16:9": "16:9 Lanskap", "9:16": "9:16 Potret", "1:1": "1:1 Persegi", "4:3": "4:3", "3:4": "3:4", "21:9": "21:9 Ultra-lebar" };
 
 export function RenderingBox({ kind = "image", dark = false, aspect = "" }) {
   const Icon = kind === "video" ? Clapperboard : ImageIcon;
@@ -102,12 +102,28 @@ export function MessageCta({ m, dark = false }) {
   return <Link to={m.cta.href} data-testid="msg-cta" className={`mt-2 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${dark ? "bg-white text-slate-900 hover:bg-white/90" : "bg-[#2F6BFF] text-white hover:bg-[#2558d6]"}`}>{m.cta.label} <ExternalLink size={11} /></Link>;
 }
 
+const SEL_CLS = (dark) => `w-full appearance-none rounded-lg border py-1.5 pl-2.5 pr-7 text-[11px] font-semibold outline-none transition focus:ring-2 focus:ring-[#2F6BFF]/40 ${dark ? "border-white/15 bg-white/10 text-white [&>option]:text-slate-900" : "border-amber-200 bg-white text-slate-800"}`;
+function Combo({ label, value, onChange, items, testid, dark }) {
+  return (
+    <label className="flex min-w-[140px] flex-1 flex-col gap-1 sm:max-w-[240px]" data-testid={`${testid}-picker`}>
+      <span className={dark ? "text-white/60" : "text-amber-700"}>{label}</span>
+      <span className="relative block">
+        <select value={value} onChange={(e) => onChange(e.target.value)} className={SEL_CLS(dark)} data-testid={testid}>
+          {items.map(([v, l, hint]) => <option key={v} value={v}>{l}{hint ? ` — ${hint}` : ""}</option>)}
+        </select>
+        <ChevronDown size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-60" />
+      </span>
+    </label>
+  );
+}
 // Seedance 2.0 vs 2.5 picker with resolution + real-person options: per-second platform price, clip total and whether the balance covers it.
 const RES_OPTS = [["480p", "480p", "Hemat"], ["720p", "720p", "Standar"], ["1080p", "1080p", "Tajam"]];
+const VIDEO_ASPECTS = [["16:9", "Lanskap 16:9", "YouTube"], ["9:16", "Potret 9:16", "Reels / Shorts / TikTok"], ["1:1", "Persegi 1:1", "feed Instagram"], ["4:3", "4:3"], ["3:4", "3:4"], ["21:9", "Sinematik 21:9"]];
 function VideoChoiceCard({ m, cid, onDone, dark }) {
   const pt = m.pending_tool;
   const [busy, setBusy] = useState(pt?.running ? "run" : "");
   const [res, setRes] = useState(pt.resolution || "720p");
+  const [vAspect, setVAspect] = useState(pt.aspect_ratio || "16:9");
   const [real, setReal] = useState(!!pt.real_person);
   const [audio, setAudio] = useState(!!pt.with_audio);
   const [consent, setConsent] = useState(false);
@@ -118,15 +134,18 @@ function VideoChoiceCard({ m, cid, onDone, dark }) {
   const supported = (o) => pt.duration <= o.max_dur && (o.resolutions || ["720p"]).includes(res) && (!real || o.real_person) && (!audio || o.audio);
   const pick = async (tier) => {
     setBusy(tier);
-    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: tier, resolution: res, real_person: real, with_audio: audio, app_url: window.location.origin } }); await onDone?.(); }
+    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: tier, resolution: res, aspect: vAspect, real_person: real, with_audio: audio, app_url: window.location.origin } }); await onDone?.(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal memulai render video"); setBusy(""); }
   };
   const cancel = async () => { setBusy("cancel"); try { await api.post(`/conversations/${cid}/messages/${m.id}/cancel-tool`); await onDone?.(); } catch { setBusy(""); } };
-  if (busy && busy !== "cancel") return <RenderingBox kind="video" dark={dark} aspect={pt.aspect_ratio} />;
+  if (busy && busy !== "cancel") return <RenderingBox kind="video" dark={dark} aspect={vAspect} />;
   const seg = (on) => `rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${on ? (dark ? "bg-white text-slate-900" : "bg-[#2F6BFF] text-white") : (dark ? "bg-white/10 hover:bg-white/15" : "bg-white hover:bg-slate-100")}`;
   return (
     <div data-testid="video-choice-card" className={`mt-2 rounded-xl border p-3 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-50" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
-      <p className="mb-2 flex items-center gap-1.5 font-semibold"><Clapperboard size={14} /> Video {pt.duration} detik{pt.aspect_ratio && pt.aspect_ratio !== "16:9" ? ` · ${ASPECT_LABEL[pt.aspect_ratio] || pt.aspect_ratio}` : ""} <span className={`ml-auto flex items-center gap-1 font-normal ${dark ? "text-white/60" : "text-amber-700"}`}><Coins size={11} /> saldo {fmtCredits(pt.balance)}</span></p>
+      <p className="mb-2 flex items-center gap-1.5 font-semibold"><Clapperboard size={14} /> Video {pt.duration} detik{vAspect !== "16:9" ? ` · ${ASPECT_LABEL[vAspect] || vAspect}` : ""} <span className={`ml-auto flex items-center gap-1 font-normal ${dark ? "text-white/60" : "text-amber-700"}`}><Coins size={11} /> saldo {fmtCredits(pt.balance)}</span></p>
+      <div className="mb-2 flex flex-wrap gap-2">
+        <Combo label="Rasio" value={vAspect} onChange={setVAspect} items={VIDEO_ASPECTS} testid="video-aspect" dark={dark} />
+      </div>
       <div className="mb-2 flex flex-wrap items-center gap-1.5" data-testid="video-res-picker">
         <span className={`mr-1 ${dark ? "text-white/60" : "text-amber-700"}`}>Resolusi</span>
         {RES_OPTS.map(([v, l, hint]) => <button key={v} type="button" onClick={() => setRes(v)} className={seg(res === v)} data-testid={`video-res-${v}`} title={`×${mult.res[v] ?? 1}`}>{l} <span className="font-normal opacity-70">{hint}</span></button>)}
@@ -170,31 +189,21 @@ function VideoChoiceCard({ m, cid, onDone, dark }) {
 }
 
 // Image confirmation with model choice (Nano Banana vs GPT Image) + aspect ratio & quality — picking a model runs the tool.
-const IMG_ASPECTS = [["1:1", "Persegi", "aspect-square"], ["16:9", "Lanskap", "aspect-video"], ["9:16", "Potret", "aspect-[9/16]"], ["4:3", "4:3", "aspect-[4/3]"], ["3:4", "3:4", "aspect-[3/4]"]];
+const IMG_ASPECTS = [["1:1", "Persegi"], ["16:9", "Lanskap"], ["9:16", "Potret"], ["4:3", "4:3"], ["3:4", "3:4"], ["21:9", "Ultra-lebar"]];
 const IMG_QUALITIES = [["hemat", "Hemat", "1K · draf"], ["standar", "Standar", "2K"], ["tinggi", "Tinggi", "4K · detail"]];
-const SEL_CLS = (dark) => `w-full appearance-none rounded-lg border py-1.5 pl-2.5 pr-7 text-[11px] font-semibold outline-none transition focus:ring-2 focus:ring-[#2F6BFF]/40 ${dark ? "border-white/15 bg-white/10 text-white [&>option]:text-slate-900" : "border-amber-200 bg-white text-slate-800"}`;
-function Combo({ label, value, onChange, items, testid, dark }) {
-  return (
-    <label className="flex min-w-[140px] flex-1 flex-col gap-1 sm:max-w-[240px]" data-testid={`${testid}-picker`}>
-      <span className={dark ? "text-white/60" : "text-amber-700"}>{label}</span>
-      <span className="relative block">
-        <select value={value} onChange={(e) => onChange(e.target.value)} className={SEL_CLS(dark)} data-testid={testid}>
-          {items.map(([v, l, hint]) => <option key={v} value={v}>{l}{hint ? ` — ${hint}` : ""}</option>)}
-        </select>
-        <ChevronDown size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-60" />
-      </span>
-    </label>
-  );
-}
 function ImageChoiceCard({ m, cid, onDone, dark = false }) {
   const [busy, setBusy] = useState(m.pending_tool?.running ? "run" : "");
   const pt = m.pending_tool;
   const [aspect, setAspect] = useState(pt.aspect_ratio || "1:1");
   const [quality, setQuality] = useState(pt.quality || "standar");
+  const [preset, setPreset] = useState(pt.preset || "");
+  const presets = pt.presets || [];
+  const choosePreset = (id) => { setPreset(id); const p = presets.find((x) => x.id === id); if (p) setAspect(p.aspect); };
+  const chooseAspect = (v) => { setAspect(v); if (preset && presets.find((x) => x.id === preset)?.aspect !== v) setPreset(""); };
   if (busy === "run") return <RenderingBox kind={pt.kind} dark={dark} aspect={aspect} />;
   const pick = async (id) => {
     setBusy("run");
-    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: id, aspect, quality, app_url: window.location.origin } }); await onDone?.(); }
+    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: id, aspect, quality, preset: preset || undefined, app_url: window.location.origin } }); await onDone?.(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal membuat gambar"); setBusy(""); }
   };
   const cancel = async () => { setBusy("cancel"); try { await api.post(`/conversations/${cid}/messages/${m.id}/cancel-tool`); await onDone?.(); } catch (e) { setBusy(""); } };
@@ -204,7 +213,8 @@ function ImageChoiceCard({ m, cid, onDone, dark = false }) {
     <div data-testid="tool-request-card" className={`mt-2 rounded-xl border p-3 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
       <p className="mb-2 flex items-center gap-1.5 font-semibold"><ImageIcon size={14} /> {pt.kind === "image_edit" ? "Edit gambar terakhir" : "Buat gambar"}</p>
       <div className="mb-3 flex flex-wrap gap-2">
-        <Combo label="Rasio" value={aspect} onChange={setAspect} items={IMG_ASPECTS.map(([v, l]) => [v, `${l} ${v}`])} testid="image-aspect" dark={dark} />
+        {presets.length > 0 && <Combo label="Preset sosial" value={preset} onChange={choosePreset} items={[["", "Kustom"], ...presets.map((p) => [p.id, p.label, p.aspect])]} testid="image-preset" dark={dark} />}
+        <Combo label="Rasio" value={aspect} onChange={chooseAspect} items={IMG_ASPECTS.map(([v, l]) => [v, `${l} ${v}`])} testid="image-aspect" dark={dark} />
         <Combo label="Kualitas" value={quality} onChange={setQuality} items={IMG_QUALITIES} testid="image-quality" dark={dark} />
       </div>
       <p className={`mb-1.5 ${lbl}`}>Pilih model:</p>
