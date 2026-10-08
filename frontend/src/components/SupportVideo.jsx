@@ -20,7 +20,13 @@ export function VideoConfirmModal({ cfg, onConfirm, onClose }) {
         <div className="mt-4 grid gap-2 rounded-xl bg-white/5 p-4 text-sm">
           <p className="flex items-center gap-2" data-testid="video-price"><Coins size={14} className="text-amber-300" /> Biaya video: <b>{cfg.credits_per_sec} kredit/detik</b> <span className="text-white/50">(±{cfg.credits_per_sec * 60} kredit/menit)</span></p>
           <p className="flex items-center gap-2" data-testid="video-limit"><Clock size={14} className="text-[#8FB0FF]" /> Durasi maksimal video: <b>{cfg.max_minutes} menit</b> <span className="text-white/50">(maks ±{cfg.max_cost} kredit)</span></p>
-          <p className="flex items-start gap-2 text-white/60"><ShieldAlert size={14} className="mt-0.5 shrink-0" /> Biaya ini di luar tarif panggilan suara per menit. Video bisa dimatikan kapan saja; tagihan dihitung per detik yang berjalan.{cfg.sandbox ? " Mode uji coba (sandbox): sesi dibatasi ±1 menit." : ""}</p>
+          <p className="flex items-center gap-2" data-testid="video-avatar-name"><Video size={14} className="text-[#8FB0FF]" /> Avatar: <b>{cfg.avatar_name || "—"}</b></p>
+          <p className="flex items-start gap-2 text-white/60"><ShieldAlert size={14} className="mt-0.5 shrink-0" /> Biaya ini di luar tarif panggilan suara per menit. Video bisa dimatikan kapan saja; tagihan dihitung per detik yang berjalan.</p>
+          {cfg.sandbox && (
+            <p className="flex items-start gap-2 rounded-lg bg-amber-400/10 p-2.5 text-amber-200" data-testid="video-sandbox-warning">
+              <ShieldAlert size={14} className="mt-0.5 shrink-0" /> <span>Mode uji coba (sandbox) aktif: yang tampil adalah <b>avatar sandbox LiveAvatar</b>{cfg.configured_avatar_name ? <>, bukan avatar pilihan Anda (<b>{cfg.configured_avatar_name}</b>)</> : null}, dan sesi dibatasi ±1 menit. Matikan Sandbox di Admin Platform untuk memakai avatar pilihan Anda.</span>
+            </p>
+          )}
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/15" data-testid="video-confirm-cancel">Batal</button>

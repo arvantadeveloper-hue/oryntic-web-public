@@ -21,6 +21,7 @@ SUPPORT_ID = "oryntix-support"
 PLATFORM_WID = "__platform__"
 LA_BASE = "https://api.liveavatar.com/v1"
 SANDBOX_AVATAR = "dd73ea75-1218-4ef3-92ce-606d5f7fbc0a"
+SANDBOX_AVATAR_NAME = "Wayne (avatar sandbox LiveAvatar)"
 
 DEFAULT_CONFIG = {
     "enabled": True, "name": "Oryntix", "summary": "Customer Support Agent", "portrait": "/brand/oryntix-support.jpg",
@@ -31,7 +32,17 @@ DEFAULT_CONFIG = {
 }
 _cache: dict = {}
 _cache_at = 0.0
-CACHE_TTL = 30  # seconds — the platform-admin (separate process) writes the same document, so never cache forever
+CACHE_TTL = 5  # seconds — the platform-admin (separate process) writes the same document, so keep it short
+# Text fields that must never be blanked out by an empty value coming from the admin form.
+BLANK_FALLBACK = ("name", "summary", "portrait", "model", "voice_model", "voice", "system_prompt", "knowledge")
+
+
+def _merged(doc: dict) -> dict:
+    out = {**DEFAULT_CONFIG, **doc}
+    for k in BLANK_FALLBACK:
+        if not str(out.get(k) or "").strip():
+            out[k] = DEFAULT_CONFIG[k]
+    return out
 
 
 async def get_config(fresh: bool = False) -> dict:
@@ -39,7 +50,7 @@ async def get_config(fresh: bool = False) -> dict:
     if fresh or not _cache or time.monotonic() - _cache_at > CACHE_TTL:
         doc = await db.config.find_one({"id": "support_agent"}, {"_id": 0, "id": 0}) or {}
         _cache.clear()
-        _cache.update({**DEFAULT_CONFIG, **doc})
+        _cache.update(_merged(doc))
         _cache_at = time.monotonic()
     return dict(_cache)
 
@@ -79,8 +90,15 @@ async def support_prompt_parts() -> list:
 async def video_config(_: dict = Depends(current_user)):
     c = await get_config()
     on = bool(c.get("video_enabled") and c.get("avatar_id") and os.environ.get("LIVEAVATAR_API_KEY"))
-    return {"enabled": on, "credits_per_sec": c["video_credits_per_sec"], "max_minutes": c["video_max_minutes"], "warn_minutes": c["video_warn_minutes"],
-            "max_cost": c["video_credits_per_sec"] * c["video_max_minutes"] * 60, "avatar_name": c.get("avatar_name"), "sandbox": bool(c.get("sandbox"))}
+    sandbox = bool(c.get("sandbox"))
+    # LiveAvatar sandbox sessions are hard-capped at 60 s, so report the limit the user will actually get.
+    max_minutes = 1 if sandbox else int(c["video_max_minutes"])
+    return {"enabled": on, "credits_per_sec": c["video_credits_per_sec"], "max_minutes": max_minutes,
+            "warn_minutes": 1 if sandbox else int(c["video_warn_minutes"]),
+            "max_cost": c["video_credits_per_sec"] * max_minutes * 60,
+            "avatar_name": SANDBOX_AVATAR_NAME if c.get("sandbox") else c.get("avatar_name"),
+            "configured_avatar_name": c.get("avatar_name"), "configured_avatar_preview": c.get("avatar_preview"),
+            "sandbox": sandbox}
 
 
 # ---------- LiveAvatar session lifecycle ----------
