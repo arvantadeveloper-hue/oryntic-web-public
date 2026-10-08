@@ -2,9 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Zap, MonitorUp, MonitorOff, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
-import { vadUpdate, reportUsage, ContextPruner, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL } from "../lib/realtimeSession";
+import { vadUpdate, reportUsage, ContextPruner, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL , removeAllCallAudio } from "../lib/realtimeSession";
 import { captureFrame } from "../lib/peerAudio";
-import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
+import { MicPipeline, loadMicPrefs, saveMicPrefs } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
 import { MeetingShell, LayoutMenu, useMeetingLayout } from "./MeetingShell";
@@ -140,7 +140,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
         setPhase("thinking"); break;
       case "conversation.item.input_audio_transcription.completed": {
         const t = (ev.transcript || "").trim();
-        if (t && isBackchannel(t) && Date.now() - interruptedAtRef.current < 8000) {
+        if (t && isBackchannel(t) && BEHAVIOUR.backchannel_resume && Date.now() - interruptedAtRef.current < (BEHAVIOUR.backchannel_window_ms || 8000)) {
           interruptedAtRef.current = 0;
           if (respActiveRef.current) { send({ type: "response.cancel" }); send({ type: "output_audio_buffer.clear" }); } // server VAD already started answering the "hmm"
           createResponse({ type: "response.create", response: { instructions: RESUME_AFTER_BACKCHANNEL(t) } });
@@ -189,6 +189,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
   };
 
   const connect = async (run) => {
+    await loadBehaviour(); // platform Conversation Behaviour (turn detection, barge-in, backchannel) before any session.update
     const stale = () => run !== runIdRef.current;
     try {
       const c = await api.post("/realtime/calls", { conversation_id: cid, opening });
@@ -237,7 +238,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     try { pcRef.current?.close(); } catch (e) {}
     try { pipeRef.current?.stop(); } catch (e) {}
     stopShare();
-    try { if (audioElRef.current) { audioElRef.current.srcObject = null; audioElRef.current.remove(); } } catch (e) {}
+    try { if (audioElRef.current) { audioElRef.current.srcObject = null; audioElRef.current.remove(); } } catch (e) {}    window.__oryntixInCall = false; removeAllCallAudio();
   };
 
   // user truly barged in (sustained voice near the mic) → stop the assistant mid-sentence
@@ -249,9 +250,9 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
   };
   const confirmInterrupt = () => {
     const openFor = pipeRef.current ? pipeRef.current.openFor() : Infinity;
-    if (openFor >= BARGE_CONFIRM_MS) { userInterrupted(); return; }
+    if (openFor >= bargeMs()) { userInterrupted(); return; }
     if (bargeTimerRef.current) clearTimeout(bargeTimerRef.current);
-    bargeTimerRef.current = setTimeout(() => { if (!endedRef.current && pipeRef.current?.isOpen()) userInterrupted(); }, Math.max(60, BARGE_CONFIRM_MS - openFor));
+    bargeTimerRef.current = setTimeout(() => { if (!endedRef.current && pipeRef.current?.isOpen()) userInterrupted(); }, Math.max(60, bargeMs() - openFor));
   };
   const changeMic = (p) => {
     setMicPrefs(p); saveMicPrefs(p);

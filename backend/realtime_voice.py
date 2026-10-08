@@ -15,14 +15,15 @@ from llm import record_usage, quota_exceeded, quota_message
 from chat import _can_access, _persona_system, _history_text
 from realtime import notify
 from ratelimit import rate_limit, get_limits, set_limits
-from pricing import usd_to_credits, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates
+from pricing import usd_to_credits, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates, REALTIME_MODELS, DEFAULT_REALTIME_MODEL, realtime_credits_per_min, realtime_model_prices
 from tools import get_routing, TASK_CONTEXT
-from llm import MODEL_CATALOG
+from behaviour import get_behaviour, turn_detection
+from llm import MODEL_CATALOG, model_label
 
 router = APIRouter(prefix="/api", tags=["realtime-voice"])
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
+REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")  # fallback only; each persona chooses its voice_model
 # Session instructions are always Oryntix's own (assistant_persona.py) — dashboard-stored prompts are not used.
 
 # TTS voice (persona.voice) -> Realtime voice
@@ -52,7 +53,8 @@ def enabled() -> bool:
 @router.get("/realtime/status")
 async def status(u: dict = Depends(current_user)):
     p = await get_pricing()
-    return {"enabled": enabled(), "model": REALTIME_MODEL, "credits_per_min": credits_per_min(p), "prompt_id": None, "prompt_version": None}
+    return {"enabled": enabled(), "model": DEFAULT_REALTIME_MODEL, "credits_per_min": realtime_credits_per_min(p, DEFAULT_REALTIME_MODEL), "prompt_id": None, "prompt_version": None,
+            "models": [{"id": k, **{kk: v[kk] for kk in ("label", "tagline")}, "credits_per_min": realtime_credits_per_min(p, k), "default": k == DEFAULT_REALTIME_MODEL} for k, v in REALTIME_MODELS.items()]}
 
 
 class PricingIn(BaseModel):
@@ -132,7 +134,8 @@ ASSIGN_TOOL = {"type": "function", "name": "assign_task",
                    "team": {"type": "boolean", "description": "true when the user wants the work split among the other assistants (delegate sub-tasks); offer this for big tasks when there are several assistants"},
                    "assignments": {"type": "array", "description": "Only when the user explicitly names who handles which part (e.g. 'bagian keuangan minta Nova'): one entry per named part", "items": {"type": "object", "properties": {
                        "assistant": {"type": "string", "description": "Exact assistant name as the user said it"},
-                       "part": {"type": "string", "description": "Which part of the task they should handle"}}, "required": ["assistant", "part"]}}},
+                       "part": {"type": "string", "description": "Which part of the task they should handle"}}, "required": ["assistant", "part"]}},
+                   "model": {"type": "string", "description": "Model id the user CONFIRMED for this task after you asked (see MODEL CONFIRMATION in your instructions). Omit when the user wants your own model."}},
                    "required": ["title", "brief"]}}
 ARCHIVE_SEARCH_TOOL = {"type": "function", "name": "search_archive",
                        "description": "Search the user's archived (old, summarized) conversations by keywords. Use when the user asks about an old chat or wants to find/restore an archive. Results are posted to the chat panel; read the titles back briefly.",
@@ -243,6 +246,11 @@ async def _close_stale_calls(user_id: str):
 async def _session_instructions(persona: dict, u: dict, roster: list, history: str, opening, role: str, title: str = "", panel: str = "") -> str:
     """Static persona/style first (cacheable prefix), per-call context last."""
     text = await _persona_system(persona, u, None, voice_mode=True) + "\n\n" + SPEAKING_STYLE
+    rt = await get_routing()
+    text += (f"\n\nMODEL CONFIRMATION: your own model is '{model_label(persona.get('model'))}' (id {persona.get('model')}). Before you call assign_task for coding/IT work "
+             f"(recommended: {model_label(rt['it_model'])}, id {rt['it_model']}) or heavy research (recommended: {model_label(rt['research_model'])}, id {rt['research_model']}), "
+             "ASK the user in one short sentence whether to use the recommended model or your own, WAIT for the answer, then call assign_task with `model` set to the confirmed id "
+             "(omit it for your own model). Never switch models without asking. This does NOT apply to images or videos — keep using generate_image/generate_video as before.")
     text += ("\n\nMEDIA TOOLS: use generate_image for any picture request and generate_video for any video/clip request — they appear in the chat panel next to the call. "
              "Say briefly that you are making it (or, for video, that the model picker is in the chat panel); never claim you cannot create images or videos.")
     uname = u.get("name") or "the user"
@@ -278,8 +286,8 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
         raise HTTPException(404, "Conversation not found")
     await rate_limit(u, "calls")
     personas = _order_personas(await _call_personas(conv, u), conv)
-    cpm = credits_per_min(await get_pricing())
-    await _ensure_affordable(u, len(personas), cpm)
+    p = await get_pricing()
+    await _ensure_affordable(u, len(personas), max(realtime_credits_per_min(p, pp.get("voice_model")) for pp in personas))
     await _close_stale_calls(u["id"])
 
     history = await _voice_context(conv["id"])
@@ -291,18 +299,20 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
     sessions = []
     for i, persona in enumerate(personas):
         role = "solo" if not multi else ("moderator" if i == 0 else "panelist")
-        call = {"id": new_id(), "group_id": group_id, "conversation_id": conv["id"], "user_id": u["id"], "persona_id": persona["id"],
+        vm = persona.get("voice_model") if persona.get("voice_model") in REALTIME_MODELS else DEFAULT_REALTIME_MODEL
+        cpm = realtime_credits_per_min(p, vm)
+        call = {"id": new_id(), "group_id": group_id, "conversation_id": conv["id"], "user_id": u["id"], "persona_id": persona["id"], "model": vm,
                 "persona_name": persona["name"], "call_session_id": x.call_session_id or group_id,
                 "voice": VOICE_MAP.get(persona.get("voice", "alloy"), "marin"), "role": role, "roster": roster,
                 "instructions": await _session_instructions(persona, u, roster, history, x.opening, role, conv.get("title", ""), panel),
                 "multi": multi, "primary": i == 0, "status": "created", "billed_minutes": 0, "credits": 0, "credits_per_min": cpm,
                 "created_at": now_iso(), "started_at": None, "ended_at": None, "seconds": 0}
         await db.realtime_calls.insert_one(dict(call))
-        sessions.append({"call_id": call["id"], "voice": call["voice"], "primary": i == 0, "role": role,
+        sessions.append({"call_id": call["id"], "voice": call["voice"], "primary": i == 0, "role": role, "model": vm, "credits_per_min": cpm,
                          "persona": {"id": persona["id"], "name": persona["name"], "portrait": persona.get("portrait")}})
     first = sessions[0]
-    return {"call_id": first["call_id"], "voice": first["voice"], "persona": first["persona"], "model": REALTIME_MODEL,
-            "credits_per_min": cpm, "credits_per_min_total": cpm * len(sessions), "multi": multi, "group_id": group_id,
+    return {"call_id": first["call_id"], "voice": first["voice"], "persona": first["persona"], "model": first["model"],
+            "credits_per_min": first["credits_per_min"], "credits_per_min_total": sum(s_["credits_per_min"] for s_ in sessions), "multi": multi, "group_id": group_id,
             "moderator_persona_id": personas[0]["id"],
             "sessions": sessions, "language": ((u.get("settings") or {}).get("conversation_language") or "id")}
 
@@ -329,12 +339,14 @@ async def _own_call(call_id: str, u: dict) -> dict:
     return call
 
 
-def vad_config(sensitivity: str, multi: bool) -> dict:
-    """Semantic VAD judges whether the audio is meaningful speech; eagerness follows the user's mic sensitivity.
-    interrupt_response is off: the browser confirms a real barge-in (noise gate open ≥300ms) before cancelling."""
-    # calm turn-taking: even "high" sensitivity never gets eager end-of-turn detection
-    eager = {"low": "low", "medium": "low", "high": "medium"}.get(sensitivity or "low", "low")
-    return {"type": "semantic_vad", "eagerness": eager, "create_response": not multi, "interrupt_response": False}
+async def vad_config(sensitivity: str, multi: bool) -> dict:
+    """Turn-taking from the platform-wide Conversation Behaviour config (back-office); default semantic_vad + eagerness=low."""
+    return turn_detection(await get_behaviour(), multi)
+
+
+@router.get("/realtime/behaviour")
+async def realtime_behaviour(_: dict = Depends(current_user)):
+    return await get_behaviour()
 
 
 @router.post("/realtime/calls/{call_id}/negotiate", response_class=PlainTextResponse)
@@ -350,11 +362,11 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
     if role == "panelist":
         audio_in = {"turn_detection": None}  # no mic audio: the user's words arrive as text (saves audio input tokens)
     else:
-        audio_in = {"turn_detection": vad_config(request.query_params.get("sensitivity") or settings.get("mic_sensitivity"), multi),
+        audio_in = {"turn_detection": await vad_config(request.query_params.get("sensitivity") or settings.get("mic_sensitivity"), multi),
                     "transcription": {"model": "gpt-4o-mini-transcribe", "language": lang}}
     session = {
         "type": "realtime",
-        "model": REALTIME_MODEL,
+        "model": call.get("model") or DEFAULT_REALTIME_MODEL,
         "output_modalities": ["audio"],
         "audio": {"input": audio_in, "output": {"voice": call["voice"]}},
         "instructions": call["instructions"],
@@ -438,7 +450,7 @@ async def report_usage(call_id: str, x: UsageIn, u: dict = Depends(current_user)
     """Bill one Realtime response from its real token usage (audio in/out, text, cached) × margin."""
     call = await _own_call(call_id, u)
     p = await get_pricing()
-    usd = realtime_usage_usd(p, x.usage or {})
+    usd = realtime_usage_usd(p, x.usage or {}, call.get("model"))
     exact = usd_to_credits(p, usd, "realtime_call")
     acc = float(call.get("usage_credits_exact") or 0) + exact
     charged = int(acc) - int(call.get("usage_credits_billed") or 0)

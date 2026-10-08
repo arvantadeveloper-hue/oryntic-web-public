@@ -79,13 +79,35 @@ def _cost(p: dict, key: str) -> float:
     return float(p.get(key) if p.get(key) is not None else DEFAULT_PRICING[key])
 
 
-def realtime_usage_usd(p: dict, usage: dict) -> float:
-    """Raw provider cost of one Realtime response from OpenAI's usage report."""
+# Realtime voice models a persona can use; USD per 1M tokens (OpenAI list prices) — overridable per model in platform_pricing.realtime_models
+REALTIME_MODELS = {
+    "gpt-realtime-2.1": {"label": "GPT Realtime 2.1", "tagline": "Kualitas terbaik", "audio_in": 32.0, "audio_out": 64.0, "text_in": 4.0, "text_out": 24.0, "cached_in": 0.4},
+    "gpt-realtime-2.1-mini": {"label": "GPT Realtime 2.1 Mini", "tagline": "Cepat & hemat (default)", "audio_in": 10.0, "audio_out": 20.0, "text_in": 0.6, "text_out": 2.4, "cached_in": 0.3},
+    "gpt-realtime-2.0": {"label": "GPT Realtime 2.0", "tagline": "Generasi sebelumnya", "audio_in": 32.0, "audio_out": 64.0, "text_in": 4.0, "text_out": 24.0, "cached_in": 0.4},
+}
+DEFAULT_REALTIME_MODEL = "gpt-realtime-2.1-mini"
+
+
+def realtime_model_prices(p: dict, model: str | None) -> dict:
+    base = REALTIME_MODELS.get(model or DEFAULT_REALTIME_MODEL) or REALTIME_MODELS[DEFAULT_REALTIME_MODEL]
+    return {**base, **((p.get("realtime_models") or {}).get(model or DEFAULT_REALTIME_MODEL) or {})}
+
+
+def realtime_credits_per_min(p: dict, model: str | None) -> int:
+    """Credits/minute shown in the UI: the admin's per-minute rate (calibrated on gpt-realtime-2.1 prices) scaled by the model's audio price."""
+    m = realtime_model_prices(p, model)
+    base = compute_rates(p)["realtime_per_min"]
+    return max(1, int(round(base * (m["audio_in"] + m["audio_out"]) / (32.0 + 64.0))))
+
+
+def realtime_usage_usd(p: dict, usage: dict, model: str | None = None) -> float:
+    """Raw provider cost of one Realtime response from OpenAI's usage report (prices of the session's model)."""
     i, o = usage.get("input_token_details") or {}, usage.get("output_token_details") or {}
     cached = int((i.get("cached_tokens_details") or {}).get("audio_tokens") or 0) + int((i.get("cached_tokens_details") or {}).get("text_tokens") or 0) or int(i.get("cached_tokens") or 0)
-    return (max(0, int(i.get("audio_tokens") or 0) - 0) * p["rt_audio_in_usd_1m"] + int(i.get("text_tokens") or 0) * p["rt_text_in_usd_1m"]
-            + int(o.get("audio_tokens") or 0) * p["rt_audio_out_usd_1m"] + int(o.get("text_tokens") or 0) * p["rt_text_out_usd_1m"]
-            + cached * p["rt_cached_in_usd_1m"]) / 1_000_000
+    m = realtime_model_prices(p, model)
+    return (int(i.get("audio_tokens") or 0) * m["audio_in"] + int(i.get("text_tokens") or 0) * m["text_in"]
+            + int(o.get("audio_tokens") or 0) * m["audio_out"] + int(o.get("text_tokens") or 0) * m["text_out"]
+            + cached * m["cached_in"]) / 1_000_000
 
 
 def model_price(p: dict, model_key: str | None) -> dict | None:

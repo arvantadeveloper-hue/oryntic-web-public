@@ -113,6 +113,28 @@ async def revise_task(tid: str, x: ReviseIn, u: dict = Depends(current_user)):
     return {"version": ver, "summary": summary, "credits_used": used}
 
 
+class ApplyIn(BaseModel):
+    message_id: str
+    mode: str = Field(default="replace", pattern="^(replace|append)$")
+
+
+@router.post("/tasks/{tid}/apply-message")
+async def apply_message(tid: str, x: ApplyIn, u: dict = Depends(current_user)):
+    """'Terapkan ke dokumen': an assistant chat message becomes the new document version (replace) or is appended — no LLM, always succeeds."""
+    t = await get_task_for(tid, u)
+    m = await db.messages.find_one({"id": x.message_id, "role": "assistant"}, {"_id": 0})
+    if not m or not (m.get("content") or "").strip():
+        raise HTTPException(404, "Pesan tidak ditemukan")
+    conv = await db.conversations.find_one({"id": m["conversation_id"]}, {"_id": 0, "user_id": 1, "participants": 1})
+    if not conv or not (conv.get("user_id") == u["id"] or u["id"] in (conv.get("participants") or [])):
+        raise HTTPException(403, "Tidak punya akses ke percakapan ini")
+    body = m["content"].strip()
+    new_md = body if x.mode == "replace" else ((t.get("final_output") or "").rstrip() + "\n\n" + body)
+    persona = await db.personas.find_one({"id": m.get("persona_id")}, {"_id": 0}) if m.get("persona_id") else None
+    ver = await save_revision(t, new_md, f"Diterapkan dari chat ({'ganti isi' if x.mode == 'replace' else 'tambahkan'}) oleh {u.get('name') or 'pengguna'}", persona)
+    return {"version": ver, "task_id": tid}
+
+
 @router.post("/tasks/{tid}/versions/{ver}/restore")
 async def restore_version(tid: str, ver: int, u: dict = Depends(current_user)):
     """Non-destructive rollback: the old content is saved as a NEW version, history stays intact."""

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, MessageSquare, RefreshCw, Wand2, Copy, Trash2, Brain, Plus, Volume2, Loader2, Star } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
+import { VoiceModelPicker } from "../components/VoiceModelPicker";
 import { KnowledgeTab } from "../components/KnowledgeTab";
 import { useAuth } from "../context/AuthContext";
 
@@ -32,6 +33,7 @@ export default function PersonaDetail() {
   useEffect(() => () => { try { previewAudioRef.current?.pause(); } catch (e) {} }, []);
   const modelLabel = (key) => (models.find((m) => m.id === key) || {}).label || key;
   const changeModel = async (key) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, model: key }); setP(r.data); toast.success("Model diperbarui"); };
+  const changeVoiceModel = async (vm) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, voice_model: vm }); setP(r.data); toast.success("Model suara diperbarui"); };
   const changeVoice = async (v) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, voice: v }); setP(r.data); toast.success("Suara diperbarui"); };
   const previewVoice = async (v) => {
     try { previewAudioRef.current?.pause(); } catch (e) {}
@@ -109,9 +111,10 @@ export default function PersonaDetail() {
               ))}
             </select>
           </div>
+          <div className="mt-3"><VoiceModelPicker value={p.voice_model} onChange={changeVoiceModel} compact /></div>
           <div className="mt-3">
             <div className="mb-1.5 flex items-center justify-between">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Suara (TTS)</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Karakter Suara</label>
               <button onClick={() => previewVoice(p.voice || "alloy")} data-testid="persona-voice-preview-current" className="flex items-center gap-1 text-xs font-semibold text-[#2F6BFF]" title="Dengar suara saat ini">
                 {previewing === (p.voice || "alloy") ? <Loader2 size={13} className="animate-spin" /> : <Volume2 size={13} />} Dengar
               </button>

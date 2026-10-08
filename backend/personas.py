@@ -26,6 +26,7 @@ class PersonaIn(BaseModel):
     profile: dict
     model: str = DEFAULT_MODEL_KEY
     voice: str = "alloy"
+    voice_model: Optional[str] = Field(default=None, pattern="^[a-z0-9.-]+$")  # Realtime voice model (gpt-realtime-2.1 / -2.1-mini / -2.0)
     reference_photo: Optional[str] = None
 
 
@@ -87,6 +88,7 @@ async def create_persona(x: PersonaIn, u: dict = Depends(require_admin)):
         "profile": x.profile,
         "model": _valid_model(x.model),
         "voice": x.voice or "alloy",
+        "voice_model": x.voice_model or "gpt-realtime-2.1-mini",
         "portrait": None,
         "reference_photo": x.reference_photo,
         "version": 1,
@@ -159,6 +161,7 @@ async def update_persona(pid: str, body: dict, u: dict = Depends(require_admin))
         "summary": ident.get("summary", p.get("summary", "")),
         "model": _valid_model(body.get("model", p.get("model"))),
         "voice": body.get("voice", p.get("voice", "alloy")),
+        "voice_model": body.get("voice_model") or p.get("voice_model") or "gpt-realtime-2.1-mini",
         "version": p.get("version", 1) + 1,
         "versions": versions[-10:],
         "updated_at": now_iso(),

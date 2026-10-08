@@ -75,6 +75,16 @@ export default function PlatformPricing({ readOnly }) {
         <p className="text-xs text-slate-500">Ditagih per respons dari laporan pemakaian OpenAI, memakai margin fitur "Koneksi Realtime". Harga resmi gpt-realtime-2.1: audio masuk $32, audio keluar $64, teks masuk $4, teks keluar $24, cache $0,40.</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-5">{RT.map(([k, l]) => <NumField key={k} label={l} value={draft[k]} onChange={(v) => update({ [k]: v })} step={0.1} testid={`pp-${k}`} disabled={readOnly} />)}</div>
       </div>
+      <div className="mt-6 aivora-card p-5" data-testid="pp-realtime-models">
+        <p className="text-sm font-bold text-slate-900">Model suara per persona — harga provider (USD / 1M token) & tarif per menit</p>
+        <p className="text-xs text-slate-500">Setiap persona memilih model suaranya (default gpt-realtime-2.1-mini). Tarif/menit di UI = tarif "Koneksi Realtime" × rasio harga audio model terhadap gpt-realtime-2.1; penagihan sebenarnya memakai token aktual × harga model.</p>
+        <div className="mt-3 overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left text-slate-500"><th className="py-1 pr-3">Model</th><th className="pr-3">Audio masuk</th><th className="pr-3">Audio keluar</th><th className="pr-3">Teks masuk</th><th className="pr-3">Teks keluar</th><th className="pr-3">Cache</th><th>Kredit/menit</th></tr></thead>
+          <tbody>{(preview?.realtime_models || []).map((m) => {
+            const ov = (draft.realtime_models || {})[m.id] || {};
+            const cell = (k) => <td key={k} className="py-1 pr-3"><input type="number" step="0.1" min="0" disabled={readOnly} value={ov[k] ?? m[k]} data-testid={`pp-rt-${m.id}-${k}`} onChange={(e) => update({ realtime_models: { ...(draft.realtime_models || {}), [m.id]: { ...ov, [k]: parseFloat(e.target.value) || 0 } } })} className="input-dark w-24 py-1.5 text-xs" /></td>;
+            return <tr key={m.id} className="border-t border-[#E7ECF3]"><td className="py-1 pr-3 font-semibold text-slate-800">{m.label}</td>{["audio_in", "audio_out", "text_in", "text_out", "cached_in"].map(cell)}<td className="font-bold text-[#2F6BFF]" data-testid={`pp-rt-${m.id}-cpm`}>~{m.credits_per_min}</td></tr>;
+          })}</tbody></table></div>
+      </div>
     </div>
   );
 }

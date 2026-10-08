@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from db import db
 from auth import require_admin, require_platform_admin, require_platform_staff, workspace_id, public_user, member_ids
 from wallet import get_packages
 from llm import GPT_MODEL, IMAGE_MODEL, user_today_usage
-from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES, DEFAULT_PRICING, FEATURES, feature_table, build_packages, model_table
+from behaviour import get_behaviour, set_behaviour, BehaviourIn
+from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES, DEFAULT_PRICING, FEATURES, feature_table, build_packages, model_table, REALTIME_MODELS, realtime_model_prices, realtime_credits_per_min
 from llm import MODEL_CATALOG
 
 
@@ -113,6 +115,7 @@ class PlatformPricingIn(BaseModel):
     margin_pct: float = Field(ge=0, le=500)
     tax_pct: float = Field(ge=0, le=100)
     usd_to_idr: float = Field(gt=0)
+    realtime_models: Optional[dict] = None  # {model_id: {audio_in, audio_out, text_in, text_out, cached_in}} USD/1M overrides per voice model
     idr_per_credit: float = Field(gt=0)
     text_usd_per_1k_chars: float = Field(gt=0)
     image_usd: float = Field(gt=0)
@@ -174,6 +177,7 @@ async def pricing(_: dict = Depends(require_platform_staff)):
         "rates": compute_rates(p),
         "features": feature_table(p),
         "models": model_table(p, MODEL_CATALOG),
+        "realtime_models": [{"id": k, **realtime_model_prices(p, k), "credits_per_min": realtime_credits_per_min(p, k)} for k in REALTIME_MODELS],
         "trial": await get_trial(),
         "providers": [
             {"provider": "OpenAI", "model": GPT_MODEL, "capability": "text", "unit": "1k chars", "rate_credits_per_1k_chars": RATES["text_per_1k"], "status": "active"},
@@ -240,3 +244,13 @@ async def usage_report(days: int = 30, admin: dict = Depends(require_admin)):
     feat_out = sorted([{"feature": f, "label": FEATURE_LABELS.get(f, f.replace("_", " ").title()), "credits": c} for f, c in by_feature.items()], key=lambda x: -x["credits"])
     day_list = [{"date": d, "credits": daily.get(d, 0)} for d in ((now - timedelta(days=i)).date().isoformat() for i in range(days - 1, -1, -1))]
     return {"days": days, "total": sum(by_user.values()), "events": len(events), "by_user": users_out, "by_feature": feat_out, "daily": day_list}
+
+
+@router.get("/realtime-behaviour")
+async def admin_behaviour(_: dict = Depends(require_platform_staff)):
+    return await get_behaviour()
+
+
+@router.put("/realtime-behaviour")
+async def admin_set_behaviour(x: BehaviourIn, _: dict = Depends(require_platform_admin)):
+    return await set_behaviour(x.model_dump())

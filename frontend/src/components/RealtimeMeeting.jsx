@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap, Gavel, VolumeX, Volume2, MonitorUp, MonitorOff, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { RealtimeSession, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL } from "../lib/realtimeSession";
+import { RealtimeSession, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL , removeAllCallAudio } from "../lib/realtimeSession";
 import { PeerMesh, createMixer, captureFrame } from "../lib/peerAudio";
 import { PresentationPanel } from "./PresentationPanel";
 import { InviteButton, InviteDialog } from "./InviteToCall";
-import { MicPipeline, loadMicPrefs, saveMicPrefs, BARGE_CONFIRM_MS } from "../lib/micPipeline";
+import { MicPipeline, loadMicPrefs, saveMicPrefs } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
 import { MeetingShell, LayoutMenu, useMeetingLayout } from "./MeetingShell";
@@ -231,9 +231,9 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
   // Like ChatGPT Voice: only a sustained voice near the mic interrupts; stray sounds are ignored.
   const confirmInterrupt = () => {
     const openFor = pipeRef.current ? pipeRef.current.openFor() : Infinity;
-    if (openFor >= BARGE_CONFIRM_MS) { userInterrupted(); return; }
+    if (openFor >= bargeMs()) { userInterrupted(); return; }
     if (bargeTimerRef.current) clearTimeout(bargeTimerRef.current);
-    bargeTimerRef.current = setTimeout(() => { if (!endedRef.current && pipeRef.current?.isOpen()) userInterrupted(); }, Math.max(60, BARGE_CONFIRM_MS - openFor));
+    bargeTimerRef.current = setTimeout(() => { if (!endedRef.current && pipeRef.current?.isOpen()) userInterrupted(); }, Math.max(60, bargeMs() - openFor));
   };
 
   const changeMic = (p) => {
@@ -274,7 +274,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
         if (!t) { if (!activeRef.current) listening(); break; }
         if (isBackchannel(t)) {
           const ir = interruptedRef.current; interruptedRef.current = null;
-          if (ir && Date.now() - ir.at < 8000 && byCall(ir.callId)) { enqueue(byCall(ir.callId), RESUME_AFTER_BACKCHANNEL(t)); startNext(); }
+          if (ir && BEHAVIOUR.backchannel_resume && Date.now() - ir.at < (BEHAVIOUR.backchannel_window_ms || 8000) && byCall(ir.callId)) { enqueue(byCall(ir.callId), RESUME_AFTER_BACKCHANNEL(t)); startNext(); }
           else if (!activeRef.current) listening(); // nothing was cut off: a lone "hmm" needs no answer
           break;
         }
@@ -328,6 +328,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
 
   // ---------- lifecycle ----------
   const connect = async (run) => {
+    await loadBehaviour(); // platform Conversation Behaviour (turn detection, barge-in, backchannel) before any session.update
     const stale = () => run !== runIdRef.current;
     let created = [];
     try {
@@ -416,6 +417,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
     window.__oryntixInCall = false;
     try { const m = mixRef.current; if (m) { Object.values(m.audioEls).forEach((el) => { el.srcObject = null; el.remove(); }); m.inMix.close(); m.outMix.close(); m.ac.close(); mixRef.current = null; } } catch (e) {}
     try { pipeRef.current?.stop(); } catch (e) {}
+    removeAllCallAudio();
   };
 
   const endSessions = () => {

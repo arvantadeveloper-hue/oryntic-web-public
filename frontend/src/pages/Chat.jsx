@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Send, Search, Trash2, RefreshCw, Users, X, Check, Bot, Paperclip, Mic, Square, Volume2, VolumeX, FileText, ClipboardList, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink, HardDrive, Reply, Forward, CornerUpLeft } from "lucide-react";
+import { Send, Search, Trash2, RefreshCw, Users, X, Check, Bot, Paperclip, Mic, Square, FileText, ClipboardList, Image as ImageIcon, Gavel, Phone, MessageSquare, Video, Loader2, Images, ExternalLink, HardDrive, Reply, Forward, CornerUpLeft } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken, streamChatWithAtt, openConvSocket } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -16,7 +16,7 @@ import { DrivePicker } from "../components/DrivePicker";
 import { SummaryPrompt } from "../components/ConversationTools";
 import { ChatArchivesModal } from "../components/ChatArchives";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
-import { TaskContextCard, AddPersonaMenu, TaskOfferButtons, WorkspaceResults, ArchiveResults } from "../components/TaskChatTools";
+import { TaskContextCard, AddPersonaMenu, TaskOfferButtons, WorkspaceResults, ArchiveResults, ApplyToDocButton, ModelChoiceCard } from "../components/TaskChatTools";
 import { TaskCard, TaskSidePanel } from "../components/TaskPanel";
 
 function Avatar({ name, portrait, size = 32, moderator }) {
@@ -75,7 +75,6 @@ export default function Chat() {
   const [replyTo, setReplyTo] = useState(null);
   const [forwardMsg, setForwardMsg] = useState(null);
   const [recording, setRecording] = useState(false);
-  const [speaker, setSpeaker] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
   const [showConvList, setShowConvList] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
@@ -96,7 +95,6 @@ export default function Chat() {
   const endRef = useRef(null);
   const fileRef = useRef(null);
   const recRef = useRef(null);
-  const audioRef = useRef(null);
 
   useEffect(() => { streamingRef.current = streaming; }, [streaming]);
 
@@ -221,18 +219,6 @@ export default function Chat() {
     e.target.value = "";
   };
 
-  const playTTS = async (text, voice = "nova") => {
-    try {
-      const res = await fetch(`${API_BASE}/voice/tts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ text: text.slice(0, 1500), voice: voice || "nova" }) });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      if (audioRef.current) { try { audioRef.current.pause(); URL.revokeObjectURL(audioRef.current.src); } catch (e) {} }
-      const a = new Audio(URL.createObjectURL(blob)); audioRef.current = a;
-      a.onended = () => { try { URL.revokeObjectURL(a.src); } catch (e) {} };
-      a.play();
-    } catch (e) {}
-  };
-  const voiceFor = (pid) => (conv?.members || []).find((m) => m.id === pid)?.voice || "nova";
 
   const toggleRecord = async () => {
     if (recording) { recRef.current?.stop(); return; }
@@ -256,12 +242,13 @@ export default function Chat() {
     } catch (e) { toast.error("Mikrofon tidak tersedia"); }
   };
 
-  const send = async () => {
-    if ((!input.trim() && attachments.length === 0) || !id || cooldown > 0) return;
-    const text = input; const atts = attachments; const quote = replyTo;
+  const send = async (override = null) => {
+    if (!override && ((!input.trim() && attachments.length === 0) || !id || cooldown > 0)) return;
+    const text = override ? override.text : input; const atts = override ? [] : attachments; const quote = override ? null : replyTo;
     const reqId = Date.now().toString(36);
-    setInput(""); setAttachments([]); setReplyTo(null);
-    setMessages((m) => [...m, { id: "tmp-u-" + reqId, role: "user", content: text, reply_to: quote || undefined, created_at: new Date().toISOString(), attachments: atts.map((a) => ({ type: a.type, name: a.name })) }]);
+    if (!override) { setInput(""); setAttachments([]); setReplyTo(null); }
+    if (override?.choice_msg_id) setMessages((m) => m.filter((x) => x.id !== override.choice_msg_id));
+    if (!override) setMessages((m) => [...m, { id: "tmp-u-" + reqId, role: "user", content: text, reply_to: quote || undefined, created_at: new Date().toISOString(), attachments: atts.map((a) => ({ type: a.type, name: a.name })) }]);
     setActiveStreams((n) => n + 1);
     const key = (pid) => `${reqId}:${pid}`;
     const keys = new Set();
@@ -274,10 +261,9 @@ export default function Chat() {
         if (ev.start) setLiveMap((prev) => ({ ...prev, [k]: { ...base } }));
         if (ev.status) setLiveMap((prev) => ({ ...prev, [k]: { ...(prev[k] || base), status: ev.status, rendering: ev.rendering || "" } }));
         if (ev.delta !== undefined) setLiveMap((prev) => { const cur = prev[k] || base; return { ...prev, [k]: { ...cur, status: "", rendering: "", text: cur.text + ev.delta } }; });
-        if (ev.final && speaker && ev.content) playTTS(ev.content, ev.voice);
         if (ev.summary_request) setSummaryRequest(true);
         if (ev.done) refreshUser();
-      }, quote ? { reply_to: quote } : {});
+      }, override ? override.extra : quote ? { reply_to: quote } : {});
       if (!convWs.current || convWs.current.readyState !== 1) { const r = await api.get(`/conversations/${id}/messages?limit=50`); applyPage(r.data); }
       loadConvs();
     } catch (e) {
@@ -387,7 +373,6 @@ export default function Chat() {
               {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Masuk ruang panggilan" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#2F6BFF] px-2.5 text-xs font-semibold text-white sm:px-3"><Video size={15} /> <span className="hidden sm:inline">Masuk Panggilan</span></button>}
               {conv.type !== "private" && <button onClick={saveNotes} disabled={savingNotes} title="Buat & simpan notulen ke Ruang Kerja" data-testid="save-notes-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#E6EAF2] bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:px-3">{savingNotes ? <RefreshCw size={15} className="animate-spin" /> : <FileText size={15} />} <span className="hidden sm:inline">Notulen</span></button>}
               <AddPersonaMenu conv={conv} personas={personas || []} onAdded={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />
-              <button onClick={() => setSpeaker(!speaker)} title="Baca jawaban dengan suara" data-testid="speaker-toggle" className={`flex h-9 w-9 items-center justify-center rounded-lg border ${speaker ? "btn-grad border-transparent" : "border-[#E7ECF3] text-slate-500"}`}>{speaker ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
             </div>
           )}
         </div>
@@ -442,11 +427,13 @@ export default function Chat() {
                     <TaskOfferButtons m={m} cid={id} onDone={refreshMsgs} isLast={i === messages.length - 1} />
                     <WorkspaceResults m={m} />
                     <ArchiveResults m={m} cid={id} onDone={refreshMsgs} isLast={i === messages.length - 1} />
+                    {m.tool === "model_choice" && m.choice && <ModelChoiceCard m={m} onPick={(mid) => send({ text: m.choice.user_text, choice_msg_id: m.id, extra: { model_choice: mid, replay: true, choice_msg_id: m.id } })} />}
                   </div>
                   <ModelBadge m={m} />
                   <div className="mt-1.5 flex gap-3 opacity-0 transition group-hover:opacity-100">
                     <button onClick={() => setReplyTo({ id: m.id, name: m.persona_name, content: m.content })} title="Balas (kutip)" aria-label="Balas" data-testid="msg-reply-btn" className="text-slate-400 hover:text-slate-700"><Reply size={14} /></button>
                     <button onClick={() => setForwardMsg(m)} title="Teruskan pesan" aria-label="Teruskan" data-testid="msg-forward-btn" className="text-slate-400 hover:text-slate-700"><Forward size={14} /></button>
+                    {conv?.task_id && !m.tool && !m.is_summary && (m.content || "").length > 40 && <ApplyToDocButton taskId={conv.task_id} message={m} onDone={refreshMsgs} />}
                   </div>
                 </div>
               </div>

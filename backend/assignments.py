@@ -72,7 +72,7 @@ async def execute_assigned_task(tid: str):
         system = (await _persona_system(persona, u, None) if persona.get("id") else "You are a diligent assistant.") + \
             "\n\nYou are now EXECUTING a delegated task. Produce the COMPLETE deliverable in well-structured markdown (headings, lists, tables where useful). No preamble, no questions.\n\n" + lang_rule(u)
         prompt = f"Task: {t.get('goal')}\nDetails: {t.get('brief') or ''}\n\n(Reminder: {lang_rule(u)})"
-        model_key, _ = await route_model(persona.get("model"), prompt, 0, await _owner_settings(u) if u else {})
+        model_key = t.get("model") or persona.get("model")  # never switch models silently: only a model the user confirmed (task.model) or the assistant's own
         out = await llm_text(system, prompt, model_key)
         used = text_credits(prompt, out)
         await record_usage(t["user_id"], "assigned_task", used, {"task_id": tid})
@@ -162,6 +162,7 @@ class AssignIn(BaseModel):
     persona_id: Optional[str] = None
     team: bool = False
     assignments: Optional[list] = Field(default=None, max_length=10)  # [{assistant, part}] explicit "bagian X minta Nova"
+    model: Optional[str] = Field(default=None, pattern="^[a-z0-9_-]+$")  # model the user confirmed for this task; omitted = the assistant's own model
 
 
 async def _target_persona(conv: dict, requested: Optional[str]) -> dict:
@@ -185,6 +186,8 @@ async def assign_task(cid: str, x: AssignIn, u: dict = Depends(current_user)):
     src = "meeting" if conv.get("type") == "meeting" else "call"
     create = create_team_task if (x.team or assignments) else create_assigned_task
     task = await create(u, persona, conv, plan, src)
+    if x.model and x.model != "__own__" and not task.get("team"):
+        await db.tasks.update_one({"id": task["id"]}, {"$set": {"model": x.model}}); task["model"] = x.model
     tz = (u.get("settings") or {}).get("timezone") or "Asia/Jakarta"
     when = when_text(task.get("scheduled_at"), tz)
     detail = f" {team_summary(task)}" if task.get("team") else ""

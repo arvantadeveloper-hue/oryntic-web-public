@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { onUserEvent, coalesce } from "../lib/userEvents";
 import { useNavigate } from "react-router-dom";
-import { ClipboardList, ExternalLink, Bot, Plus, Check, X } from "lucide-react";
+import { ClipboardList, ClipboardCheck, ExternalLink, Bot, Plus, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 
@@ -148,6 +148,46 @@ export function ArchiveResults({ m, cid, onDone, isLast }) {
           <button onClick={() => answer("tidak")} disabled={!!busy} className="rounded-full border border-[#E7ECF3] bg-white px-4 py-1.5 text-xs font-semibold text-slate-700" data-testid="archive-confirm-no">Tidak</button>
         </div>
       )}
+    </div>
+  );
+}
+
+// "Terapkan ke dokumen": save this assistant reply as the next version of the linked workspace document (no LLM involved).
+export function ApplyToDocButton({ taskId, message, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const apply = async (mode) => {
+    setBusy(true);
+    try {
+      const r = await api.post(`/tasks/${taskId}/apply-message`, { message_id: message.id, mode });
+      toast.success(`Dokumen diperbarui → v${r.data.version}`); setOpen(false); onDone && onDone();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Gagal menerapkan ke dokumen"); } finally { setBusy(false); }
+  };
+  return (
+    <span className="relative">
+      <button onClick={() => setOpen((o) => !o)} title="Terapkan isi balasan ini ke dokumen di Ruang Kerja" aria-label="Terapkan ke dokumen" data-testid="msg-apply-doc-btn" className="flex items-center gap-1 text-[11px] font-semibold text-[#2F6BFF] hover:underline"><ClipboardCheck size={14} /> Terapkan ke dokumen</button>
+      {open && (
+        <span className="absolute bottom-6 left-0 z-20 flex w-64 flex-col gap-1 rounded-xl border border-[#E7ECF3] bg-white p-2 text-xs shadow-xl" data-testid="apply-doc-menu">
+          <button disabled={busy} onClick={() => apply("replace")} data-testid="apply-doc-replace" className="rounded-lg px-3 py-2 text-left hover:bg-[#EEF3FF]"><span className="font-semibold">Ganti seluruh isi dokumen</span><span className="block text-slate-500">Balasan ini menjadi versi baru dokumen</span></button>
+          <button disabled={busy} onClick={() => apply("append")} data-testid="apply-doc-append" className="rounded-lg px-3 py-2 text-left hover:bg-[#EEF3FF]"><span className="font-semibold">Tambahkan di akhir dokumen</span><span className="block text-slate-500">Isi lama dipertahankan</span></button>
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Model-switch confirmation: the assistant never switches models silently; the user picks (default = the assistant's own model).
+export function ModelChoiceCard({ m, onPick }) {
+  const [busy, setBusy] = useState(false);
+  const opts = m.choice?.options || [];
+  return (
+    <div className="mt-2 flex flex-wrap gap-2" data-testid="model-choice-card">
+      {opts.map((o) => (
+        <button key={o.id} disabled={busy} onClick={() => { setBusy(true); onPick(o.id); }} data-testid={`model-choice-${o.id}`}
+          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-60 ${o.default ? "border-[#2F6BFF] bg-[#2F6BFF] text-white hover:brightness-110" : "border-[#E7ECF3] bg-white text-slate-700 hover:bg-[#EEF3FF]"}`}>
+          {o.default ? <Check size={12} className="mr-1 inline" /> : <Bot size={12} className="mr-1 inline" />}{o.label}{o.default ? " (model asisten)" : ""}
+        </button>
+      ))}
     </div>
   );
 }

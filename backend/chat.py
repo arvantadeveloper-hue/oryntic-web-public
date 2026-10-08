@@ -150,6 +150,9 @@ class MsgIn(BaseModel):
     channel: Optional[str] = Field(default=None, pattern="^(meeting_chat)$")  # typed in the live meeting's chat panel
     reply_to: Optional[dict] = None  # {id, name, content} of the quoted message
     forwarded: bool = False
+    model_choice: Optional[str] = Field(default=None, pattern="^[a-z0-9_-]+$")  # user's answer to a model-switch confirmation ("__own__" or a catalog model id)
+    replay: bool = False  # re-send of an already stored user message (after choosing the model) → don't store it again
+    choice_msg_id: Optional[str] = None  # the model_choice card to remove once answered
 
 
 class MemIn(BaseModel):
@@ -450,9 +453,9 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     prof = persona.get("profile", {})
     lang_name = _lang_name(user)
     parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in, and regardless of which AI model is answering or which tool/task mode is active. Never switch to another language unless the user explicitly asks for it."]
-    parts.append(f"You are '{persona['name']}', an AI Assistent.")
+    parts.append(f"You are '{persona['name']}', an AI Assistent. {prof.get('system_instructions','')}")
     parts += persona_block(persona["name"], lang_name, voice_mode)
-    parts.append(f"VIDEO PRICING (platform credits, from the admin price list): {await video_pricing_text()}; default clip {seedance.DEFAULT_DUR} s at 720p, Seedance 2.0 up to 15 s, Seedance 2.5 up to 30 s; resolution 480p (hemat, ×{seedance.multipliers()['res'].get('480p')}) / 720p / 1080p (tajam, ×{seedance.multipliers()['res'].get('1080p')}); real-person mode (Seedance 2.0, image-to-video only, ×{seedance.multipliers()['real_person']}); generated sound/ambience ×{seedance.multipliers()['audio']}. "
+    parts.append(f"VIDEO PRICING (platform credits, from the admin price list): {await video_pricing_text()}; default clip {seedance.DEFAULT_DUR} s at 720p, Seedance 2.0 up to 15 s, Seedance 2.5 up to 30 s; resolution 480p (×{seedance.multipliers()['res'].get('480p')}) / 720p / 1080p (×{seedance.multipliers()['res'].get('1080p')}); real-person mode (Seedance 2.0, image-to-video only, ×{seedance.multipliers()['real_person']}); generated sound/ambience ×{seedance.multipliers()['audio']}. "
                  "Rendered videos are saved to the user's Google Drive (must be connected). When the user asks how much a video / Seedance costs, quote exactly these credits per second and the total for their duration.")
     parts.append("CAPABILITIES: You CAN create and show images (photorealistic photos, renders, illustrations, logos, posters), short videos/clips and downloadable documents directly in this chat — the platform renders them for you automatically whenever the user asks. NEVER say you cannot render, generate, display or send images or videos. If the user asks for one and it has not appeared yet, simply say briefly that you are preparing it.")
     pers = prof.get("personality", {})
@@ -1095,6 +1098,8 @@ class ReplyCtx:
     system: str = ""
     model_key: Optional[str] = None
     routed: Optional[str] = None
+    model_choice: Optional[str] = None
+    choice_needed: Optional[dict] = None
     task: Optional[dict] = None
 
     @property
@@ -1113,7 +1118,17 @@ async def _prepare_ctx(ctx: ReplyCtx) -> ReplyCtx:
     ctx.system = await _persona_system(ctx.persona, ctx.user, ctx.roster, voice_mode=ctx.voice_mode, query=ctx.user_text)
     if ctx.via == "meeting_chat":
         ctx.system += "\n\n" + MEETING_CHAT_STYLE
-    ctx.model_key, ctx.routed = await route_model(ctx.persona.get("model"), ctx.user_text, ctx.attach_len, await _owner_settings(ctx.user))
+    own = ctx.persona.get("model")
+    suggested, reason = await route_model(own, ctx.user_text, ctx.attach_len, await _owner_settings(ctx.user))
+    if ctx.model_choice:  # the user already answered the confirmation card
+        ctx.model_key = own if ctx.model_choice == "__own__" else ctx.model_choice
+        ctx.routed = reason if ctx.model_key != own else None
+    elif reason and suggested != own and not ctx.voice_mode and ctx.via != "meeting_chat":
+        # never switch silently: ask first (default = the assistant's own model). Video/Seedance flows are separate and untouched.
+        ctx.model_key, ctx.routed = own, None
+        ctx.choice_needed = {"reason": reason, "options": [{"id": "__own__", "label": model_label(own), "default": True}, {"id": suggested, "label": model_label(suggested), "default": False}]}
+    else:
+        ctx.model_key, ctx.routed = (suggested, reason) if ctx.voice_mode or ctx.via == "meeting_chat" else (own, None)
     if ctx.routed:  # another model answers this turn — restate the language rule so the switch is invisible to the user
         ctx.system += f"\n\nMODEL SWITCH NOTE: you are a different model handling this turn on behalf of the same persona. Keep the same persona, tone and language. {lang_rule(ctx.user)}"
     last = await db.messages.find_one({"conversation_id": ctx.cid, "role": "assistant", "tool": "workspace_search"}, {"_id": 0, "results": 1}, sort=[("created_at", -1)])
@@ -1203,13 +1218,14 @@ async def _make_offer(ctx, plan: dict):
         yield ev
 
 
-async def _wants_revision(text: str, task: dict) -> bool:
+async def _wants_revision(text: str, task: dict, history: str = "") -> bool:
     if not REVISE_RE.search(text or ""):
         return False
     try:
-        r = await llm_json("Does the user's message ask to CHANGE/REVISE the document under discussion (edit, add, remove, rewrite parts)? "
-                           "Questions, opinions or chit-chat are NOT revisions. Reply JSON {\"revise\": true|false}.",
-                           f"Document title: {task.get('goal')}\nUser message: {text}")
+        r = await llm_json("Does the user's LAST message ask to CHANGE/REVISE/UPDATE the workspace document under discussion — including applying, saving or "
+                           "using content that the assistant proposed earlier in the conversation as the new document content? Questions, opinions, asking for a "
+                           "proposal/draft in chat only, or chit-chat are NOT revisions. Reply JSON {\"revise\": true|false}.",
+                           f"Document title: {task.get('goal')}\nRecent conversation:\n{history}\n\nUser LAST message: {text}")
         return bool(r.get("revise"))
     except Exception:
         return False
@@ -1219,7 +1235,7 @@ async def _revise_turn(ctx):
     yield ctx.sse(start=True)
     yield ctx.sse(status="Merevisi hasil tugas di Ruang Kerja...")
     try:
-        new_md, summary, used = await revise_with_llm(ctx.task, ctx.user_text, ctx.system, ctx.model_key)
+        new_md, summary, used = await revise_with_llm(ctx.task, ctx.user_text, ctx.system, ctx.model_key, await _history_text(ctx.cid, limit=12, with_summary=False))
     except Exception:
         async for ev in _emit_final(ctx, "Maaf, revisinya belum berhasil disimpan. Coba ulangi permintaannya.", 0, {}):
             yield ev
@@ -1259,7 +1275,7 @@ async def _typed_intercepts(ctx: ReplyCtx):
             yield ev
         if handled:
             return
-    elif await _wants_revision(ctx.user_text, ctx.task):
+    elif await _wants_revision(ctx.user_text, ctx.task, await _history_text(ctx.cid, limit=8, with_summary=False)):
         async for ev in _revise_turn(ctx):
             yield ev
         return
@@ -1298,6 +1314,12 @@ async def _plain_reply(ctx: ReplyCtx):
 async def _persona_reply(ctx: ReplyCtx):
     """Stream one persona reply as SSE strings; the last yielded item is the int credits used."""
     await _prepare_ctx(ctx)
+    if ctx.choice_needed:
+        rs = {"it": "pertanyaan kode/IT", "research": "riset atau konteks panjang"}.get(ctx.choice_needed["reason"], ctx.choice_needed["reason"])
+        text = f"Untuk {rs} ini saya bisa minta bantuan model lain. Mau dikerjakan dengan model mana?"
+        async for ev in _emit_final(ctx, text, 0, {"tool": "model_choice", "choice": {**ctx.choice_needed, "user_text": ctx.user_text}}):
+            yield ev
+        return
     if ctx.user_text and not ctx.voice_mode:
         intercepted = False
         async for ev in _typed_intercepts(ctx):
@@ -1435,7 +1457,11 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     await throttle_message(u, x.content)
     conv, personas = await _load_ai_conv(cid, u)
     attach_text, attach_meta = await _process_attachments(x.attachments, u["id"])
-    await _store_user_message(cid, x, u, attach_text, attach_meta)
+    if x.replay and x.model_choice:
+        if x.choice_msg_id:
+            await db.messages.delete_one({"id": x.choice_msg_id, "conversation_id": cid, "tool": "model_choice"})
+    else:
+        await _store_user_message(cid, x, u, attach_text, attach_meta)
     responders = await _choose_responders(x, conv, personas, cid)
     roster = [p["name"] for p in personas] if len(personas) > 1 else None
     extra = _reply_extra(x, attach_text)
@@ -1453,7 +1479,7 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
             for persona in responders:
                 prompt = (await _history_text(cid, query=x.content)) + extra + f"\n{persona['name']}:"
                 ctx = ReplyCtx(cid=cid, user=await _bill_user(persona), persona=persona, roster=roster, prompt=prompt, voice_mode=x.voice_mode,
-                               via=x.channel, user_text=x.content, attach_len=len(attach_text))
+                               via=x.channel, user_text=x.content, attach_len=len(attach_text), model_choice=x.model_choice)
                 async for ev in _collect(_persona_reply(ctx), totals):
                     yield ev
             if await _moderator_if_stuck(cid, conv, responders, roster, x):

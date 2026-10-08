@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Sparkles, Image as ImageIcon, Layers, ArrowLeft, Upload, Wand2, Check, Volume2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
+import { VoiceModelPicker } from "../components/VoiceModelPicker";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 
@@ -35,6 +36,7 @@ export default function CreatePersona() {
   const [voices, setVoices] = useState([]);
   const [voiceMeta, setVoiceMeta] = useState({ info: {}, realtime: [] });
   const [voice, setVoice] = useState("nova");
+  const [voiceModel, setVoiceModel] = useState("gpt-realtime-2.1-mini");
   const [previewing, setPreviewing] = useState(null);
   const previewAudioRef = useRef(null);
 
@@ -89,7 +91,7 @@ export default function CreatePersona() {
   const saveAndPortrait = async () => {
     setBusy(true);
     try {
-      const r = await api.post("/personas", { profile, reference_photo: photo || null, model: modelKey, voice });
+      const r = await api.post("/personas", { profile, reference_photo: photo || null, model: modelKey, voice, voice_model: voiceModel });
       const pid = r.data.id;
       toast.success("Persona disimpan, membuat potret...");
       try {
@@ -187,9 +189,10 @@ export default function CreatePersona() {
             ))}
           </div>
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Suara Persona (TTS)</label>
-            <p className="mb-2 text-xs text-slate-400">Pilih suara untuk jawaban audio & mode panggilan. Tekan ikon untuk mendengar contoh.</p>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <VoiceModelPicker value={voiceModel} onChange={setVoiceModel} />
+            <label className="mb-1 mt-5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Karakter Suara</label>
+            <p className="mb-2 text-xs text-slate-400">Warna suara asisten di panggilan. Tekan ikon speaker untuk mendengar contoh.</p>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {voices.map((v) => {
                 const on = voice === v;
                 return (

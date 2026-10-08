@@ -322,7 +322,7 @@ TABLE_RE = re.compile(r"^\s*\|.+\|\s*$", re.M)
 TASK_CONTEXT = ("\n\nWORKSPACE TASK UNDER DISCUSSION (id {tid}, version {ver}, status {status}; the ONLY valid link to it is /workspace/{tid} — never invent other URLs):\nTitle: {goal}\n--- CURRENT RESULT ---\n{body}\n--- END ---\n"
                 "The user may ask questions about this result or request changes. Discuss it in context; when they ask for a change, the system "
                 "saves a revised version to the Workspace automatically — confirm briefly what changed.")
-REVISE_RE = re.compile(r"\b(revisi|ubah|ganti|perbaiki|tambah(kan)?|hapus|kurangi|perbarui|update|rapikan|singkat|perpanjang|sesuaikan|koreksi|edit|rewrite|revise|change|tulis ulang)\b", re.I)
+REVISE_RE = re.compile(r"\b(revisi|ubah|ganti|perbaiki|tambah(kan)?|hapus|kurangi|perbarui|update|rapikan|singkat|perpanjang|sesuaikan|koreksi|edit|rewrite|revise|change|tulis ulang|terapkan|simpan|masukkan|pakai|gunakan|jadikan|replace|apply|save)\b", re.I)
 
 
 def has_tables(md: str) -> bool:
@@ -340,12 +340,13 @@ async def save_revision(task: dict, new_md: str, note: str, persona: Optional[di
     return cur + 1
 
 
-async def revise_with_llm(task: dict, request: str, system: str, model_key: Optional[str]) -> tuple:
-    """Returns (new_markdown, change_summary, credits)."""
+async def revise_with_llm(task: dict, request: str, system: str, model_key: Optional[str], history: str = "") -> tuple:
+    """Returns (new_markdown, change_summary, credits). `history` = recent chat so "pakai konten di atas" resolves to the right text."""
     sys = system + ("\n\nYou are REVISING a workspace deliverable. Output the COMPLETE revised document in markdown (keep everything that was "
                     "not asked to change), then on the very last line write exactly: RINGKASAN PERUBAHAN: <1-2 sentences>. Keep the document in the user's language "
                     "per the LANGUAGE RULE above — never translate it to another language unless the revision request explicitly asks for that.")
-    prompt = f"CURRENT DOCUMENT:\n{(task.get('final_output') or '')[:40000]}\n\nREVISION REQUEST: {request}"
+    ctx = f"RECENT CONVERSATION (the request may refer to content proposed here — when the user approves content from this conversation, use it verbatim as the new document body/section):\n{history[-12000:]}\n\n" if history else ""
+    prompt = f"{ctx}CURRENT DOCUMENT:\n{(task.get('final_output') or '')[:40000]}\n\nREVISION REQUEST: {request}"
     out = await llm_text(sys, prompt, model_key)
     summary = ""
     if "RINGKASAN PERUBAHAN:" in out:

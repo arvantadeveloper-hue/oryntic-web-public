@@ -3,10 +3,25 @@ import { API_BASE, getToken, api } from "./api";
 export const reportUsage = (callId, ev) => { if (ev?.type === "response.done" && ev.response?.usage) api.post(`/realtime/calls/${callId}/usage`, { usage: ev.response.usage }).catch(() => {}); };
 
 // Same semantic-VAD mapping as backend `vad_config`; interruption is confirmed client-side (see MicPipeline.openFor).
-export const vadUpdate = (sensitivity, createResponse) => ({
-  type: "session.update",
-  session: { type: "realtime", audio: { input: { turn_detection: { type: "semantic_vad", eagerness: ({ low: "low", medium: "low", high: "medium" })[sensitivity] || "low", create_response: createResponse, interrupt_response: false } } } },
-});
+// Platform-wide Conversation Behaviour (set in the back-office): turn detection, eagerness, barge-in threshold, backchannel tolerance.
+export const BEHAVIOUR = { turn_detection: "semantic_vad", eagerness: "low", interrupt_response: false, threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 500, barge_confirm_ms: 1300, backchannel_resume: true, backchannel_window_ms: 8000 };
+export async function loadBehaviour() {
+  try { const r = await api.get("/realtime/behaviour"); Object.assign(BEHAVIOUR, r.data || {}); } catch (e) {}
+  return BEHAVIOUR;
+}
+export const bargeMs = () => BEHAVIOUR.barge_confirm_ms || 1300;
+export const vadUpdate = (_sensitivity, createResponse) => {
+  const b = BEHAVIOUR;
+  const td = b.turn_detection === "server_vad"
+    ? { type: "server_vad", threshold: b.threshold, prefix_padding_ms: b.prefix_padding_ms, silence_duration_ms: b.silence_duration_ms }
+    : { type: "semantic_vad", eagerness: b.eagerness || "low" };
+  return { type: "session.update", session: { type: "realtime", audio: { input: { turn_detection: { ...td, create_response: createResponse, interrupt_response: !!b.interrupt_response } } } } };
+};
+
+// Safety net: no call UI is mounted → no <audio> element created by a call may keep playing.
+export function removeAllCallAudio() {
+  document.querySelectorAll("body > audio").forEach((el) => { try { el.pause(); el.srcObject = null; el.remove(); } catch (e) {} });
+}
 
 // Short listener sounds ("hmm", "iya", "oke"...) are backchannels, not turns — see REALTIME AVATAR CONVERSATION BEHAVIOR in the persona prompt.
 const BACKCHANNEL_WORD = "(h+m+|he+m+|e+m+|m+|he-?e[hm]|ya+|iya+|yoi|oh+|oke+|okey|ok|okay|sip+|hehe+|he+|gitu|baik|betul|bener)";

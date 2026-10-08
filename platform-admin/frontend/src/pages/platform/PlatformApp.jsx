@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Percent, Package, Users, ShieldCheck, Timer, LogOut, Loader2, Lock, Receipt } from "lucide-react";
+import { LayoutDashboard, Percent, Package, Users, ShieldCheck, Timer, LogOut, Loader2, Lock, Receipt, AudioWaveform } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
@@ -10,6 +10,7 @@ import PlatformPackages from "./PlatformPackages";
 import PlatformUsers from "./PlatformUsers";
 import PlatformStaff from "./PlatformStaff";
 import PlatformTrial from "./PlatformTrial";
+import PlatformBehaviour from "./PlatformBehaviour";
 import PlatformFinance from "./PlatformFinance";
 
 // Separate back-office site. PLATFORM_MODE (env REACT_APP_PLATFORM_MODE=1 or host "admin.*"/"platform.*") serves it at "/" for admin.oryntix.com.
@@ -24,6 +25,7 @@ const NAV = [
   { to: `${BASE}/users`, icon: Users, label: "Pengguna", roles: ["super_admin", "finance"] },
   { to: `${BASE}/staff`, icon: ShieldCheck, label: "Staf & Peran", roles: ["super_admin"] },
   { to: `${BASE}/trial`, icon: Timer, label: "Trial & Batas", roles: ["super_admin"] },
+  { to: `${BASE}/behaviour`, icon: AudioWaveform, label: "Conversation Behaviour", roles: ["super_admin"] },
 ];
 export const ROLE_LABEL = { super_admin: "Super Admin", finance: "Finance" };
 
@@ -97,6 +99,7 @@ export default function PlatformApp() {
         <Route path="users" element={<PlatformUsers readOnly={!can(["super_admin"])} />} />
         <Route path="staff" element={can(["super_admin"]) ? <PlatformStaff /> : <Navigate to={BASE || "/"} replace />} />
         <Route path="trial" element={can(["super_admin"]) ? <PlatformTrial /> : <Navigate to={BASE || "/"} replace />} />
+        <Route path="behaviour" element={can(["super_admin"]) ? <PlatformBehaviour /> : <Navigate to={BASE || "/"} replace />} />
         <Route path="*" element={<Navigate to={BASE || "/"} replace />} />
       </Route>
     </Routes>
