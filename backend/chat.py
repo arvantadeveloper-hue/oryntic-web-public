@@ -1299,7 +1299,7 @@ async def _plain_reply(ctx: ReplyCtx):
             tool_out = await run_with_tools(ctx.system, ctx.prompt, ctx.model_key, tool_ids, ctx.user["id"])
         except Exception as exc:
             logging.getLogger(__name__).warning("provider tools failed, falling back: %s", str(exc)[:200])
-    if tool_out and (tool_out["text"] or tool_out["media"]):
+    if tool_out and (tool_out["text"] or tool_out["media"] or tool_out.get("pending_files")):
         full = tool_out["text"] or "Ini hasilnya 🎨"
     else:
         try:
@@ -1326,6 +1326,8 @@ async def _plain_reply(ctx: ReplyCtx):
         extra.update({"tools_used": tool_out["tools_used"], "citations": tool_out["citations"]})
     if tool_out and tool_out.get("media"):
         extra["media"] = tool_out["media"]
+    if tool_out and tool_out.get("pending_files"):
+        extra["pending_files"] = tool_out["pending_files"]
     ai_msg = await _save_ai_msg(ctx.cid, ctx.persona, full, used, ctx.via, extra)
     yield ctx.sse(final=True, message_id=ai_msg["id"], content=full)
     await notify(ctx.cid, {"type": "message", "role": "assistant", "persona_id": ctx.persona["id"], "message": clean(ai_msg)})

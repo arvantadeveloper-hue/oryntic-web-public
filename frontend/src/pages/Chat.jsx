@@ -10,7 +10,7 @@ import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
 import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
-import { MediaList, ToolRequestCard, ModelBadge, ToolUsage, RenderingBox, MessageCta, downloadUrl } from "../components/MessageExtras";
+import { MediaList, ToolRequestCard, ModelBadge, ToolUsage, PendingFiles, RenderingBox, MessageCta, downloadUrl } from "../components/MessageExtras";
 import { GalleryPicker } from "../components/GalleryPicker";
 import { DrivePicker } from "../components/DrivePicker";
 import { SummaryPrompt } from "../components/ConversationTools";
@@ -421,6 +421,7 @@ export default function Chat() {
                     <Markdown content={m.content} />
                     {m.rendering && !(m.media || []).length && <RenderingBox kind={m.rendering} aspect={m.aspect_ratio} />}
                     <MediaList media={m.media || []} />
+                    <PendingFiles m={m} cid={id} onDone={refreshMsgs} />
                     {m.task_id && <TaskCard m={m} onOpen={setPanelTask} />}
                     <ToolRequestCard m={m} cid={id} onDone={refreshMsgs} />
                     <MessageCta m={m} />

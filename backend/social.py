@@ -3,14 +3,15 @@
 import asyncio
 import base64
 import hashlib
+import json
 import os
 import time
 from typing import Optional
 import httpx
 import jwt
 from cryptography.fernet import Fernet
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Form, Request
+from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from db import db, now_iso, new_id
 from auth import current_user, JWT_SECRET
@@ -282,6 +283,66 @@ async def publish(uid: str, x: PublishIn) -> list:
 @router.post("/publish")
 async def publish_endpoint(x: PublishIn, u: dict = Depends(current_user)):
     return {"results": await publish(u["id"], x)}
+
+
+# ---------- Meta (Facebook) platform callbacks: Deauthorize + Data Deletion Request ----------
+def _parse_signed_request(signed_request: str) -> dict:
+    """Verify Facebook's signed_request (HMAC-SHA256 with the app secret) and return its payload."""
+    import hmac
+    def pad(s: str) -> str:
+        return s + "=" * (-len(s) % 4)
+    try:
+        sig_b64, payload_b64 = signed_request.split(".", 1)
+        sig = base64.urlsafe_b64decode(pad(sig_b64))
+        payload = json.loads(base64.urlsafe_b64decode(pad(payload_b64)))
+    except Exception:
+        raise HTTPException(400, "signed_request tidak valid")
+    expected = hmac.new(os.environ["META_APP_SECRET"].encode(), payload_b64.encode(), hashlib.sha256).digest()
+    if not hmac.compare_digest(sig, expected):
+        raise HTTPException(400, "Tanda tangan signed_request tidak cocok")
+    return payload
+
+
+async def _remove_meta_user(fb_user_id: str, wipe_posts: bool) -> int:
+    accs = await db.social_accounts.find({"provider": "meta", "account_id": fb_user_id}, {"_id": 0, "user_id": 1}).to_list(50)
+    await db.social_accounts.delete_many({"provider": "meta", "account_id": fb_user_id})
+    if wipe_posts and accs:
+        await db.social_posts.delete_many({"provider": "meta", "user_id": {"$in": [a["user_id"] for a in accs]}})
+    return len(accs)
+
+
+@router.post("/meta/deauthorize")
+async def meta_deauthorize(signed_request: str = Form(...)):
+    """Facebook 'Deauthorize callback URL': the user removed Oryntix from their Facebook apps → drop stored tokens."""
+    if not configured("meta"):
+        raise HTTPException(503, "Integrasi Meta belum dikonfigurasi.")
+    payload = _parse_signed_request(signed_request)
+    removed = await _remove_meta_user(str(payload.get("user_id") or ""), wipe_posts=False)
+    return {"ok": True, "removed": removed}
+
+
+@router.post("/meta/data-deletion")
+async def meta_data_deletion(request: Request, signed_request: str = Form(...)):
+    """Facebook 'Data Deletion Request URL': delete everything we hold for that Facebook user and return a status URL + confirmation code."""
+    if not configured("meta"):
+        raise HTTPException(503, "Integrasi Meta belum dikonfigurasi.")
+    payload = _parse_signed_request(signed_request)
+    fb_uid = str(payload.get("user_id") or "")
+    removed = await _remove_meta_user(fb_uid, wipe_posts=True)
+    code = new_id().split("-")[0]
+    await db.data_deletion_requests.insert_one({"id": new_id(), "code": code, "provider": "meta", "subject_id": fb_uid, "removed_accounts": removed, "status": "done", "created_at": now_iso()})
+    base = f"{request.headers.get('x-forwarded-proto') or request.url.scheme}://{request.headers.get('x-forwarded-host') or request.headers.get('host')}"
+    return {"url": f"{base}/api/social/meta/data-deletion/{code}", "confirmation_code": code}
+
+
+@router.get("/meta/data-deletion/{code}", response_class=HTMLResponse)
+async def meta_data_deletion_status(code: str):
+    req = await db.data_deletion_requests.find_one({"code": code}, {"_id": 0})
+    if not req:
+        return HTMLResponse("<h2>Permintaan tidak ditemukan</h2>", status_code=404)
+    return HTMLResponse(f"<!doctype html><html lang='id'><body style='font-family:sans-serif;max-width:560px;margin:48px auto;padding:0 16px'>"
+                        f"<h2>Oryntix — Penghapusan Data</h2><p>Kode konfirmasi: <b>{code}</b></p><p>Status: <b>Selesai</b> ({req['created_at'][:10]}).</p>"
+                        f"<p>Semua token akses, koneksi akun Facebook/Instagram, dan riwayat unggahan yang terkait akun Facebook Anda telah dihapus dari Oryntix.</p></body></html>")
 
 
 @router.get("/posts")

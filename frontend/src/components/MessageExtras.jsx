@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
-import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins, X, UserRound, ShieldCheck, Volume2, VolumeX } from "lucide-react";
+import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins, X, UserRound, ShieldCheck, Volume2, VolumeX, Save } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 
@@ -188,6 +188,47 @@ export function ToolRequestCard({ m, cid, onDone, dark = false }) {
 }
 
 const REASON = { it: "topik IT/coding", research: "riset & analisis panjang" };
+
+export const pendingUrl = (id) => `${API_BASE}/pending-files/${id}?auth=${getToken()}`;
+const fmtSize = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+// Files produced by a provider tool (chart PNG / CSV / GPT image) that are only HELD until the user confirms where to save them.
+export function PendingFiles({ m, cid, onDone, dark = false }) {
+  const [busy, setBusy] = useState("");
+  const [drive, setDrive] = useState(null);
+  const files = m.pending_files || [];
+  useEffect(() => { if (files.length && drive === null) api.get("/integrations/google/status").then((r) => setDrive(!!r.data?.connected)).catch(() => setDrive(false)); }, [files.length, drive]);
+  if (!files.length) return null;
+  const act = async (f, target) => {
+    setBusy(`${f.id}:${target}`);
+    try {
+      if (target === "discard") await api.delete(`/pending-files/${f.id}`, { params: { message_id: m.id } });
+      else await api.post(`/pending-files/${f.id}/save`, { message_id: m.id, target });
+      toast.success(target === "discard" ? "Berkas dibuang" : target === "drive" ? `Tersimpan di Google Drive: ${f.name}` : `Tersimpan: ${f.name}`);
+      await onDone?.();
+    } catch (e) {
+      const st = e?.response?.status; const detail = e?.response?.data?.detail || "Gagal menyimpan";
+      toast.error(detail, st === 413 || st === 400 ? { action: { label: "Buka Integrasi", onClick: () => { window.location.href = "/integrations"; } }, duration: 9000 } : undefined);
+    } finally { setBusy(""); }
+  };
+  const btn = dark ? "bg-white/10 text-white hover:bg-white/15" : "bg-white text-slate-700 hover:bg-slate-100";
+  return (
+    <div className="mt-2 space-y-2" data-testid="pending-files">
+      {files.map((f) => (
+        <div key={f.id} data-testid={`pending-file-${f.kind}`} className={`rounded-xl border p-2 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-50" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+          {f.kind === "image" ? <img src={pendingUrl(f.id)} alt={f.name} className="mb-2 max-h-72 w-full rounded-lg object-contain bg-black/5" data-testid="pending-file-preview" />
+            : <a href={pendingUrl(f.id)} target="_blank" rel="noreferrer" className="mb-2 flex items-center gap-1.5 font-semibold underline-offset-2 hover:underline"><FileText size={13} /> {f.name} <span className="font-normal opacity-70">· {fmtSize(f.size)}</span></a>}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-auto flex items-center gap-1 font-semibold"><Save size={12} /> Simpan {f.kind === "image" ? "gambar" : "berkas"} ini? <span className="font-normal opacity-70">(sementara, 2 jam)</span></span>
+            <button type="button" disabled={!!busy} onClick={() => act(f, "storage")} data-testid="pending-save-btn" className="flex items-center gap-1 rounded-lg bg-[#2F6BFF] px-2.5 py-1.5 font-bold text-white disabled:opacity-60">{busy === `${f.id}:storage` ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Simpan</button>
+            {drive && <button type="button" disabled={!!busy} onClick={() => act(f, "drive")} data-testid="pending-save-drive-btn" className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-semibold disabled:opacity-60 ${btn}`}>{busy === `${f.id}:drive` ? <Loader2 size={12} className="animate-spin" /> : <HardDrive size={12} />} Ke Drive</button>}
+            <button type="button" disabled={!!busy} onClick={() => act(f, "discard")} data-testid="pending-discard-btn" className={`rounded-lg px-2.5 py-1.5 font-semibold disabled:opacity-60 ${btn}`}>Buang</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // Provider built-in tools the assistant used for this reply (+ credits) and the sources it cited.
 export function ToolUsage({ m, dark = false }) {

@@ -29,6 +29,7 @@ from knowledge import router as knowledge_router
 from workspace import router as workspace_router
 from assignments import router as assignments_router, tasks_tick
 from models import router as models_router
+from pending_files import router as pending_files_router
 from voice import router as voice_router
 from files import router as files_router
 from storage import init_storage
@@ -69,6 +70,7 @@ app.include_router(knowledge_router)
 app.include_router(workspace_router)
 app.include_router(assignments_router)
 app.include_router(models_router)
+app.include_router(pending_files_router)
 app.include_router(voice_router)
 app.include_router(files_router)
 from realtime_voice import router as realtime_voice_router  # noqa: E402

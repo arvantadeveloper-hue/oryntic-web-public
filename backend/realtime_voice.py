@@ -463,9 +463,9 @@ async def _voice_provider_tool(call_id: str, u: dict, runner, text: str, tool: s
     spoken = re.sub(r"\s*\(\[[^\]]*\]\([^)]*\)\)", "", out["text"])  # drop inline "([site](url))" so the voice model doesn't read URLs aloud
     spoken = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", spoken).strip()
     md = f"{card_title} «{text}»\n\n{out['text']}"
-    await _save_ai_msg(call["conversation_id"], persona, md, credits, "meeting_chat", {"tool": tool, "tools_used": out["tools_used"], "citations": sources, **({"media": out["media"]} if out.get("media") else {})})
+    await _save_ai_msg(call["conversation_id"], persona, md, credits, "meeting_chat", {"tool": tool, "tools_used": out["tools_used"], "citations": sources, **({"media": out["media"]} if out.get("media") else {}), **({"pending_files": out["pending_files"]} if out.get("pending_files") else {})})
     await notify(call["conversation_id"], {"type": "message", "role": "assistant"})
-    return {"answer": spoken, "sources": [{"title": s["title"], "url": s["url"]} for s in sources[:5]], "credits": credits}
+    return {"answer": spoken, "sources": [{"title": s["title"], "url": s["url"]} for s in sources[:5]], "credits": credits, "files": [f["name"] for f in out.get("pending_files") or []]}
 
 
 @router.post("/realtime/calls/{call_id}/web-search")

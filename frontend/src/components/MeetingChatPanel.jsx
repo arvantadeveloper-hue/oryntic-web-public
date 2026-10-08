@@ -6,7 +6,7 @@ import { api, streamChatWithAtt } from "../lib/api";
 import { GalleryPicker } from "./GalleryPicker";
 import { DrivePicker } from "./DrivePicker";
 import { Markdown } from "./Markdown";
-import { MediaList, ToolRequestCard, ModelBadge, ToolUsage, RenderingBox, MessageCta } from "./MessageExtras";
+import { MediaList, ToolRequestCard, ModelBadge, ToolUsage, PendingFiles, RenderingBox, MessageCta } from "./MessageExtras";
 
 const VIDEO_RE = /https?:\/\/[^\s)>"']+\.(?:mp4|webm)(?:\?[^\s)>"']*)?/gi;
 const IMAGE_RE = /https?:\/\/[^\s)>"']+\.(?:png|jpe?g|gif|webp)(?:\?[^\s)>"']*)?/gi;
@@ -66,6 +66,7 @@ function Bubble({ m, me, cid, onRefresh }) {
       {me ? <p className="whitespace-pre-wrap break-words">{m.content}</p> : <div className={MD_DARK}><Markdown content={m.content} /></div>}
       {!me && m.rendering && !mediaOf(m).length && <RenderingBox kind={m.rendering} dark aspect={m.aspect_ratio} />}
       {!me && <MediaList media={mediaOf(m)} dark />}
+      {!me && <PendingFiles m={m} cid={cid} onDone={onRefresh} dark />}
       {!me && <ToolRequestCard m={m} cid={cid} onDone={onRefresh} dark />}
       {!me && <MessageCta m={m} dark />}
       {!me && <ModelBadge m={m} dark />}
