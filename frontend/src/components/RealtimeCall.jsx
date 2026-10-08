@@ -5,10 +5,10 @@ import { api, API_BASE, getToken } from "../lib/api";
 import { vadUpdate, reportUsage, ContextPruner, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL, removeAllCallAudio, bargeMs, loadBehaviour, BEHAVIOUR } from "../lib/realtimeSession";
 import { captureFrame } from "../lib/peerAudio";
 import { MicPipeline, loadMicPrefs, saveMicPrefs } from "../lib/micPipeline";
-import { MicSettingsMenu } from "./MicSettingsMenu";
+import { CallMoreMenu } from "./CallMoreMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
-import { MeetingShell, LayoutMenu, useMeetingLayout } from "./MeetingShell";
-import { InviteButton, InviteDialog } from "./InviteToCall";
+import { MeetingShell, useMeetingLayout } from "./MeetingShell";
+import { InviteDialog } from "./InviteToCall";
 import { useAuth } from "../context/AuthContext";
 
 // ChatGPT-Voice style call: speech-to-speech via OpenAI Realtime (WebRTC), negotiated through our backend.
@@ -379,12 +379,10 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
   const controls = (
     <div className="flex items-center justify-center gap-3 px-4 py-8 sm:gap-4">
       <button onClick={toggleMute} data-testid="rt-mute" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
-      <MicSettingsMenu prefs={micPrefs} onChange={changeMic} pipeline={pipe} />
-      <LayoutMenu layout={layout} onChange={setLayout} />
       <button onClick={screen ? stopShare : startShare} disabled={phase === "connecting"} data-testid="rt-share-screen" title={screen ? "Berhenti membagikan layar" : "Bagikan layar — lalu tekan “Tunjukkan ke asisten” agar asisten melihatnya"} className={`flex h-14 w-14 items-center justify-center rounded-full transition disabled:opacity-50 ${screen ? "bg-emerald-500" : "bg-white/15 hover:bg-white/25"}`}>{screen ? <MonitorOff size={22} /> : <MonitorUp size={22} />}</button>
-      {isHost && onConvChange && <InviteButton onClick={() => setInvite(true)} disabled={phase === "connecting"} />}
       {layout !== "chat" && <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />}
-      <button onClick={hangup} data-testid="rt-end" className="flex h-14 items-center gap-2 rounded-full bg-[#EF4444] px-6 text-sm font-bold transition hover:brightness-105"><PhoneOff size={20} /> Akhiri</button>
+      <CallMoreMenu micPrefs={micPrefs} onMicChange={changeMic} pipeline={pipe} layout={layout} onLayoutChange={setLayout} onInvite={isHost && onConvChange ? () => setInvite(true) : null} inviteDisabled={phase === "connecting"} />
+      <button onClick={hangup} data-testid="rt-end" title="Akhiri panggilan" className="flex h-14 w-14 items-center justify-center rounded-full bg-[#EF4444] transition hover:brightness-105"><PhoneOff size={22} /></button>
     </div>
   );
 

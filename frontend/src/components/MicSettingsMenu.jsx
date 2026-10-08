@@ -7,24 +7,16 @@ import { SENSITIVITIES, SENS_LABEL, SENS_HINT } from "../lib/micPipeline";
 const pct = (v) => `${Math.round(Math.min(100, Math.max(0, ((20 * Math.log10(Math.max(v || 1e-4, 1e-4))) + 60) / 60 * 100)))}%`;
 
 // Gear button → context menu with mic sensitivity, AI noise suppression and a live level meter.
-export function MicSettingsMenu({ prefs, onChange, pipeline }) {
-  const [open, setOpen] = useState(false);
+// Content of the microphone settings (used inside the popover and embedded in the call "⋮" menu).
+export function MicSettingsPanel({ prefs, onChange, pipeline, active = true }) {
   const [meter, setMeter] = useState(null);
-
   useEffect(() => {
-    if (!open || !pipeline) return undefined;
+    if (!active || !pipeline) return undefined;
     return pipeline.onMeter((m) => setMeter(m));
-  }, [open, pipeline]);
-
+  }, [active, pipeline]);
   const noiseAvailable = !pipeline || pipeline.hasNoise;
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button data-testid="mic-settings-btn" title="Pengaturan mikrofon" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${open ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}>
-          <Settings2 size={22} />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent side="top" align="center" sideOffset={12} className="z-[120] w-80 rounded-2xl border-white/10 bg-[#0f172a] p-4 text-white shadow-2xl" data-testid="mic-settings-menu">
+    <div data-testid="mic-settings-menu">
         <p className="text-[11px] font-bold uppercase tracking-wider text-white/50">Pengaturan Mikrofon</p>
 
         <p className="mt-3 text-sm font-semibold">Sensitivitas</p>
@@ -55,6 +47,21 @@ export function MicSettingsMenu({ prefs, onChange, pipeline }) {
           </div>
           <p className="mt-1.5 text-[11px] text-white/50">Suara di bawah garis kuning dianggap latar dan tidak dikirim.</p>
         </div>
+    </div>
+  );
+}
+
+export function MicSettingsMenu({ prefs, onChange, pipeline }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button data-testid="mic-settings-btn" title="Pengaturan mikrofon" className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition ${open ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}>
+          <Settings2 size={22} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="center" sideOffset={12} className="z-[120] w-80 rounded-2xl border-white/10 bg-[#0f172a] p-4 text-white shadow-2xl">
+        <MicSettingsPanel prefs={prefs} onChange={onChange} pipeline={pipeline} active={open} />
       </PopoverContent>
     </Popover>
   );

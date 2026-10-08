@@ -15,6 +15,20 @@ export function useMeetingLayout() {
   return [layout, setLayout];
 }
 
+export function LayoutOptions({ layout, onChange, onPicked }) {
+  return (
+    <>
+      {LAYOUTS.map((l) => (
+        <button key={l.id} data-testid={`layout-opt-${l.id}`} onClick={() => { onChange(l.id); onPicked?.(); }}
+          className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${layout === l.id ? "bg-[#2F6BFF] text-white" : "hover:bg-white/10"}`}>
+          <l.Icon size={18} className="shrink-0" />
+          <span className="min-w-0"><span className="block text-sm font-semibold">{l.label}</span><span className={`block text-[11px] ${layout === l.id ? "text-white/80" : "text-white/50"}`}>{l.hint}</span></span>
+        </button>
+      ))}
+    </>
+  );
+}
+
 export function LayoutMenu({ layout, onChange }) {
   const [open, setOpen] = useState(false);
   const cur = LAYOUTS.find((l) => l.id === layout) || LAYOUTS[0];
@@ -25,13 +39,7 @@ export function LayoutMenu({ layout, onChange }) {
       </PopoverTrigger>
       <PopoverContent side="top" align="center" sideOffset={12} className="z-[120] w-72 rounded-2xl border-white/10 bg-[#0f172a] p-2 text-white shadow-2xl" data-testid="layout-menu">
         <p className="px-2 pb-1 pt-1 text-[11px] font-bold uppercase tracking-wider text-white/50">Tata letak panggilan</p>
-        {LAYOUTS.map((l) => (
-          <button key={l.id} data-testid={`layout-opt-${l.id}`} onClick={() => { onChange(l.id); setOpen(false); }}
-            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${layout === l.id ? "bg-[#2F6BFF] text-white" : "hover:bg-white/10"}`}>
-            <l.Icon size={18} className="shrink-0" />
-            <span className="min-w-0"><span className="block text-sm font-semibold">{l.label}</span><span className={`block text-[11px] ${layout === l.id ? "text-white/80" : "text-white/50"}`}>{l.hint}</span></span>
-          </button>
-        ))}
+        <LayoutOptions layout={layout} onChange={onChange} onPicked={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   );
