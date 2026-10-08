@@ -23,6 +23,7 @@ function EventForm({ date, onClose, onSaved }) {
   const [remind, setRemind] = useState(false);
   const [mode, setMode] = useState("call");
   const [offsets, setOffsets] = useState([30]);
+  const [repeat, setRepeat] = useState("none");
   const [personaId, setPersonaId] = useState("");
   const [personas, setPersonas] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -32,7 +33,7 @@ function EventForm({ date, onClose, onSaved }) {
     try {
       const start = new Date(`${dayKey(date)}T${f.time}:00`);
       if (remind && !offsets.length) { toast.error("Pilih minimal satu waktu ingatkan"); setBusy(false); return; }
-      await api.post("/events", { title: f.title, start_at: start.toISOString(), notes: f.notes, remind_mode: remind ? mode : null, remind_offsets: remind ? offsets : [], persona_id: personaId || null });
+      await api.post("/events", { title: f.title, start_at: start.toISOString(), notes: f.notes, remind_mode: remind ? mode : null, remind_offsets: remind ? offsets : [], persona_id: personaId || null, repeat: remind ? repeat : "none" });
       toast.success(remind ? "Event + pengingat ditambahkan" : "Event ditambahkan"); onSaved(); onClose();
     } catch (err) { toast.error(err?.response?.data?.detail || "Gagal menyimpan"); } finally { setBusy(false); }
   };
@@ -46,7 +47,7 @@ function EventForm({ date, onClose, onSaved }) {
       <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700">
         <input type="checkbox" checked={remind} onChange={(e) => setRemind(e.target.checked)} data-testid="event-remind-toggle" className="h-4 w-4 accent-[#2F6BFF]" /> <Bell size={12} /> Ingatkan saya
       </label>
-      {remind && <RemindOptions compact mode={mode} offsets={offsets} onMode={setMode} onOffsets={setOffsets} personas={personas} personaId={personaId} onPersona={setPersonaId} />}
+      {remind && <RemindOptions compact mode={mode} offsets={offsets} onMode={setMode} onOffsets={setOffsets} personas={personas} personaId={personaId} onPersona={setPersonaId} repeat={repeat} onRepeat={setRepeat} />}
       <div className="flex gap-2"><button disabled={busy} className="btn-grad rounded-lg px-4 py-1.5 text-xs" data-testid="event-save">{busy ? <Loader2 size={12} className="animate-spin" /> : "Simpan"}</button><button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-xs text-slate-500">Batal</button></div>
     </form>
   );

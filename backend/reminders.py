@@ -10,6 +10,7 @@ from realtime import notify_user
 
 router = APIRouter(prefix="/api/reminders", tags=["reminders"])
 MODES = ("call", "chat")
+REPEATS = ("none", "daily", "weekly", "monthly")
 OFFSETS = (5, 10, 15, 30, 60, 120, 1440)
 
 
@@ -20,6 +21,7 @@ class ReminderIn(BaseModel):
     remind_minutes: int = 30  # legacy single offset
     offsets: Optional[list[int]] = None  # e.g. [30, 60] → 30 min AND 1 h before
     mode: str = "call"  # call = assistant rings; chat = assistant sends a message
+    repeat: str = "none"  # none | daily | weekly | monthly
     persona_id: Optional[str] = None
 
 
@@ -55,13 +57,34 @@ def build_alerts(start: datetime, offsets: list) -> list:
     return [{"minutes": m, "remind_at": (start - timedelta(minutes=m)).isoformat(), "status": "scheduled"} for m in offsets]
 
 
-async def create_reminder_doc(uid: str, title: str, description: str, start: datetime, offsets: list, mode: str, persona_id: Optional[str], event_id: Optional[str] = None) -> dict:
+def next_occurrence(start: datetime, repeat: str, after: datetime) -> datetime:
+    """First occurrence of a repeating reminder strictly after `after` (same wall-clock time)."""
+    nxt = start
+    for _ in range(600):
+        if nxt > after:
+            return nxt
+        if repeat == "daily":
+            nxt = nxt + timedelta(days=1)
+        elif repeat == "weekly":
+            nxt = nxt + timedelta(weeks=1)
+        else:
+            m = nxt.month % 12 + 1
+            y = nxt.year + (1 if nxt.month == 12 else 0)
+            import calendar as _cal
+            nxt = nxt.replace(year=y, month=m, day=min(start.day, _cal.monthrange(y, m)[1]))
+    return nxt
+
+
+async def create_reminder_doc(uid: str, title: str, description: str, start: datetime, offsets: list, mode: str, persona_id: Optional[str], event_id: Optional[str] = None, repeat: str = "none") -> dict:
     """Shared by the Reminders form, calendar events and the assistant's calendar tool."""
     offsets = _offsets(offsets, 30)
     mode = mode if mode in MODES else "call"
+    repeat = repeat if repeat in REPEATS else "none"
+    if repeat != "none" and start <= datetime.now(timezone.utc):
+        start = next_occurrence(start, repeat, datetime.now(timezone.utc))
     doc = {
         "id": new_id(), "user_id": uid, "title": title, "description": description or "",
-        "start_at": start.isoformat(), "remind_minutes": min(offsets), "offsets": offsets, "mode": mode,
+        "start_at": start.isoformat(), "remind_minutes": min(offsets), "offsets": offsets, "mode": mode, "repeat": repeat, "occurrence": 1,
         "remind_at": (start - timedelta(minutes=min(offsets))).isoformat(), "alerts": build_alerts(start, offsets),
         "persona_id": persona_id, "event_id": event_id,
         "status": "scheduled", "message": "", "created_at": now_iso(),
@@ -72,7 +95,7 @@ async def create_reminder_doc(uid: str, title: str, description: str, start: dat
 
 @router.post("")
 async def create_reminder(x: ReminderIn, u: dict = Depends(current_user)):
-    return await create_reminder_doc(u["id"], x.title, x.description or "", _parse(x.start_at), _offsets(x.offsets, x.remind_minutes), x.mode, x.persona_id)
+    return await create_reminder_doc(u["id"], x.title, x.description or "", _parse(x.start_at), _offsets(x.offsets, x.remind_minutes), x.mode, x.persona_id, repeat=x.repeat)
 
 
 @router.get("")
@@ -101,6 +124,8 @@ async def update_reminder(rid: str, body: dict, u: dict = Depends(current_user))
             fields[k] = body[k]
     if body.get("mode") in MODES:
         fields["mode"] = body["mode"]
+    if body.get("repeat") in REPEATS:
+        fields["repeat"] = body["repeat"]
     start = _parse(body["start_at"]) if "start_at" in body else _parse(r["start_at"])
     if "start_at" in body or "offsets" in body or "remind_minutes" in body:
         offsets = _offsets(body.get("offsets", r.get("offsets")), body.get("remind_minutes", r.get("remind_minutes", 30)))
@@ -111,9 +136,9 @@ async def update_reminder(rid: str, body: dict, u: dict = Depends(current_user))
         ev_fields = {k: v for k, v in fields.items() if k in ("title", "start_at")}
         if "description" in fields:
             ev_fields["notes"] = fields["description"]
-        if "mode" in fields or "offsets" in fields or "persona_id" in fields:
+        if "mode" in fields or "offsets" in fields or "persona_id" in fields or "repeat" in fields:
             ev_fields["remind"] = {"mode": fields.get("mode", r.get("mode", "call")), "offsets": fields.get("offsets", r.get("offsets") or [r.get("remind_minutes", 30)]),
-                                   "persona_id": fields.get("persona_id", r.get("persona_id"))}
+                                   "persona_id": fields.get("persona_id", r.get("persona_id")), "repeat": fields.get("repeat", r.get("repeat", "none"))}
         if ev_fields:
             await db.events.update_one({"id": r["event_id"]}, {"$set": ev_fields})
     return await db.reminders.find_one({"id": rid}, {"_id": 0})
@@ -221,9 +246,31 @@ async def _fire_chat(r: dict, u: dict, minutes: int):
     await send_push(u["id"], f"Pengingat: {r.get('title') or 'Agenda'}", f"{persona['name']}: dimulai {_minutes_label(minutes)} lagi.", {"link": f"/chat/{conv['id']}", "tag": f"reminder-{r['id']}-{minutes}"}, kind="reminders")
 
 
+async def _roll_repeating(now: datetime):
+    """Repeating reminders whose start has passed (and are not ringing) → schedule the next occurrence."""
+    async for r in db.reminders.find({"repeat": {"$in": ["daily", "weekly", "monthly"]}, "start_at": {"$lte": now.isoformat()}, "status": {"$ne": "ringing"}}):
+        try:
+            nxt = next_occurrence(_parse(r["start_at"]), r["repeat"], now)
+        except Exception:
+            continue
+        offsets = r.get("offsets") or [r.get("remind_minutes", 30)]
+        await db.reminders.update_one({"id": r["id"]}, {"$set": {"start_at": nxt.isoformat(), "remind_at": (nxt - timedelta(minutes=min(offsets))).isoformat(), "alerts": build_alerts(nxt, offsets),
+                                                                 "status": "scheduled", "occurrence": int(r.get("occurrence", 1)) + 1}})
+        if r.get("event_id"):
+            await db.events.update_one({"id": r["event_id"]}, {"$set": {"start_at": nxt.isoformat()}})
+
+
+async def _purge_past(now: datetime):
+    """Non-repeating reminders whose start passed ≥1 h ago (delivered, declined, missed or never answered) are deleted; linked calendar events stay as history."""
+    cutoff = (now - timedelta(hours=1)).isoformat()
+    await db.reminders.delete_many({"repeat": {"$nin": ["daily", "weekly", "monthly"]}, "start_at": {"$lte": cutoff}, "status": {"$ne": "ringing"}})
+
+
 async def scheduler_tick():
     now = datetime.now(timezone.utc)
     now_s = now.isoformat()
+    await _roll_repeating(now)
+    await _purge_past(now)
     q = {"$or": [{"alerts": {"$elemMatch": {"status": "scheduled", "remind_at": {"$lte": now_s}}}},
                  {"alerts": {"$exists": False}, "status": "scheduled", "remind_at": {"$lte": now_s}}]}
     async for r in db.reminders.find(q):

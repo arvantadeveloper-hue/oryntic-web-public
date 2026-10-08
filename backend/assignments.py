@@ -218,6 +218,7 @@ class EventIn(BaseModel):
     remind_mode: Optional[str] = None  # call | chat → creates a linked reminder
     remind_offsets: list[int] = Field(default_factory=list)  # minutes before start, e.g. [30, 60]
     persona_id: Optional[str] = None
+    repeat: str = "none"  # none | daily | weekly | monthly (applies to the linked reminder; the event shows its next occurrence)
     conversation_id: Optional[str] = None  # when created by the assistant (chat/voice tool): post a confirmation card there
 
 
@@ -230,8 +231,9 @@ async def create_event_doc(u: dict, x: EventIn) -> dict:
     doc = {"id": eid, "user_id": u["id"], "workspace_id": workspace_id(u), "title": x.title, "start_at": start, "end_at": _utc(x.end_at), "notes": x.notes or "",
            "remind": None, "reminder_id": None, "created_at": now_iso()}
     if x.remind_mode in ("call", "chat") and x.remind_offsets:
-        rem = await create_reminder_doc(u["id"], x.title, x.notes or "", _parse(start), x.remind_offsets, x.remind_mode, x.persona_id, event_id=eid)
-        doc["remind"] = {"mode": rem["mode"], "offsets": rem["offsets"], "persona_id": x.persona_id}
+        rem = await create_reminder_doc(u["id"], x.title, x.notes or "", _parse(start), x.remind_offsets, x.remind_mode, x.persona_id, event_id=eid, repeat=x.repeat)
+        doc["remind"] = {"mode": rem["mode"], "offsets": rem["offsets"], "persona_id": x.persona_id, "repeat": rem["repeat"]}
+        doc["start_at"] = rem["start_at"]
         doc["reminder_id"] = rem["id"]
     await db.events.insert_one(dict(doc))
     return clean(doc)
@@ -262,7 +264,8 @@ def event_markdown(ev: dict) -> str:
     except Exception:
         when = ev["start_at"]
     rem = ev.get("remind")
-    line = (f"\n🔔 Ingatkan via **{'panggilan' if rem['mode'] == 'call' else 'chat'}** " + ", ".join(f"{_minutes_label(m)} sebelum" for m in rem["offsets"])) if rem else "\n🔕 Tanpa pengingat"
+    rep = {"daily": " · berulang setiap hari", "weekly": " · berulang setiap minggu", "monthly": " · berulang setiap bulan"}.get((rem or {}).get("repeat") or "", "")
+    line = (f"\n🔔 Ingatkan via **{'panggilan' if rem['mode'] == 'call' else 'chat'}** " + ", ".join(f"{_minutes_label(m)} sebelum" for m in rem["offsets"]) + rep) if rem else "\n🔕 Tanpa pengingat"
     return f"📅 **Tercatat di kalender:** {ev['title']}\n🕒 {when}{line}" + (f"\n📝 {ev['notes']}" if ev.get("notes") else "")
 
 

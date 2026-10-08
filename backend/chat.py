@@ -1189,7 +1189,8 @@ async def _calendar_turn(ctx):
     mode = plan.get("remind_mode") if plan.get("remind_mode") in ("call", "chat") else "call"
     try:
         ev = await create_event_doc(ctx.user, EventIn(title=(plan.get("title") or ctx.user_text[:80]).strip()[:200], start_at=plan["start_at"], notes=(plan.get("notes") or "")[:2000],
-                                                      remind_mode=mode if offsets else None, remind_offsets=offsets, persona_id=ctx.persona["id"]))
+                                                      remind_mode=mode if offsets else None, remind_offsets=offsets, persona_id=ctx.persona["id"],
+                                                      repeat=plan.get("repeat") if plan.get("repeat") in ("daily", "weekly", "monthly") else "none"))
     except Exception:
         async for e in _emit_final(ctx, "Maaf, waktu yang disebut belum bisa saya pahami. Bisa sebutkan tanggal dan jamnya?", 0, {"tool": "calendar_question"}):
             yield e

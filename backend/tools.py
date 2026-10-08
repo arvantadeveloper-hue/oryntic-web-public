@@ -403,10 +403,11 @@ async def plan_calendar(text: str, tz: str, history: str = "", force: bool = Fal
     try:
         r = await llm_json(
             "You extract a CALENDAR ENTRY the user wants recorded (meeting, appointment, activity, deadline, birthday, reminder). Reply JSON only: "
-            "{\"is_calendar\": bool, \"title\": str, \"start_at\": str|null, \"notes\": str, \"remind_mode\": \"call\"|\"chat\"|null, \"remind_offsets\": [int], \"question\": str|null}. "
+            "{\"is_calendar\": bool, \"title\": str, \"start_at\": str|null, \"notes\": str, \"remind_mode\": \"call\"|\"chat\"|null, \"remind_offsets\": [int], \"repeat\": \"none\"|\"daily\"|\"weekly\"|\"monthly\", \"question\": str|null}. "
             "title: short Indonesian title (max 8 words, no date words). start_at: ISO-8601 WITH timezone offset, resolved from relative words ('besok jam 10', 'Jumat depan sore') using Now; "
             "null when no usable time was given. notes: extra details (place, people, agenda) or ''. remind_mode: 'call' if the user wants to be called/phoned, 'chat' if via message/chat, "
             "null if unspecified. remind_offsets: minutes before start the user asked for (e.g. '30 menit dan 1 jam sebelum' → [30, 60]); [] if unspecified; use [0] when the user explicitly wants NO reminder. "
+            "repeat: 'daily'/'weekly'/'monthly' when the user says setiap hari/minggu/bulan, tiap Senin, bulanan, rutin…; else 'none'. For repeating entries start_at is the FIRST occurrence (for 'tiap Senin jam 8' → next Monday 08:00). "
             "question: when start_at is missing or truly ambiguous (date without time, or 'minggu depan' without a day), ONE short Indonesian question asking exactly what is missing; else null. "
             "is_calendar=false for anything that is not a request to record/schedule/remind.",
             f"Now: {now.isoformat()} ({tz}).\nRecent context: {history[-600:]}\nUser message: {text}")

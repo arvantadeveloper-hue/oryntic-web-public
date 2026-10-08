@@ -1,14 +1,16 @@
 import React from "react";
-import { Phone, MessageSquare } from "lucide-react";
+import { Phone, MessageSquare, Repeat } from "lucide-react";
 
 export const OFFSETS = [{ v: 10, l: "10 menit" }, { v: 30, l: "30 menit" }, { v: 60, l: "1 jam" }, { v: 1440, l: "1 hari" }];
+export const REPEATS = [{ v: "none", l: "Tidak berulang" }, { v: "daily", l: "Setiap hari" }, { v: "weekly", l: "Setiap minggu" }, { v: "monthly", l: "Setiap bulan" }];
+export const repeatLabel = (r) => ({ daily: "setiap hari", weekly: "setiap minggu", monthly: "setiap bulan" }[r] || "");
 export const offsetLabel = (m) => (m % 1440 === 0 ? `${m / 1440} hari` : m % 60 === 0 ? `${m / 60} jam` : `${m} menit`);
 
 // Shared "how & when to remind me" chooser for reminders and calendar events.
-export function RemindOptions({ mode, offsets, onMode, onOffsets, personas = [], personaId, onPersona, compact = false }) {
+export function RemindOptions({ mode, offsets, onMode, onOffsets, personas = [], personaId, onPersona, repeat, onRepeat, compact = false }) {
   const toggle = (v) => onOffsets(offsets.includes(v) ? offsets.filter((x) => x !== v) : [...offsets, v].sort((a, b) => a - b));
   return (
-    <div className={`grid gap-3 ${compact ? "" : "sm:grid-cols-3"}`} data-testid="remind-options">
+    <div className={`grid gap-3 ${compact ? "" : "sm:grid-cols-2 lg:grid-cols-4"}`} data-testid="remind-options">
       <div>
         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Cara ingatkan</label>
         <div className="flex gap-1.5">
@@ -29,6 +31,14 @@ export function RemindOptions({ mode, offsets, onMode, onOffsets, personas = [],
           ))}
         </div>
       </div>
+      {onRepeat && (
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Pengulangan</label>
+          <select className="input-dark py-2 text-sm" value={repeat || "none"} onChange={(e) => onRepeat(e.target.value)} data-testid="remind-repeat">
+            {REPEATS.map((r) => <option key={r.v} value={r.v}>{r.l}</option>)}
+          </select>
+        </div>
+      )}
       {onPersona && (
         <div>
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Asisten</label>
@@ -45,5 +55,6 @@ export function RemindOptions({ mode, offsets, onMode, onOffsets, personas = [],
 export function RemindSummary({ remind, className = "" }) {
   if (!remind) return null;
   const Icon = remind.mode === "chat" ? MessageSquare : Phone;
-  return <span className={`inline-flex items-center gap-1 ${className}`} data-testid="remind-summary"><Icon size={11} /> {remind.mode === "chat" ? "chat" : "panggilan"} · {(remind.offsets || []).map(offsetLabel).join(", ")} sebelum</span>;
+  const rep = repeatLabel(remind.repeat);
+  return <span className={`inline-flex items-center gap-1 ${className}`} data-testid="remind-summary"><Icon size={11} /> {remind.mode === "chat" ? "chat" : "panggilan"} · {(remind.offsets || []).map(offsetLabel).join(", ")} sebelum{rep && <span className="inline-flex items-center gap-0.5" data-testid="remind-repeat-label"> · <Repeat size={11} /> {rep}</span>}</span>;
 }
