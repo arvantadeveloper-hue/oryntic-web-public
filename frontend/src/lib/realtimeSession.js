@@ -71,15 +71,28 @@ export class ContextPruner {
 
 // One OpenAI Realtime WebRTC session (negotiated via our backend). sendAudio=false → receive-only (panelists get the user's words as text).
 export class RealtimeSession {
-  constructor({ callId, persona, primary, role, stream, onEvent, onError, onTrack, sensitivity = "medium", createResponse = false, sendAudio = true }) {
+  constructor({ callId, persona, primary, role, stream, onEvent, onError, onStatus, onTrack, sensitivity = "medium", createResponse = false, sendAudio = true }) {
     this.callId = callId; this.persona = persona; this.primary = primary; this.role = role; this.stream = stream; this.onTrack = onTrack;
-    this.onEvent = onEvent; this.onError = onError; this.sensitivity = sensitivity; this.createResponse = createResponse; this.sendAudio = sendAudio;
+    this.onEvent = onEvent; this.onError = onError; this.onStatus = onStatus; this.sensitivity = sensitivity; this.createResponse = createResponse; this.sendAudio = sendAudio;
+    this.reconnecting = false; this.reconnectAttempts = 0; this.reconnectTimer = null;
     this.pc = null; this.dc = null; this.audioEl = null; this.ac = null; this.analyser = null; this.buf = null;
     this.level = 0; this.closed = false;
     this.pruner = new ContextPruner(this);
   }
 
   async connect() {
+    await this._openPeer(false);
+  }
+
+  _teardownPeer() {
+    try { this.ac?.close(); } catch (e) {}
+    try { if (this.dc) { this.dc.onmessage = null; this.dc.onopen = null; this.dc.close(); } } catch (e) {}
+    try { if (this.pc) { this.pc.onconnectionstatechange = null; this.pc.ontrack = null; this.pc.close(); } } catch (e) {}
+    try { if (this.audioEl) { this.audioEl.srcObject = null; this.audioEl.remove(); this.audioEl = null; } } catch (e) {}
+    this.analyser = null;
+  }
+
+  async _openPeer(resume) {
     const pc = new RTCPeerConnection(); this.pc = pc;
     const audioEl = document.createElement("audio"); audioEl.autoplay = true; document.body.appendChild(audioEl); this.audioEl = audioEl;
     pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; this._monitor(e.streams[0]); this.onTrack?.(e.streams[0]); };
@@ -87,7 +100,7 @@ export class RealtimeSession {
     else pc.addTransceiver("audio", { direction: "recvonly" });
     const dc = pc.createDataChannel("oai-events"); this.dc = dc;
     dc.onmessage = (e) => { try { const ev = JSON.parse(e.data); reportUsage(this.callId, ev); this.pruner.onEvent(ev); this._track(ev); this.onEvent(this, ev); } catch (err) {} };
-    pc.onconnectionstatechange = () => { if (["failed", "disconnected", "closed"].includes(pc.connectionState) && !this.closed) this.onError?.(this, new Error("connection lost")); };
+    pc.onconnectionstatechange = () => { if (this.pc === pc && ["failed", "disconnected", "closed"].includes(pc.connectionState) && !this.closed) this._scheduleReconnect(); };
     const opened = new Promise((resolve) => { dc.onopen = resolve; });
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
     const res = await fetch(`${API_BASE}/realtime/calls/${this.callId}/negotiate?sensitivity=${this.sensitivity}`, { method: "POST", headers: { "Content-Type": "application/sdp", Authorization: `Bearer ${getToken()}` }, body: offer.sdp });
@@ -96,6 +109,27 @@ export class RealtimeSession {
     if (this.closed) return;
     await pc.setRemoteDescription({ type: "answer", sdp: answer });
     await Promise.race([opened, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout data channel")), 15000))]);
+    if (resume && !this.closed) {
+      this.reconnecting = false; this.reconnectAttempts = 0;
+      this.onStatus?.(this, "connected");
+      this.send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text: "[System: the call connection dropped briefly and is now restored. Continue naturally where you left off; do not restart the conversation.]" }] } });
+    }
+  }
+
+  // Connection dropped → keep the session alive, report "reconnecting", retry with backoff; give up (onError) after ~8 attempts.
+  _scheduleReconnect(delay = 1500) {
+    if (this.closed || this.reconnectTimer) return;
+    if (!this.reconnecting) { this.reconnecting = true; this.reconnectAttempts = 0; this.onStatus?.(this, "reconnecting"); }
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      if (this.closed) return;
+      if (!navigator.onLine) { this._scheduleReconnect(2000); return; }
+      this.reconnectAttempts += 1;
+      if (this.reconnectAttempts > 8) { this.reconnecting = false; this.onError?.(this, new Error("connection lost")); return; }
+      this._teardownPeer();
+      try { await this._openPeer(true); }
+      catch (e) { this._scheduleReconnect(Math.min(15000, 1500 * this.reconnectAttempts)); }
+    }, delay);
   }
 
   _monitor(stream) {
@@ -145,6 +179,7 @@ export class RealtimeSession {
   }
 
   close() {
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.closed = true;
     try { this.ac?.close(); } catch (e) {}
     try { this.dc?.close(); } catch (e) {}

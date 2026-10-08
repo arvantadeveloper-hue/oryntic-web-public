@@ -24,6 +24,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
   const [invite, setInvite] = useState(false);
   const [modId, setModId] = useState(conv.moderator_persona_id || members[0]?.id);
   const [phase, setPhase] = useState("connecting"); // connecting|listening|user_speaking|responding|ending
+  const [reconnecting, setReconnecting] = useState(new Set()); // callIds of assistants currently re-establishing their WebRTC leg
   const [statusMap, setStatusMap] = useState({});
   const [levels, setLevels] = useState({});
   const [caption, setCaption] = useState(null);
@@ -384,7 +385,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
         await beat(); presenceRef.current = setInterval(beat, 30000);
       }
       if (!runAI) { startedAtRef.current = Date.now(); listening(); return; }
-      const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, role: x.role, stream: aiInput, sendAudio: x.role !== "panelist", sensitivity: micPrefs.sensitivity, createResponse: false, onEvent: handleEvent, onError: () => { if (!endedRef.current) toast.message("Koneksi salah satu peserta terputus"); },
+      const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, role: x.role, stream: aiInput, sendAudio: x.role !== "panelist", sensitivity: micPrefs.sensitivity, createResponse: false, onEvent: handleEvent, onError: () => { if (!endedRef.current) toast.error("Koneksi salah satu asisten tidak dapat dipulihkan"); }, onStatus: (sess, st) => { if (endedRef.current) return; setReconnecting((r) => { const n = new Set(r); if (st === "reconnecting") n.add(sess.callId); else n.delete(sess.callId); return n; }); if (st === "connected") toast.success(`${sess.persona?.name || "Asisten"} tersambung kembali`); },
         onTrack: (rs) => { if (mixRef.current) mixRef.current.outMix.add(rs); } }));
       sessionsRef.current = sessions;
       await Promise.all(sessions.map((s) => s.connect()));
@@ -478,7 +479,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
   const toggleMute = () => { const nv = !muted; setMuted(nv); pipeRef.current?.setMuted(nv); };
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0"), ss = String(elapsed % 60).padStart(2, "0");
   const modName = members.find((m) => m.id === modId)?.name || "Moderator";
-  const label = { connecting: "Menyambungkan semua peserta...", listening: !runAI ? (hasAI ? "Terhubung dengan teman — asisten aktif saat pemilik grup bergabung." : "Panggilan suara dengan teman (WebRTC).") : `Mendengarkan Anda — ${modName} memandu; sebut nama asisten lain untuk minta pendapatnya.`, user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
+  const label = reconnecting.size ? "Koneksi terputus, sedang menyambung kembali..." : { connecting: "Menyambungkan semua peserta...", listening: !runAI ? (hasAI ? "Terhubung dengan teman — asisten aktif saat pemilik grup bergabung." : "Panggilan suara dengan teman (WebRTC).") : `Mendengarkan Anda — ${modName} memandu; sebut nama asisten lain untuk minta pendapatnya.`, user_speaking: "Anda berbicara...", responding: "Agen merespons — sela kapan saja", ending: "Menyusun notulen..." }[phase];
   const tiles = [{ id: ME, isMe: true, name: user?.name || "Anda" },
     ...humans.map((h) => { const p = peers.find((x) => x.id === h.id); return { id: h.id, name: h.name, isHuman: true, online: !!p, state: p?.state }; }),
     ...members.map((m) => ({ id: m.id, name: m.name, portrait: m.portrait, isMod: m.id === modId }))];

@@ -191,6 +191,73 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     }
   };
 
+  const reconnectRef = useRef({ attempts: 0, timer: null, busy: false });
+  const streamRef = useRef(null);
+
+  const teardownPeer = () => {
+    if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    try { acRef.current?.close(); } catch (e) {}
+    try { if (dcRef.current) { dcRef.current.onmessage = null; dcRef.current.onopen = null; dcRef.current.close(); } } catch (e) {}
+    try { if (pcRef.current) { pcRef.current.onconnectionstatechange = null; pcRef.current.ontrack = null; pcRef.current.close(); } } catch (e) {}
+    try { if (audioElRef.current) { audioElRef.current.srcObject = null; audioElRef.current.remove(); audioElRef.current = null; } } catch (e) {}
+  };
+
+  // Build the WebRTC leg (peer, audio sink, data channel, SDP negotiate). Used for the first connect and for every reconnect.
+  const setupPeer = async (run, { resume = false } = {}) => {
+    const stale = () => run !== runIdRef.current || endedRef.current;
+    const pc = new RTCPeerConnection(); pcRef.current = pc;
+    const audioEl = document.createElement("audio"); audioEl.autoplay = true; audioElRef.current = audioEl; document.body.appendChild(audioEl);
+    pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; monitor(e.streams[0]); };
+    streamRef.current.getTracks().forEach((t) => pc.addTrack(t, streamRef.current));
+    const dc = pc.createDataChannel("oai-events"); dcRef.current = dc;
+    prunerRef.current = new ContextPruner({ send });
+    dc.onmessage = (e) => { try { handleEvent(JSON.parse(e.data)); } catch (err) {} };
+    dc.onopen = () => {
+      if (stale()) return;
+      reconnectRef.current.attempts = 0;
+      if (!startedAtRef.current) startedAtRef.current = Date.now();
+      setPhase("listening");
+      if (resume) {
+        toast.success("Koneksi tersambung kembali");
+        send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text: "[System: the call connection dropped briefly and is now restored. Continue naturally where you left off; do not restart the conversation.]" }] } });
+      } else if (opening) createResponse(); // the assistant only speaks first when IT is calling (reminder delivery)
+      if (tickRef.current) clearInterval(tickRef.current);
+      tickRef.current = setInterval(async () => {
+        try { await api.post(`/realtime/calls/${callIdRef.current}/tick`, { elapsed_seconds: secs() }); onRefresh && onRefresh(); }
+        catch (e) { if (e?.response?.status === 402) { toast.error(e.response.data?.detail || "Kredit habis"); hangup(); } }
+      }, 60000);
+    };
+    pc.onconnectionstatechange = () => {
+      if (stale() || pcRef.current !== pc) return;
+      if (["failed", "disconnected", "closed"].includes(pc.connectionState)) scheduleReconnect(run);
+    };
+    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    const res = await fetch(`${API_BASE}/realtime/calls/${callIdRef.current}/negotiate?sensitivity=${micPrefs.sensitivity}`, { method: "POST", headers: { "Content-Type": "application/sdp", Authorization: `Bearer ${getToken()}` }, body: offer.sdp });
+    if (!res.ok) { let d = "Negosiasi gagal"; try { d = (await res.json()).detail || d; } catch (e) {} throw new Error(d); }
+    const answer = await res.text();
+    if (stale()) return;
+    await pc.setRemoteDescription({ type: "answer", sdp: answer });
+  };
+
+  // Connection dropped: keep the call screen, show "Koneksi terputus, sedang menyambung kembali…" and retry with backoff (≈90 s) before giving up.
+  const scheduleReconnect = (run, delay = 1500) => {
+    const rc = reconnectRef.current;
+    if (endedRef.current || run !== runIdRef.current || rc.timer) return;
+    setPhase("reconnecting");
+    if (["speaking", "thinking"].includes(phaseRef.current)) { liveRef.current = ""; setLive(""); }
+    rc.timer = setTimeout(async () => {
+      rc.timer = null;
+      if (endedRef.current || run !== runIdRef.current) return;
+      if (!navigator.onLine) { scheduleReconnect(run, 2000); return; } // wait for the network to come back
+      rc.attempts += 1;
+      if (rc.attempts > 8) { toast.error("Koneksi tidak dapat dipulihkan. Panggilan diakhiri."); hangup(); return; }
+      teardownPeer();
+      try { await setupPeer(run, { resume: true }); }
+      catch (e) { scheduleReconnect(run, Math.min(15000, 1500 * rc.attempts)); }
+    }, delay);
+  };
+
   const connect = async (run) => {
     await loadBehaviour(); // platform Conversation Behaviour (turn detection, barge-in, backchannel) before any session.update
     const stale = () => run !== runIdRef.current;
@@ -201,30 +268,8 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       const mic = new MicPipeline(micPrefs);
       const stream = await mic.start();
       if (stale()) { mic.stop(); return; }
-      pipeRef.current = mic; setPipe(mic);
-      const pc = new RTCPeerConnection(); pcRef.current = pc;
-      const audioEl = document.createElement("audio"); audioEl.autoplay = true; audioElRef.current = audioEl; document.body.appendChild(audioEl);
-      pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; monitor(e.streams[0]); };
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
-      const dc = pc.createDataChannel("oai-events"); dcRef.current = dc;
-      prunerRef.current = new ContextPruner({ send });
-      dc.onmessage = (e) => { try { handleEvent(JSON.parse(e.data)); } catch (err) {} };
-      dc.onopen = () => {
-        startedAtRef.current = Date.now(); setPhase("listening");
-        // the user opens the conversation; the assistant only speaks first when IT is calling (reminder delivery)
-        if (opening) createResponse();
-        tickRef.current = setInterval(async () => {
-          try { await api.post(`/realtime/calls/${callIdRef.current}/tick`, { elapsed_seconds: secs() }); onRefresh && onRefresh(); }
-          catch (e) { if (e?.response?.status === 402) { toast.error(e.response.data?.detail || "Kredit habis"); hangup(); } }
-        }, 60000);
-      };
-      pc.onconnectionstatechange = () => { if (["failed", "disconnected", "closed"].includes(pc.connectionState) && !endedRef.current) { toast.message("Koneksi panggilan terputus"); hangup(); } };
-      const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
-      const res = await fetch(`${API_BASE}/realtime/calls/${callIdRef.current}/negotiate?sensitivity=${micPrefs.sensitivity}`, { method: "POST", headers: { "Content-Type": "application/sdp", Authorization: `Bearer ${getToken()}` }, body: offer.sdp });
-      if (!res.ok) { let d = "Negosiasi gagal"; try { d = (await res.json()).detail || d; } catch (e) {} throw new Error(d); }
-      const answer = await res.text();
-      if (stale()) return;
-      await pc.setRemoteDescription({ type: "answer", sdp: answer });
+      pipeRef.current = mic; setPipe(mic); streamRef.current = stream;
+      await setupPeer(run);
     } catch (e) {
       if (stale()) return;
       toast.error(e?.response?.data?.detail || e?.message || "Gagal memulai panggilan");
@@ -233,15 +278,12 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
   };
 
   const cleanup = () => {
-    if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (reconnectRef.current.timer) { clearTimeout(reconnectRef.current.timer); reconnectRef.current.timer = null; }
     if (bargeTimerRef.current) clearTimeout(bargeTimerRef.current);
-    try { acRef.current?.close(); } catch (e) {}
-    try { dcRef.current?.close(); } catch (e) {}
-    try { pcRef.current?.close(); } catch (e) {}
+    teardownPeer();
     try { pipeRef.current?.stop(); } catch (e) {}
     stopShare();
-    try { if (audioElRef.current) { audioElRef.current.srcObject = null; audioElRef.current.remove(); } } catch (e) {}    window.__oryntixInCall = false; removeAllCallAudio();
+    window.__oryntixInCall = false; removeAllCallAudio();
   };
 
   // user truly barged in (sustained voice near the mic) → stop the assistant mid-sentence
@@ -266,6 +308,14 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text: `[Chat panel] ${user?.name || "User"} typed: ${q}\n[Chat panel] You replied in text: ${a.slice(0, 600)}` }] } });
   };
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => {
+    // browser network events: react right away instead of waiting for ICE to notice
+    const offline = () => { if (!endedRef.current) scheduleReconnect(runIdRef.current, 2000); };
+    const online = () => { const rc = reconnectRef.current; if (phaseRef.current === "reconnecting" && rc.timer) { clearTimeout(rc.timer); rc.timer = null; scheduleReconnect(runIdRef.current, 300); } };
+    window.addEventListener("offline", offline); window.addEventListener("online", online);
+    return () => { window.removeEventListener("offline", offline); window.removeEventListener("online", online); };
+    // eslint-disable-next-line
+  }, []);
 
   const hangup = () => {
     if (endedRef.current) return;
@@ -290,7 +340,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
 
   const toggleMute = () => { const nv = !muted; setMuted(nv); pipeRef.current?.setMuted(nv); };
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0"), ss = String(elapsed % 60).padStart(2, "0");
-  const label = { connecting: "Menyambungkan...", listening: "Mendengarkan — bicara saja", user_speaking: "Anda berbicara...", thinking: "Hmm...", speaking: `${persona.name || "Asisten"} berbicara — sela kapan saja`, ended: "Panggilan selesai" }[phase];
+  const label = { connecting: "Menyambungkan...", reconnecting: "Koneksi terputus, sedang menyambung kembali...", listening: "Mendengarkan — bicara saja", user_speaking: "Anda berbicara...", thinking: "Hmm...", speaking: `${persona.name || "Asisten"} berbicara — sela kapan saja`, ended: "Panggilan selesai" }[phase];
   const speaking = phase === "speaking";
   const ring = 1 + (speaking ? level * 0.35 : phase === "user_speaking" ? 0.06 : 0);
 
@@ -315,17 +365,17 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       <div className="flex w-44 shrink-0 flex-col items-center justify-center gap-2">
         {avatar(150)}
         <h2 className="text-base font-bold">{persona.name || "Asisten"}</h2>
-        <p className="flex items-center gap-1.5 text-center text-[11px] text-white/70" data-testid="rt-phase">{phase === "connecting" && <Loader2 size={12} className="animate-spin" />}{label}</p>
+        <p className={`flex items-center gap-1.5 text-center text-[11px] ${phase === "reconnecting" ? "font-semibold text-amber-300" : "text-white/70"}`} data-testid="rt-phase">{["connecting", "reconnecting"].includes(phase) && <Loader2 size={12} className="animate-spin" />}{label}</p>
       </div>
     </div>
   ) : (
     <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-6">
       {avatar(260)}
       <h2 className="mt-6 text-2xl font-bold">{persona.name || "Asisten"}</h2>
-      <p className="mt-1 flex items-center gap-2 text-sm text-white/70" data-testid="rt-phase">{phase === "connecting" && <Loader2 size={14} className="animate-spin" />}{label}</p>
+      <p className={`mt-1 flex items-center gap-2 text-sm ${phase === "reconnecting" ? "font-semibold text-amber-300" : "text-white/70"}`} data-testid="rt-phase">{["connecting", "reconnecting"].includes(phase) && <Loader2 size={14} className="animate-spin" />}{label}</p>
     </div>
   );
-  const captionEl = layout === "chat" ? <p className="text-center text-xs text-white/60" data-testid="rt-phase-rail">{label}</p> : null;
+  const captionEl = layout === "chat" ? <p className={`text-center text-xs ${phase === "reconnecting" ? "font-semibold text-amber-300" : "text-white/60"}`} data-testid="rt-phase-rail">{label}</p> : null;
   const controls = (
     <div className="flex items-center justify-center gap-3 px-4 py-8 sm:gap-4">
       <button onClick={toggleMute} data-testid="rt-mute" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>

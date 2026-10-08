@@ -89,131 +89,140 @@ export default function PersonaDetail() {
 
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-8 lg:p-10 fade-up" data-testid="persona-detail-page">
-      <button onClick={() => nav("/personas")} className="mb-4 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"><ArrowLeft size={16} /> {p.name}</button>
-
-      <div className="grid gap-6 md:grid-cols-[320px_1fr]">
-        <div>
-          <div className="aivora-card overflow-hidden">
-            <div className="aspect-square bg-slate-50">
-              {p.portrait ? <img src={p.portrait} alt={p.name} className="h-full w-full object-cover" data-testid="persona-portrait" />
-                : <div className="flex h-full w-full items-center justify-center text-5xl font-bold text-slate-600">{p.name[0]}</div>}
-            </div>
-            <div className="p-4">
-              <h1 className="text-xl font-bold text-slate-900">{p.name}</h1>
-              <p className="text-xs text-slate-500">v{p.version} · {modelLabel(p.model)}</p>
-            </div>
-          </div>
-          <div className="mt-3">
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Otak Persona (Model AI)</label>
-            <select className="input-dark py-2.5" value={p.model} onChange={(e) => changeModel(e.target.value)} data-testid="persona-model-select">
-              {["openai", "anthropic", "gemini"].filter((p) => models.some((m) => m.provider === p)).map((p) => (
-                <optgroup key={p} label={models.find((m) => m.provider === p)?.provider_label || p}>
-                  {models.filter((m) => m.provider === p).map((m) => <option key={m.id} value={m.id}>{m.label} — {m.tagline}{m.credits_typical != null ? ` (≈${m.credits_typical} kredit/pesan)` : ""}</option>)}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-          <div className="mt-3"><ToolsPicker modelKey={p.model} value={p.tools || []} onChange={changeTools} compact /></div>
-          <div className="mt-3"><VoiceModelPicker value={p.voice_model} onChange={changeVoiceModel} compact /></div>
-          <div className="mt-3">
-            <div className="mb-1.5 flex items-center justify-between">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Karakter Suara</label>
-              <button onClick={() => previewVoice(p.voice || "alloy")} data-testid="persona-voice-preview-current" className="flex items-center gap-1 text-xs font-semibold text-[#2F6BFF]" title="Dengar suara saat ini">
-                {previewing === (p.voice || "alloy") ? <Loader2 size={13} className="animate-spin" /> : <Volume2 size={13} />} Dengar
-              </button>
-            </div>
-            <div className="grid grid-cols-1 gap-2">
-              {voices.map((v) => {
-                const on = (p.voice || "alloy") === v;
-                return (
-                  <div key={v} data-testid={`persona-voice-${v}`}
-                    className={`flex items-center gap-2 rounded-xl border p-2.5 transition ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3] hover:bg-slate-50"}`}>
-                    <button type="button" onClick={() => changeVoice(v)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${on ? "btn-grad border-transparent" : "border-slate-300"}`}>{on && <span className="h-1.5 w-1.5 rounded-full bg-white" />}</span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-bold capitalize text-slate-900">{v}</span>
-                        <span className="block truncate text-xs text-slate-400">{VOICE_LABELS[v] || "Suara"}</span>
-                      </span>
-                    </button>
-                    <button type="button" onClick={() => previewVoice(v)} data-testid={`persona-voice-preview-${v}`}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#E7ECF3] text-[#2F6BFF] hover:bg-[#EEF3FF]" title="Dengar contoh">
-                      {previewing === v ? <Loader2 size={15} className="animate-spin" /> : <Volume2 size={15} />}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          <div className="mt-3 space-y-2">
-            <button onClick={startChat} data-testid="persona-start-chat" className="btn-grad flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm"><MessageSquare size={16} /> Mulai Chat</button>
-            <button onClick={regen} disabled={busy} data-testid="persona-regen-portrait" className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm text-slate-700 hover:bg-slate-100"><RefreshCw size={15} /> Buat Ulang Potret (25 kredit)</button>
-            <div className="flex gap-2">
-              <button onClick={dup} className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-slate-200 py-2.5 text-sm text-slate-700 hover:bg-slate-100"><Copy size={14} /> Duplikat</button>
-              <button onClick={del} data-testid="persona-delete" className="rounded-xl border border-[#EF4444]/40 px-4 text-[#EF4444] hover:bg-[#EF4444]/10"><Trash2 size={16} /></button>
-            </div>
-          </div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <button onClick={() => nav("/personas")} className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"><ArrowLeft size={16} /> Kembali</button>
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 overflow-hidden rounded-full bg-[#EEF3FF]">{p.portrait ? <img src={p.portrait} alt={p.name} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-sm font-bold text-slate-600">{p.name[0]}</div>}</div>
+          <div><h1 className="text-lg font-bold leading-tight text-slate-900">{p.name}</h1><p className="text-xs text-slate-500">v{p.version} · {modelLabel(p.model)}</p></div>
         </div>
-
-        <div>
-          <div className="mb-4 flex gap-2 border-b border-slate-200">
-            {[["profile", "Profil"], ["appearance", "Penampilan"], ["memory", "Memori"], ["knowledge", "Pengetahuan"]].map(([k, l]) => (
-              <button key={k} onClick={() => setTab(k)} data-testid={`persona-tab-${k}`}
-                className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${tab === k ? "border-[#00D1FF] text-slate-900" : "border-transparent text-slate-500"}`}>{l}</button>
-            ))}
-          </div>
-
-          {tab === "profile" && (
-            <div className="space-y-4">
-              <Row label="Ringkasan" value={prof.identity?.summary} />
-              <Row label="Latar belakang" value={prof.identity?.background} />
-              <Row label="Pekerjaan" value={prof.identity?.occupation} />
-              <Row label="Sifat utama" value={(prof.personality?.primary_traits || []).join(", ")} />
-              <Row label="Gaya komunikasi" value={prof.personality?.communication_style} />
-              <Row label="Formalitas" value={prof.personality?.formality} />
-              <Row label="Batasan" value={prof.personality?.boundaries} />
-              <Row label="Instruksi sistem" value={prof.system_instructions} />
-            </div>
-          )}
-          {tab === "appearance" && (
-            <div className="space-y-4">
-              <Row label="Wajah" value={prof.appearance?.face} />
-              <Row label="Rambut" value={prof.appearance?.hair} />
-              <Row label="Mata" value={prof.appearance?.eyes} />
-              <Row label="Pakaian" value={prof.appearance?.clothing} />
-              <Row label="Ciri khas" value={prof.appearance?.distinctive} />
-              <Row label="Gaya visual" value={prof.appearance?.visual_style} />
-            </div>
-          )}
-          {tab === "knowledge" && <div className="aivora-card p-6"><KnowledgeTab personaId={id} /></div>}
-          {tab === "memory" && (
-            <div>
-              <div className="mb-4 flex gap-2">
-                <input className="input-dark" placeholder="Tambah memori (mis. Saya suka kopi hitam)" value={newMem} onChange={(e) => setNewMem(e.target.value)} data-testid="mem-input" />
-                <button onClick={addMem} data-testid="mem-add" className="btn-grad rounded-xl px-4"><Plus size={18} /></button>
-              </div>
-              <p className="mb-3 text-xs text-slate-500">Memori ⭐ <b>prioritas</b> selalu ikut di setiap percakapan; memori lain dipilih otomatis sesuai relevansi pesan (maks 10) untuk menghemat token.</p>
-              {mems.length === 0 ? <p className="text-sm text-slate-500">Belum ada memori untuk persona ini.</p> : [...mems].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map((m) => (
-                <div key={m.id} className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3" data-testid={`mem-${m.id}`}>
-                  <span className={`flex items-center gap-2 text-sm ${m.enabled ? "text-slate-700" : "text-slate-500 line-through"}`}>{m.pinned && <Star size={13} className="shrink-0 fill-[#F59E0B] text-[#F59E0B]" />}{m.content}</span>
-                  <div className="flex items-center gap-3">
-                    <button onClick={() => pinMem(m)} title={m.pinned ? "Lepas prioritas" : "Jadikan prioritas (selalu diingat)"} className={m.pinned ? "text-[#F59E0B]" : "text-slate-400 hover:text-[#F59E0B]"} data-testid={`mem-pin-${m.id}`}><Star size={15} className={m.pinned ? "fill-[#F59E0B]" : ""} /></button>
-                    <button onClick={() => toggleMem(m)} className="text-xs text-[#2F6BFF]">{m.enabled ? "Nonaktif" : "Aktif"}</button>
-                    <button onClick={() => delMem(m)} className="text-slate-500 hover:text-[#EF4444]"><Trash2 size={14} /></button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-6 aivora-card p-4">
-            <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900"><Wand2 size={15} className="text-[#7C3AED]" /> Edit dengan bahasa alami</h3>
-            <div className="flex gap-2">
-              <input className="input-dark" placeholder="mis. Buat lebih tenang dan ubah rambut jadi pendek" value={instr} onChange={(e) => setInstr(e.target.value)} data-testid="persona-edit-input" />
-              <button onClick={applyEdit} disabled={busy} className="btn-grad rounded-xl px-5 text-sm" data-testid="persona-edit-apply">Terapkan</button>
-            </div>
-          </div>
-        </div>
+        <button onClick={startChat} data-testid="persona-start-chat" className="btn-grad flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm"><MessageSquare size={16} /> Mulai Chat</button>
       </div>
+
+      <div className="mb-5 flex gap-1 overflow-x-auto border-b border-slate-200">
+        {[["profile", "Profil"], ["settings", "Pengaturan"], ["appearance", "Penampilan"], ["memory", "Memori"], ["knowledge", "Pengetahuan"]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} data-testid={`persona-tab-${k}`}
+            className={`-mb-px shrink-0 border-b-2 px-4 py-2.5 text-sm font-medium transition ${tab === k ? "border-[#00D1FF] text-slate-900" : "border-transparent text-slate-500"}`}>{l}</button>
+        ))}
+      </div>
+
+      {tab === "profile" && (
+        <div className="grid gap-6 md:grid-cols-[280px_1fr]" data-testid="persona-profile-tab">
+          <div>
+            <div className="aivora-card overflow-hidden">
+              <div className="aspect-square bg-slate-50">
+                {p.portrait ? <img src={p.portrait} alt={p.name} className="h-full w-full object-cover" data-testid="persona-portrait" />
+                  : <div className="flex h-full w-full items-center justify-center text-5xl font-bold text-slate-600">{p.name[0]}</div>}
+              </div>
+            </div>
+            <button onClick={regen} disabled={busy} data-testid="persona-regen-portrait" className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm text-slate-700 hover:bg-slate-100"><RefreshCw size={15} /> Buat Ulang Potret (25 kredit)</button>
+          </div>
+          <div className="space-y-4">
+            <Row label="Ringkasan" value={prof.identity?.summary} />
+            <Row label="Latar belakang" value={prof.identity?.background} />
+            <Row label="Pekerjaan" value={prof.identity?.occupation} />
+            <Row label="Sifat utama" value={(prof.personality?.primary_traits || []).join(", ")} />
+            <Row label="Gaya komunikasi" value={prof.personality?.communication_style} />
+            <Row label="Formalitas" value={prof.personality?.formality} />
+            <Row label="Batasan" value={prof.personality?.boundaries} />
+            <Row label="Instruksi sistem" value={prof.system_instructions} />
+          </div>
+        </div>
+      )}
+
+      {tab === "settings" && (
+        <div className="grid gap-6 md:grid-cols-2" data-testid="persona-settings-tab">
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Otak Persona (Model AI)</label>
+              <select className="input-dark py-2.5" value={p.model} onChange={(e) => changeModel(e.target.value)} data-testid="persona-model-select">
+                {["openai", "anthropic", "gemini"].filter((pv) => models.some((m) => m.provider === pv)).map((pv) => (
+                  <optgroup key={pv} label={models.find((m) => m.provider === pv)?.provider_label || pv}>
+                    {models.filter((m) => m.provider === pv).map((m) => <option key={m.id} value={m.id}>{m.label} — {m.tagline}{m.credits_typical != null ? ` (≈${m.credits_typical} kredit/pesan)` : ""}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            <ToolsPicker modelKey={p.model} value={p.tools || []} onChange={changeTools} compact />
+            <VoiceModelPicker value={p.voice_model} onChange={changeVoiceModel} compact />
+          </div>
+          <div className="space-y-4">
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Karakter Suara</label>
+                <button onClick={() => previewVoice(p.voice || "alloy")} data-testid="persona-voice-preview-current" className="flex items-center gap-1 text-xs font-semibold text-[#2F6BFF]" title="Dengar suara saat ini">
+                  {previewing === (p.voice || "alloy") ? <Loader2 size={13} className="animate-spin" /> : <Volume2 size={13} />} Dengar
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                {voices.map((v) => {
+                  const on = (p.voice || "alloy") === v;
+                  return (
+                    <div key={v} data-testid={`persona-voice-${v}`}
+                      className={`flex items-center gap-2 rounded-xl border p-2.5 transition ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3] hover:bg-slate-50"}`}>
+                      <button type="button" onClick={() => changeVoice(v)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${on ? "btn-grad border-transparent" : "border-slate-300"}`}>{on && <span className="h-1.5 w-1.5 rounded-full bg-white" />}</span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-bold capitalize text-slate-900">{v}</span>
+                          <span className="block truncate text-xs text-slate-400">{VOICE_LABELS[v] || "Suara"}</span>
+                        </span>
+                      </button>
+                      <button type="button" onClick={() => previewVoice(v)} data-testid={`persona-voice-preview-${v}`}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#E7ECF3] text-[#2F6BFF] hover:bg-[#EEF3FF]" title="Dengar contoh">
+                        {previewing === v ? <Loader2 size={15} className="animate-spin" /> : <Volume2 size={15} />}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex gap-2 border-t border-slate-200 pt-4">
+              <button onClick={dup} className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-slate-200 py-2.5 text-sm text-slate-700 hover:bg-slate-100"><Copy size={14} /> Duplikat</button>
+              <button onClick={del} data-testid="persona-delete" className="flex items-center gap-1 rounded-xl border border-[#EF4444]/40 px-4 text-sm text-[#EF4444] hover:bg-[#EF4444]/10"><Trash2 size={16} /> Hapus</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "appearance" && (
+        <div className="space-y-4">
+          <Row label="Wajah" value={prof.appearance?.face} />
+          <Row label="Rambut" value={prof.appearance?.hair} />
+          <Row label="Mata" value={prof.appearance?.eyes} />
+          <Row label="Pakaian" value={prof.appearance?.clothing} />
+          <Row label="Ciri khas" value={prof.appearance?.distinctive} />
+          <Row label="Gaya visual" value={prof.appearance?.visual_style} />
+        </div>
+      )}
+      {tab === "knowledge" && <div className="aivora-card p-6"><KnowledgeTab personaId={id} /></div>}
+      {tab === "memory" && (
+        <div>
+          <div className="mb-4 flex gap-2">
+            <input className="input-dark" placeholder="Tambah memori (mis. Saya suka kopi hitam)" value={newMem} onChange={(e) => setNewMem(e.target.value)} data-testid="mem-input" />
+            <button onClick={addMem} data-testid="mem-add" className="btn-grad rounded-xl px-4"><Plus size={18} /></button>
+          </div>
+          <p className="mb-3 text-xs text-slate-500">Memori ⭐ <b>prioritas</b> selalu ikut di setiap percakapan; memori lain dipilih otomatis sesuai relevansi pesan (maks 10) untuk menghemat token.</p>
+          {mems.length === 0 ? <p className="text-sm text-slate-500">Belum ada memori untuk persona ini.</p> : [...mems].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map((m) => (
+            <div key={m.id} className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3" data-testid={`mem-${m.id}`}>
+              <span className={`flex items-center gap-2 text-sm ${m.enabled ? "text-slate-700" : "text-slate-500 line-through"}`}>{m.pinned && <Star size={13} className="shrink-0 fill-[#F59E0B] text-[#F59E0B]" />}{m.content}</span>
+              <div className="flex items-center gap-3">
+                <button onClick={() => pinMem(m)} title={m.pinned ? "Lepas prioritas" : "Jadikan prioritas (selalu diingat)"} className={m.pinned ? "text-[#F59E0B]" : "text-slate-400 hover:text-[#F59E0B]"} data-testid={`mem-pin-${m.id}`}><Star size={15} className={m.pinned ? "fill-[#F59E0B]" : ""} /></button>
+                <button onClick={() => toggleMem(m)} className="text-xs text-[#2F6BFF]">{m.enabled ? "Nonaktif" : "Aktif"}</button>
+                <button onClick={() => delMem(m)} className="text-slate-500 hover:text-[#EF4444]"><Trash2 size={14} /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(tab === "profile" || tab === "appearance") && (
+        <div className="mt-6 aivora-card p-4">
+          <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900"><Wand2 size={15} className="text-[#7C3AED]" /> Edit dengan bahasa alami</h3>
+          <div className="flex gap-2">
+            <input className="input-dark" placeholder="mis. Buat lebih tenang dan ubah rambut jadi pendek" value={instr} onChange={(e) => setInstr(e.target.value)} data-testid="persona-edit-input" />
+            <button onClick={applyEdit} disabled={busy} className="btn-grad rounded-xl px-5 text-sm" data-testid="persona-edit-apply">Terapkan</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
