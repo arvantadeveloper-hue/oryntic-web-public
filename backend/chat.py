@@ -16,7 +16,7 @@ from auth import current_user, workspace_id, _lang_name, lang_rule
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit, throttle_message, inflight_start, inflight_end
-from tools import route_model, wants_tool, plan_tool, GITHUB_RE, SOCIAL_RE, run_image_tool, is_media_refusal, EDIT_RE, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task, CAL_RE
+from tools import route_model, wants_tool, plan_tool, GITHUB_RE, SOCIAL_RE, run_image_tool, norm_image_opts, is_media_refusal, EDIT_RE, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task, CAL_RE
 from pricing import rate as tool_rate, refresh as pricing_refresh
 import seedance
 from llm import model_label
@@ -609,7 +609,8 @@ async def _image_turn(ctx, plan: dict, confirm_threshold: int):
                 else f"Siap, aku bisa buatkan {n} gambarnya! 🎨 Perkiraan biaya ±{credits * n} kredit. Lanjutkan?" if n > 1
                 else "Siap, aku bisa buatkan gambarnya! 🎨 Mau pakai model yang mana?")
         yield ctx.sse(delta=text)
-        pt = {"kind": "image_edit" if ref else "image_set" if n > 1 else "image", "prompt": prompt, "prompts": prompts, "credits": credits * n, "count": n, "request": ctx.user_text[:300]}
+        pt = {"kind": "image_edit" if ref else "image_set" if n > 1 else "image", "prompt": prompt, "prompts": prompts, "credits": credits * n, "count": n, "request": ctx.user_text[:300],
+              "aspect_ratio": plan.get("aspect_ratio") or "1:1", "quality": plan.get("quality") or "standar"}
         if n == 1:
             from tools import image_model_options
             pt["options"] = await image_model_options()
@@ -626,7 +627,7 @@ async def _image_turn(ctx, plan: dict, confirm_threshold: int):
     yield ctx.sse(status="Mengedit gambar..." if ref else "Merender gambar...", rendering="image")
     out = None
     try:
-        out = await run_image_tool(ctx.user["id"], prompt, ref["path"] if ref else None)
+        out = await run_image_tool(ctx.user["id"], prompt, ref["path"] if ref else None, "gemini-image", plan.get("aspect_ratio") or "1:1", plan.get("quality") or "standar")
     except Exception as exc:
         logging.getLogger("chat").warning("image turn failed: %s", exc)
         out = None
@@ -917,6 +918,8 @@ class SocialChatIn(BaseModel):
 class VoiceImageIn(BaseModel):
     prompt: str = Field(min_length=1, max_length=2000)
     edit_previous: bool = False
+    aspect_ratio: str = Field(default="1:1", max_length=8)
+    quality: str = Field(default="standar", max_length=12)
     request: str = Field(default="", max_length=300)
 
 
@@ -946,7 +949,7 @@ async def voice_image(cid: str, x: VoiceImageIn, u: dict = Depends(current_user)
     persona = await _voice_persona(cid, u)
     ref = await _latest_media(cid, "image") if x.edit_previous else None
     try:
-        out = await run_image_tool(u["id"], x.prompt, ref["path"] if ref else None)
+        out = await run_image_tool(u["id"], x.prompt, ref["path"] if ref else None, "gemini-image", *norm_image_opts(x.aspect_ratio, x.quality))
     except Exception as exc:
         logging.getLogger("chat").warning("voice image failed: %s", exc)
         raise HTTPException(502, "Gambar belum berhasil dibuat, coba lagi") from exc
@@ -1730,7 +1733,8 @@ async def _pending_msg(cid: str, mid: str, u: dict) -> dict:
 
 
 @router.post("/conversations/{cid}/messages/{mid}/run-tool")
-async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Optional[str] = None, resolution: Optional[str] = None, real_person: bool = False, with_audio: bool = False, u: dict = Depends(current_user)):
+async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Optional[str] = None, resolution: Optional[str] = None, real_person: bool = False, with_audio: bool = False,
+                   aspect: Optional[str] = None, quality: Optional[str] = None, u: dict = Depends(current_user)):
     msg = await _pending_msg(cid, mid, u)
     over = await quota_exceeded(u)
     if over:
@@ -1778,8 +1782,9 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
         await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
         return {**msg, **upd, "pending_tool": None}
     model = choice if choice in {o["id"] for o in pt.get("options") or [] if o.get("available")} else "gemini-image"
+    aspect, quality = norm_image_opts(aspect or pt.get("aspect_ratio"), quality or pt.get("quality"))
     try:
-        out = await run_image_tool(u["id"], pt["prompt"], pt.get("reference_path"), model)
+        out = await run_image_tool(u["id"], pt["prompt"], pt.get("reference_path"), model, aspect, quality)
     except Exception as exc:
         logging.getLogger("chat").warning("run-tool image failed: %s", exc)
         await db.messages.update_one({"id": mid}, {"$unset": {"pending_tool.running": ""}})

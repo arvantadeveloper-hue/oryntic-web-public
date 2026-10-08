@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
-import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins, X, UserRound, ShieldCheck, Volume2, VolumeX, Save, AlarmClock } from "lucide-react";
+import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins, X, UserRound, ShieldCheck, Volume2, VolumeX, Save, AlarmClock, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 
@@ -42,6 +42,7 @@ export function MediaList({ media = [], dark = false }) {
           <button type="button" onClick={() => setZoom(x)} data-testid="media-image" className={`block w-full min-h-[80px] cursor-zoom-in overflow-hidden rounded-xl text-left ${dark ? "bg-black/20" : "bg-slate-100"}`}>
             <img src={x.url || fileUrl(x.path)} alt={x.name || ""} className="max-h-72 w-full object-cover transition group-hover:scale-[1.01]" />
           </button>
+          {x.quality && <span className={`mt-1 block text-[11px] ${dark ? "text-white/50" : "text-slate-400"}`} data-testid="media-image-meta">{x.model} · {ASPECT_LABEL[x.aspect_ratio] || x.aspect_ratio} · kualitas {x.quality}</span>}
           {x.path && <button type="button" onClick={() => openPublish(x)} data-testid="media-publish-btn" className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black/80"><Share2 size={11} /> Publikasikan</button>}
         </div>
       ))}
@@ -72,11 +73,11 @@ export function MediaList({ media = [], dark = false }) {
 const RENDER_LABEL = { image: "Merender gambar…", video: "Merender video… (±2–5 menit)" };
 
 const BOX_ASPECT = { "9:16": "aspect-[9/16] max-w-[240px]", "3:4": "aspect-[3/4] max-w-[320px]", "1:1": "aspect-square max-w-[320px]", "4:3": "aspect-[4/3] max-w-[420px]", "21:9": "aspect-[21/9] max-w-[480px]" };
-export const ASPECT_LABEL = { "16:9": "16:9", "9:16": "9:16 Portrait", "1:1": "1:1 Persegi", "4:3": "4:3", "3:4": "3:4", "21:9": "21:9 Sinematik" };
+export const ASPECT_LABEL = { "16:9": "16:9 Lanskap", "9:16": "9:16 Potret", "1:1": "1:1 Persegi", "4:3": "4:3", "3:4": "3:4", "21:9": "21:9 Sinematik" };
 
 export function RenderingBox({ kind = "image", dark = false, aspect = "" }) {
   const Icon = kind === "video" ? Clapperboard : ImageIcon;
-  const shape = kind === "video" ? (BOX_ASPECT[aspect] || "aspect-video max-w-[420px]") : "aspect-[4/3] max-w-[420px]";
+  const shape = kind === "video" ? (BOX_ASPECT[aspect] || "aspect-video max-w-[420px]") : (BOX_ASPECT[aspect] || "aspect-[4/3] max-w-[420px]");
   return (
     <div data-testid={`rendering-box-${kind}`} className={`relative mt-2 w-full overflow-hidden rounded-xl border ${shape} ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-100"}`}>
       <div className="render-shimmer absolute inset-0" />
@@ -168,26 +169,51 @@ function VideoChoiceCard({ m, cid, onDone, dark }) {
   );
 }
 
-// Image confirmation with model choice (Nano Banana vs GPT Image) — picking a model runs the tool.
+// Image confirmation with model choice (Nano Banana vs GPT Image) + aspect ratio & quality — picking a model runs the tool.
+const IMG_ASPECTS = [["1:1", "Persegi", "aspect-square"], ["16:9", "Lanskap", "aspect-video"], ["9:16", "Potret", "aspect-[9/16]"], ["4:3", "4:3", "aspect-[4/3]"], ["3:4", "3:4", "aspect-[3/4]"]];
+const IMG_QUALITIES = [["hemat", "Hemat", "1K · draf"], ["standar", "Standar", "2K"], ["tinggi", "Tinggi", "4K · detail"]];
+const SEL_CLS = (dark) => `w-full appearance-none rounded-lg border py-1.5 pl-2.5 pr-7 text-[11px] font-semibold outline-none transition focus:ring-2 focus:ring-[#2F6BFF]/40 ${dark ? "border-white/15 bg-white/10 text-white [&>option]:text-slate-900" : "border-amber-200 bg-white text-slate-800"}`;
+function Combo({ label, value, onChange, items, testid, dark }) {
+  return (
+    <label className="flex min-w-[140px] flex-1 flex-col gap-1 sm:max-w-[240px]" data-testid={`${testid}-picker`}>
+      <span className={dark ? "text-white/60" : "text-amber-700"}>{label}</span>
+      <span className="relative block">
+        <select value={value} onChange={(e) => onChange(e.target.value)} className={SEL_CLS(dark)} data-testid={testid}>
+          {items.map(([v, l, hint]) => <option key={v} value={v}>{l}{hint ? ` — ${hint}` : ""}</option>)}
+        </select>
+        <ChevronDown size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-60" />
+      </span>
+    </label>
+  );
+}
 function ImageChoiceCard({ m, cid, onDone, dark = false }) {
   const [busy, setBusy] = useState(m.pending_tool?.running ? "run" : "");
   const pt = m.pending_tool;
-  if (busy === "run") return <RenderingBox kind={pt.kind} dark={dark} />;
+  const [aspect, setAspect] = useState(pt.aspect_ratio || "1:1");
+  const [quality, setQuality] = useState(pt.quality || "standar");
+  if (busy === "run") return <RenderingBox kind={pt.kind} dark={dark} aspect={aspect} />;
   const pick = async (id) => {
     setBusy("run");
-    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: id, app_url: window.location.origin } }); await onDone?.(); }
+    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: id, aspect, quality, app_url: window.location.origin } }); await onDone?.(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal membuat gambar"); setBusy(""); }
   };
   const cancel = async () => { setBusy("cancel"); try { await api.post(`/conversations/${cid}/messages/${m.id}/cancel-tool`); await onDone?.(); } catch (e) { setBusy(""); } };
+  const price = (o) => o.prices?.[quality]?.[aspect] ?? o.credits;
+  const lbl = dark ? "text-white/60" : "text-amber-700";
   return (
     <div data-testid="tool-request-card" className={`mt-2 rounded-xl border p-3 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
-      <p className="mb-2 flex items-center gap-1.5 font-semibold"><ImageIcon size={14} /> {pt.kind === "image_edit" ? "Edit gambar terakhir" : "Buat gambar"} — pilih model:</p>
+      <p className="mb-2 flex items-center gap-1.5 font-semibold"><ImageIcon size={14} /> {pt.kind === "image_edit" ? "Edit gambar terakhir" : "Buat gambar"}</p>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <Combo label="Rasio" value={aspect} onChange={setAspect} items={IMG_ASPECTS.map(([v, l]) => [v, `${l} ${v}`])} testid="image-aspect" dark={dark} />
+        <Combo label="Kualitas" value={quality} onChange={setQuality} items={IMG_QUALITIES} testid="image-quality" dark={dark} />
+      </div>
+      <p className={`mb-1.5 ${lbl}`}>Pilih model:</p>
       <div className="grid gap-2 sm:grid-cols-2">
         {pt.options.map((o) => (
           <button key={o.id} type="button" disabled={!o.available || !!busy} onClick={() => pick(o.id)} data-testid={`image-choice-${o.id}`}
             className={`rounded-xl border p-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${dark ? "border-white/15 bg-white/5 hover:bg-white/10" : "border-amber-200 bg-white hover:border-[#2F6BFF]"}`}>
-            <span className="flex items-center justify-between gap-2"><span className="font-bold">{o.label}</span><span className="inline-flex items-center gap-1 font-semibold text-[#2F6BFF]"><Coins size={11} /> {o.credits} kredit</span></span>
-            <span className={`block text-[11px] ${dark ? "text-white/60" : "text-slate-500"}`}>{o.desc}{!o.available ? " · kunci provider belum diatur" : ""}</span>
+            <span className="flex items-center justify-between gap-2"><span className="font-bold">{o.label}</span><span className="inline-flex items-center gap-1 font-semibold text-[#2F6BFF]" data-testid={`image-price-${o.id}`}><Coins size={11} /> {price(o)} kredit</span></span>
+            <span className={`block text-[11px] ${dark ? "text-white/60" : "text-slate-500"}`}>{o.desc}{o.id === "gpt-image" && ["4:3", "3:4"].includes(aspect) ? " · dirender 3:2 (ukuran terdekat)" : ""}{!o.available ? " · kunci provider belum diatur" : ""}</span>
           </button>
         ))}
       </div>

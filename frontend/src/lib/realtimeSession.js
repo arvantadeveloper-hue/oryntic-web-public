@@ -217,7 +217,7 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       return { ok: true, name: r.data.name, link: r.data.webViewLink, shared: r.data.shared, note: "the clickable link was posted to the chat panel (no need to read the URL aloud)" };
     }
     if (name === "generate_image") {
-      const r = await api.post(`/conversations/${cid}/voice-image`, { prompt: args.prompt, edit_previous: !!args.edit_previous, request: args.request || "" });
+      const r = await api.post(`/conversations/${cid}/voice-image`, { prompt: args.prompt, edit_previous: !!args.edit_previous, aspect_ratio: args.aspect_ratio || "1:1", quality: args.quality || "standar", request: args.request || "" });
       return { ok: true, credits: r.data.credits, edited: r.data.edited, note: "the image is now visible in the chat panel; tell the user it's there and ask if they want changes" };
     }
     if (name === "generate_video") {

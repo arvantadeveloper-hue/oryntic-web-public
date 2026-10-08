@@ -201,13 +201,16 @@ async def llm_json(system_message: str, user_text: str, model_key: str | None = 
         return {}
 
 
-async def generate_image(prompt: str, reference_b64: Optional[str] = None) -> Optional[str]:
+async def generate_image(prompt: str, reference_b64: Optional[str] = None, aspect_ratio: Optional[str] = None, image_size: Optional[str] = None) -> Optional[str]:
     """Returns a data URL string (data:image/png;base64,...) or None."""
+    params = {"modalities": ["image", "text"]}
+    if aspect_ratio or image_size:
+        params["image_config"] = {k: v for k, v in (("aspect_ratio", aspect_ratio), ("image_size", image_size)) if v}
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=new_id(),
         system_message="You are an expert character portrait artist.",
-    ).with_model("gemini", IMAGE_MODEL).with_params(modalities=["image", "text"])
+    ).with_model("gemini", IMAGE_MODEL).with_params(**params)
 
     if reference_b64:
         msg = UserMessage(text=prompt, file_contents=[ImageContent(reference_b64)])
