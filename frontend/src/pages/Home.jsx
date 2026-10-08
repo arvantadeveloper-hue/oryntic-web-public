@@ -48,6 +48,10 @@ export default function Home() {
   const [personas, setPersonas] = useState([]);
   const [convs, setConvs] = useState([]);
   const isAdmin = user?.role === "admin";
+  const support = (personas || []).find((p) => p.builtin);
+  const openSupport = async (call) => {
+    try { const r = await api.post("/conversations", { persona_ids: [support.id], type: "private" }); nav(`/chat/${r.data.id}${call ? "?call=1" : ""}`); } catch (e) {}
+  };
 
   useEffect(() => {
     api.get("/tasks").then((r) => setTasks(r.data)).catch(() => {});
@@ -98,9 +102,23 @@ export default function Home() {
           <img src={BRAND_HERO} alt="" className="hero-float pointer-events-none absolute -right-6 top-1/2 hidden w-72 -translate-y-1/2 drop-shadow-2xl md:block lg:w-80" />
         </section>
 
+        {support && (
+          <section className="aivora-card flex flex-col gap-4 p-4 sm:flex-row sm:items-center" data-testid="home-support-agent" style={{ background: "linear-gradient(90deg, rgba(47,107,255,.08), rgba(124,58,237,.06))" }}>
+            <img src={support.portrait} alt={support.name} className="h-16 w-16 shrink-0 rounded-2xl object-cover shadow-md" />
+            <div className="min-w-0 flex-1">
+              <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-900">{support.name} <span className="rounded-full bg-[#2F6BFF]/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#2F6BFF]">Dukungan</span>{support.video_avatar && <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-600"><Video size={10} /> Video interaktif</span>}</p>
+              <p className="mt-1 text-sm text-slate-600">Butuh bantuan atau teman ngobrol? Hubungi Customer Support Agent kami melalui chat / panggilan (mendukung realtime video interaktif).</p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <button onClick={() => openSupport(false)} className="btn-primary flex items-center gap-2 py-2" data-testid="home-support-chat"><MessageSquare size={14} /> Chat</button>
+              <button onClick={() => openSupport(true)} className="flex items-center gap-2 rounded-xl border border-[#2F6BFF]/30 bg-white px-4 py-2 text-sm font-semibold text-[#2F6BFF] hover:bg-[#EEF3FF]" data-testid="home-support-call"><Mic size={14} /> Panggil</button>
+            </div>
+          </section>
+        )}
+
         {/* stats */}
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Stat icon={Bot} label="Active Agents" value={personas.length} tint="#2F6BFF" testId="stat-agents" />
+          <Stat icon={Bot} label="Active Agents" value={personas.filter((p) => !p.builtin).length} tint="#2F6BFF" testId="stat-agents" />
           <Stat icon={FolderKanban} label="Projects" value={tasks.length} tint="#7C3AED" testId="stat-projects" />
           <Stat icon={CheckCircle2} label="Tasks Completed" value={completed.length} tint="#10B981" testId="stat-completed" />
           <Stat icon={Clock} label="Panggilan" value={convs.filter((c) => c.type === "meeting").length} tint="#F59E0B" testId="stat-meetings" />

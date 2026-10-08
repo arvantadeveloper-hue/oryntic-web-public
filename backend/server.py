@@ -31,6 +31,7 @@ from assignments import router as assignments_router, tasks_tick
 from models import router as models_router
 from pending_files import router as pending_files_router
 from voice import router as voice_router
+from support_agent import router as support_router
 from files import router as files_router
 from storage import init_storage
 from realtime import manager, user_manager
@@ -51,6 +52,7 @@ app.include_router(personas_router)
 from portraits import router as portraits_router, migrate_portraits
 app.include_router(portraits_router, prefix="/api")
 app.include_router(chat_router)
+app.include_router(support_router)
 app.include_router(agents_router)
 app.include_router(reminders_router)
 app.include_router(wallet_router)

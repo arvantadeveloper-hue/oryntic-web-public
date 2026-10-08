@@ -241,6 +241,11 @@ class CallIn(BaseModel):
 async def _call_personas(conv: dict, u: dict) -> list:
     pids = conv.get("persona_ids") or ([conv["persona_id"]] if conv.get("persona_id") else [])
     personas = [p async for p in db.personas.find({"id": {"$in": pids}, "user_id": workspace_id(u), "deleted": {"$ne": True}}, {"_id": 0})]
+    from support_agent import SUPPORT_ID, support_persona
+    if SUPPORT_ID in pids:
+        sp = await support_persona()
+        if sp:
+            personas.append(sp)
     personas.sort(key=lambda p: pids.index(p["id"]))
     if not personas:
         raise HTTPException(400, "Percakapan ini tidak memiliki persona")
@@ -266,6 +271,11 @@ async def _close_stale_calls(user_id: str):
 async def _session_instructions(persona: dict, u: dict, roster: list, history: str, opening, role: str, title: str = "", panel: str = "") -> str:
     """Static persona/style first (cacheable prefix), per-call context last."""
     text = await _persona_system(persona, u, None, voice_mode=True) + "\n\n" + SPEAKING_STYLE
+    if persona.get("builtin"):
+        if history.strip():
+            text += f"\n\nRecent conversation with the user (for context):\n{history}"
+        text += f"\n\n{u.get('name') or 'The user'} opens the conversation. Do NOT greet or speak first — wait for them, then respond to what they actually say."
+        return text
     rt = await get_routing()
     text += (f"\n\nMODEL CONFIRMATION: your own model is '{model_label(persona.get('model'))}' (id {persona.get('model')}). Before you call assign_task for coding/IT work "
              f"(recommended: {model_label(rt['it_model'])}, id {rt['it_model']}) or heavy research (recommended: {model_label(rt['research_model'])}, id {rt['research_model']}), "
@@ -400,7 +410,8 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         from provider_tools import web_search_tool, code_tool
         call_persona = await db.personas.find_one({"id": call["persona_id"]}, {"_id": 0, "model": 1, "tools": 1}) or {}
         web_on, code_on = bool(web_search_tool(call_persona)), bool(code_tool(call_persona))
-        tools = [ASSIGN_TOOL, SEARCH_TOOL, CALENDAR_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + ([RUN_CODE_TOOL] if code_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        from support_agent import is_support
+        tools = [] if is_support(call["persona_id"]) else [ASSIGN_TOOL, SEARCH_TOOL, CALENDAR_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + ([RUN_CODE_TOOL] if code_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:

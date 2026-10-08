@@ -76,6 +76,7 @@ export default function Chat() {
   const [forwardMsg, setForwardMsg] = useState(null);
   const [recording, setRecording] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
+  useEffect(() => { if (conv && new URLSearchParams(location.search).get("call") === "1") { setVideoOpen(true); nav(`/chat/${id}`, { replace: true }); } }, [conv?.id]); // eslint-disable-line
   const [showConvList, setShowConvList] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [showDrive, setShowDrive] = useState(false);
@@ -521,7 +522,7 @@ export default function Chat() {
                 </button>
               ); })}
               {friends.length > 0 && <p className="px-1 pt-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Asisten</p>}
-              {(personas || []).map((p) => {
+              {(personas || []).filter((p) => !p.builtin).map((p) => {
                 const on = picked.includes(p.id);
                 return (
                   <button key={p.id} onClick={() => togglePick(p.id)} data-testid={`pick-${p.id}`} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${on ? "border-[#2F6BFF] bg-[#EEF3FF]" : "border-[#E7ECF3] hover:bg-slate-50"}`}>

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, PhoneOff, Loader2, Zap, MonitorUp, MonitorOff, Camera } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Loader2, Zap, MonitorUp, MonitorOff, Camera, Video, VideoOff } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { vadUpdate, reportUsage, ContextPruner, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL, removeAllCallAudio, bargeMs, loadBehaviour, BEHAVIOUR } from "../lib/realtimeSession";
@@ -10,6 +10,7 @@ import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingCha
 import { MeetingShell, useMeetingLayout } from "./MeetingShell";
 import { InviteDialog } from "./InviteToCall";
 import { useAuth } from "../context/AuthContext";
+import { VideoConfirmModal, useAvatarVideo, AvatarVideoView } from "./SupportVideo";
 
 // ChatGPT-Voice style call: speech-to-speech via OpenAI Realtime (WebRTC), negotiated through our backend.
 export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onConvChange, opening = null }) {
@@ -52,10 +53,14 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
   const tickRef = useRef(null);
   const runIdRef = useRef(0);
   const prunerRef = useRef(null);
+  const remoteStreamRef = useRef(null);
+  const isSupport = !!persona.builtin;
 
   const secs = () => (startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0);
 
   const send = (ev) => { try { if (dcRef.current?.readyState === "open") dcRef.current.send(JSON.stringify(ev)); } catch (e) {} };
+  const inject = (text) => send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
+  const video = useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject, phaseRef, enabled: isSupport });
   // one active response per session: queue response.create while one runs, flush on response.done
   const respActiveRef = useRef(false);
   const respQueueRef = useRef([]);
@@ -135,9 +140,15 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       case "response.created":
         respActiveRef.current = true; break;
       case "input_audio_buffer.speech_started":
-        confirmInterrupt(); break;
+        video.onUserSpeaking(true); confirmInterrupt(); break;
       case "input_audio_buffer.speech_stopped":
-        setPhase("thinking"); break;
+        video.onUserSpeaking(false); setPhase("thinking"); break;
+      case "output_audio_buffer.started":
+        video.onAssistantAudioStart(); break;
+      case "output_audio_buffer.stopped":
+        video.onAssistantAudioStop(); break;
+      case "output_audio_buffer.cleared":
+        video.onInterrupt(); break;
       case "conversation.item.input_audio_transcription.completed": {
         const t = (ev.transcript || "").trim();
         if (t && isBackchannel(t) && BEHAVIOUR.backchannel_resume && Date.now() - interruptedAtRef.current < (BEHAVIOUR.backchannel_window_ms || 8000)) {
@@ -208,7 +219,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     const stale = () => run !== runIdRef.current || endedRef.current;
     const pc = new RTCPeerConnection(); pcRef.current = pc;
     const audioEl = document.createElement("audio"); audioEl.autoplay = true; audioElRef.current = audioEl; document.body.appendChild(audioEl);
-    pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; monitor(e.streams[0]); };
+    pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; remoteStreamRef.current = e.streams[0]; monitor(e.streams[0]); if (video.state === "on") { video.attachStream(e.streams[0]); audioEl.muted = true; } };
     streamRef.current.getTracks().forEach((t) => pc.addTrack(t, streamRef.current));
     const dc = pc.createDataChannel("oai-events"); dcRef.current = dc;
     prunerRef.current = new ContextPruner({ send });
@@ -283,6 +294,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     teardownPeer();
     try { pipeRef.current?.stop(); } catch (e) {}
     stopShare();
+    video.stop();
     window.__oryntixInCall = false; removeAllCallAudio();
   };
 
@@ -368,6 +380,11 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
         <p className={`flex items-center gap-1.5 text-center text-[11px] ${phase === "reconnecting" ? "font-semibold text-amber-300" : "text-white/70"}`} data-testid="rt-phase">{["connecting", "reconnecting"].includes(phase) && <Loader2 size={12} className="animate-spin" />}{label}</p>
       </div>
     </div>
+  ) : video.state !== "off" && video.state !== "confirm" ? (
+    <div className="flex flex-1 flex-col items-center gap-3 overflow-hidden px-4 pb-2 sm:px-6">
+      <div className="w-full max-w-3xl flex-1 min-h-0"><AvatarVideoView track={video.track} remaining={video.remaining} credits={video.credits} name={persona.name || "Oryntix"} onStop={() => video.stop("user")} state={video.state} /></div>
+      <p className={`flex items-center gap-2 text-sm ${phase === "reconnecting" ? "font-semibold text-amber-300" : "text-white/70"}`} data-testid="rt-phase">{["connecting", "reconnecting"].includes(phase) && <Loader2 size={14} className="animate-spin" />}{label}</p>
+    </div>
   ) : (
     <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-6">
       {avatar(260)}
@@ -380,6 +397,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     <div className="flex items-center justify-center gap-3 px-4 py-8 sm:gap-4">
       <button onClick={toggleMute} data-testid="rt-mute" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
       <button onClick={screen ? stopShare : startShare} disabled={phase === "connecting"} data-testid="rt-share-screen" title={screen ? "Berhenti membagikan layar" : "Bagikan layar — lalu tekan “Tunjukkan ke asisten” agar asisten melihatnya"} className={`flex h-14 w-14 items-center justify-center rounded-full transition disabled:opacity-50 ${screen ? "bg-emerald-500" : "bg-white/15 hover:bg-white/25"}`}>{screen ? <MonitorOff size={22} /> : <MonitorUp size={22} />}</button>
+      {isSupport && video.cfg?.enabled && <button onClick={() => (video.state === "on" ? video.stop("user") : video.setState("confirm"))} disabled={phase === "connecting" || ["starting", "ending"].includes(video.state)} data-testid="rt-video-toggle" title={video.state === "on" ? "Matikan video avatar" : `Video interaktif · ${video.cfg.credits_per_sec} kredit/detik`} className={`flex h-14 w-14 items-center justify-center rounded-full transition disabled:opacity-50 ${video.state === "on" ? "bg-[#2F6BFF]" : "bg-white/15 hover:bg-white/25"}`}>{["starting", "ending"].includes(video.state) ? <Loader2 size={22} className="animate-spin" /> : video.state === "on" ? <VideoOff size={22} /> : <Video size={22} />}</button>}
       {layout !== "chat" && <ChatToggleButton open={chat.open} unread={chat.unread} onClick={chat.toggle} />}
       <CallMoreMenu micPrefs={micPrefs} onMicChange={changeMic} pipeline={pipe} layout={layout} onLayoutChange={setLayout} onInvite={isHost && onConvChange ? () => setInvite(true) : null} inviteDisabled={phase === "connecting"} />
       <button onClick={hangup} data-testid="rt-end" title="Akhiri panggilan" className="flex h-14 w-14 items-center justify-center rounded-full bg-[#EF4444] transition hover:brightness-105"><PhoneOff size={22} /></button>
@@ -398,6 +416,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       <MeetingShell layout={layout} chatOpen={chat.open} stage={stage} caption={captionEl} controls={controls} participants={participants}
         chat={(variant) => <MeetingChatPanel variant={variant} cid={cid} messages={messages} onRefresh={onRefresh} onClose={chat.close} onExchange={onChatExchange} />} />
       {invite && <InviteDialog conv={conv} onClose={() => setInvite(false)} onInvited={(c) => onConvChange && onConvChange(c)} />}
+      {video.state === "confirm" && video.cfg && <VideoConfirmModal cfg={video.cfg} onClose={() => video.setState("off")} onConfirm={() => video.start()} />}
     </div>
   );
 }

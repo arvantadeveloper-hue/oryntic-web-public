@@ -161,8 +161,14 @@ class MemIn(BaseModel):
 
 
 async def _get_personas(ids, wid=None):
+    from support_agent import is_support, support_persona
     out = []
     for pid in ids:
+        if is_support(pid):
+            sp = await support_persona()
+            if sp:
+                out.append(sp)
+            continue
         q = {"id": pid}
         if wid:
             q["user_id"] = wid
@@ -200,6 +206,9 @@ def view_title(conv: dict, uid: str) -> dict:
 
 @router.post("/conversations")
 async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
+    from support_agent import SUPPORT_ID
+    if SUPPORT_ID in (x.persona_ids or []) and (len(x.persona_ids) > 1 or x.type != "private" or (x.participant_ids or [])):
+        raise HTTPException(400, "Oryntix (dukungan) hanya tersedia di percakapan privat")
     personas = await _get_personas(x.persona_ids, workspace_id(u))
     participants = await _resolve_participants(u, x.participant_ids or [])
     if not personas and len(participants) < 2:
@@ -213,7 +222,7 @@ async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
         "type": ctype,
         "persona_ids": [p["id"] for p in personas],
         "persona_id": personas[0]["id"] if personas else None,
-        "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy")} for p in personas],
+        "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy"), **({"builtin": True} if p.get("builtin") else {})} for p in personas],
         "title": x.title or (_conv_title(ctype, personas) if personas else "Grup " + ", ".join(h["name"] for h in humans)), "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
     }
     await db.conversations.insert_one(dict(doc))
@@ -455,6 +464,11 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in, and regardless of which AI model is answering or which tool/task mode is active. Never switch to another language unless the user explicitly asks for it."]
     parts.append(f"You are '{persona['name']}', an AI Assistent. {prof.get('system_instructions','')}")
     parts += persona_block(persona["name"], lang_name, voice_mode)
+    if persona.get("builtin"):
+        from support_agent import support_prompt_parts
+        parts += await support_prompt_parts()
+        parts.append(lang_rule(user))
+        return "\n".join(parts)
     parts.append(f"VIDEO PRICING (platform credits, from the admin price list): {await video_pricing_text()}; default clip {seedance.DEFAULT_DUR} s at 720p, Seedance 2.0 up to 15 s, Seedance 2.5 up to 30 s; resolution 480p (×{seedance.multipliers()['res'].get('480p')}) / 720p / 1080p (×{seedance.multipliers()['res'].get('1080p')}); real-person mode (Seedance 2.0, image-to-video only, ×{seedance.multipliers()['real_person']}); generated sound/ambience ×{seedance.multipliers()['audio']}. "
                  "Rendered videos are saved to the user's Google Drive (must be connected). When the user asks how much a video / Seedance costs, quote exactly these credits per second and the total for their duration.")
     parts.append("CAPABILITIES: You CAN create and show images (photorealistic photos, renders, illustrations, logos, posters), short videos/clips and downloadable documents directly in this chat — the platform renders them for you automatically whenever the user asks. NEVER say you cannot render, generate, display or send images or videos. If the user asks for one and it has not appeared yet, simply say briefly that you are preparing it.")
@@ -1330,7 +1344,7 @@ async def _typed_intercepts(ctx: ReplyCtx):
         async for ev in _revise_turn(ctx):
             yield ev
         return
-    if wants_tool(ctx.user_text) or ((EDIT_RE.search(ctx.user_text) or ANIMATE_RE.search(ctx.user_text)) and await _latest_media(ctx.cid, "image")):
+    if not ctx.persona.get("builtin") and (wants_tool(ctx.user_text) or ((EDIT_RE.search(ctx.user_text) or ANIMATE_RE.search(ctx.user_text)) and await _latest_media(ctx.cid, "image"))):
         plan = plan or await plan_tool(ctx.user_text, ctx.prompt)
         if plan.get("tool") != "none":
             async for ev in _tool_turn(ctx, plan):
@@ -1356,7 +1370,7 @@ async def _plain_reply(ctx: ReplyCtx):
             full = await llm_text(ctx.system, ctx.prompt, ctx.model_key)
         except Exception:
             full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
-    if not ctx.voice_mode and not tool_out and is_media_refusal(ctx.user_text, full):
+    if not ctx.voice_mode and not tool_out and not ctx.persona.get("builtin") and is_media_refusal(ctx.user_text, full):
         # the model wrongly claimed it cannot render — render it anyway
         plan = await plan_tool(ctx.user_text, ctx.prompt)
         if plan.get("tool") not in ("image", "image_edit", "video"):

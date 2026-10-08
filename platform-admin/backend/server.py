@@ -29,6 +29,8 @@ app.include_router(auth_router)
 app.include_router(platform_router)
 app.include_router(finance_router)
 app.include_router(pricing_router)
+from support_admin import router as support_router
+app.include_router(support_router)
 
 app.add_middleware(
     CORSMiddleware,

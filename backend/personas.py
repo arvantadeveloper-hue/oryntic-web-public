@@ -79,7 +79,9 @@ async def generate_profile(x: GenerateProfileIn, u: dict = Depends(require_admin
 @router.get("")
 async def list_personas(u: dict = Depends(current_user)):
     items = await db.personas.find({"user_id": workspace_id(u), "deleted": {"$ne": True}}, {"_id": 0}).sort("updated_at", -1).to_list(200)
-    return items
+    from support_agent import support_persona
+    sp = await support_persona()
+    return ([sp] if sp else []) + items
 
 
 @router.post("")
@@ -108,6 +110,11 @@ async def create_persona(x: PersonaIn, u: dict = Depends(require_admin)):
 
 @router.get("/{pid}")
 async def get_persona(pid: str, u: dict = Depends(current_user)):
+    from support_agent import is_support, support_persona
+    if is_support(pid):
+        sp = await support_persona()
+        if sp:
+            return sp
     p = await db.personas.find_one({"id": pid, "user_id": workspace_id(u)}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Persona not found")

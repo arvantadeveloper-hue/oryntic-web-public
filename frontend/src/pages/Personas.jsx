@@ -51,14 +51,15 @@ export default function Personas() {
       ) : (
         <div className="mt-8 grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
           {items.map((p) => (
-            <div key={p.id} onClick={() => nav(`/personas/${p.id}`)} data-testid={`persona-card-${p.id}`}
-              className="aivora-card aivora-card-hover group cursor-pointer overflow-hidden">
+            <div key={p.id} onClick={(e) => (p.builtin ? startChat(p, e) : nav(`/personas/${p.id}`))} data-testid={`persona-card-${p.id}`}
+              className={`aivora-card aivora-card-hover group cursor-pointer overflow-hidden ${p.builtin ? "ring-2 ring-[#2F6BFF]/40" : ""}`}>
               <div className="relative aspect-square bg-slate-50">
+                {p.builtin && <span className="absolute left-2 top-2 z-10 rounded-full bg-[#2F6BFF] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white" data-testid="persona-support-badge">Dukungan</span>}
                 {p.portrait ? <img src={p.portrait} alt={p.name} className="h-full w-full object-cover" />
                   : <div className="flex h-full w-full items-center justify-center text-4xl font-bold text-slate-600">{p.name[0]}</div>}
                 <div className="absolute inset-x-0 bottom-0 flex gap-2 p-3 opacity-0 transition group-hover:opacity-100" style={{ background: "linear-gradient(transparent, rgba(11,19,43,.9))" }}>
                   <button onClick={(e) => startChat(p, e)} data-testid={`persona-chat-${p.id}`} className="btn-grad flex flex-1 items-center justify-center gap-1 rounded-lg py-2 text-xs"><MessageSquare size={13} /> Chat</button>
-                  <button onClick={(e) => del(p, e)} data-testid={`persona-del-${p.id}`} className="rounded-lg bg-[#EF4444]/80 px-3 text-slate-900"><Trash2 size={14} /></button>
+                  {!p.builtin && <button onClick={(e) => del(p, e)} data-testid={`persona-del-${p.id}`} className="rounded-lg bg-[#EF4444]/80 px-3 text-slate-900"><Trash2 size={14} /></button>}
                 </div>
               </div>
               <div className="p-3">
