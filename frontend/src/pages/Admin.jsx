@@ -116,7 +116,7 @@ export default function Admin() {
           <div>
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Platform Tariff & Trial</h3>
             <div className="space-y-4">
-              <PlatformPricingCard pricing={pricing.pricing} rates={pricing.rates} rtModels={pricing.realtime_models} onSaved={(d) => setPricing({ ...pricing, pricing: d.pricing, rates: d.rates })} />
+              <PlatformPricingCard pricing={pricing.pricing} rates={pricing.rates} rtModels={pricing.realtime_models} tools={pricing.tools} onSaved={(d) => setPricing({ ...pricing, pricing: d.pricing, rates: d.rates, tools: d.tools || pricing.tools })} />
               <TrialCard trial={pricing.trial} onSaved={(tr) => setPricing({ ...pricing, trial: tr })} />
             </div>
           </div>

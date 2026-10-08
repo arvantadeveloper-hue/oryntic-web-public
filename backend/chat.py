@@ -1149,6 +1149,7 @@ DISCUSS_RE = re.compile(r"\b(satu per satu|bahas (dulu|bersama|saja)|diskusi(kan
 TASK_RE_STRONG = re.compile(r"\b(buatkan|susun(kan)?|kerjakan|siapkan|rancang|tulis(kan)?)\b", re.I)
 TEAM_RE = re.compile(r"\b(bagi(kan)? (tugas(nya)? )?ke tim|bagi tugas|delegasikan|kerjakan bersama tim|libatkan (tim|asisten lain)|split to team)\b", re.I)
 SEARCH_RE = re.compile(r"\b(cari(kan)?|carilah|temukan|ada (dokumen|hasil|notulen|laporan|file|berkas|tugas)|dokumen (tentang|mengenai|soal)|di ruang kerja|workspace)\b", re.I)
+WEB_RE = re.compile(r"\b(web|internet|google|online|daring|berita|terkini|terbaru|hari ini|saat ini|sekarang)\b", re.I)  # "cari di web…" is for the model's search tool, not the workspace
 TEAM_OFFER = ("\n\nAtau, karena tim kita ada beberapa asisten, saya juga bisa **bagi ke tim**: saya pecah jadi sub-tugas untuk asisten yang paling cocok, lalu saya rangkai hasilnya. "
               "Anda juga boleh menunjuk langsung, misalnya «bagian keuangan minta Nova».")
 
@@ -1256,7 +1257,7 @@ async def _typed_intercepts(ctx: ReplyCtx):
         async for ev in _emit_final(ctx, hit["content"], 0, hit["extra"]):
             yield ev
         return
-    if SEARCH_RE.search(ctx.user_text) and not TASK_RE_STRONG.search(ctx.user_text):
+    if SEARCH_RE.search(ctx.user_text) and not TASK_RE_STRONG.search(ctx.user_text) and not WEB_RE.search(ctx.user_text):
         async for ev in _search_turn(ctx):
             yield ev
         return
@@ -1289,11 +1290,23 @@ async def _typed_intercepts(ctx: ReplyCtx):
 async def _plain_reply(ctx: ReplyCtx):
     """Default streamed LLM answer; the last yielded item is the int credits used."""
     yield ctx.sse(start=True)
-    try:
-        full = await llm_text(ctx.system, ctx.prompt, ctx.model_key)
-    except Exception:
-        full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
-    if not ctx.voice_mode and is_media_refusal(ctx.user_text, full):
+    from provider_tools import persona_tools, run_with_tools
+    tool_ids = persona_tools(ctx.persona, ctx.model_key)
+    tool_out = None
+    if tool_ids:
+        yield ctx.sse(status="Menggunakan alat bawaan model…")
+        try:
+            tool_out = await run_with_tools(ctx.system, ctx.prompt, ctx.model_key, tool_ids, ctx.user["id"])
+        except Exception as exc:
+            logging.getLogger(__name__).warning("provider tools failed, falling back: %s", str(exc)[:200])
+    if tool_out and (tool_out["text"] or tool_out["media"]):
+        full = tool_out["text"] or "Ini hasilnya 🎨"
+    else:
+        try:
+            full = await llm_text(ctx.system, ctx.prompt, ctx.model_key)
+        except Exception:
+            full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
+    if not ctx.voice_mode and not tool_out and is_media_refusal(ctx.user_text, full):
         # the model wrongly claimed it cannot render — render it anyway
         plan = await plan_tool(ctx.user_text, ctx.prompt)
         if plan.get("tool") not in ("image", "image_edit", "video"):
@@ -1305,6 +1318,14 @@ async def _plain_reply(ctx: ReplyCtx):
     used = text_credits(ctx.prompt, full, ctx.model_key)
     await record_usage(ctx.user["id"], "chat", used, {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"], "model": ctx.model_key, **ctx.meta_extra})
     extra = {"model_key": ctx.model_key, "model_label": model_label(ctx.model_key), "routed": ctx.routed} if ctx.routed else {}
+    if tool_out and tool_out.get("tools_used"):
+        for t in tool_out["tools_used"]:
+            if t["credits"]:
+                await record_usage(ctx.user["id"], f"tool:{t['id']}", t["credits"], {"conversation_id": ctx.cid, "persona_id": ctx.persona["id"], "count": t["count"], **ctx.meta_extra})
+        used += tool_out["tool_credits"]
+        extra.update({"tools_used": tool_out["tools_used"], "citations": tool_out["citations"]})
+    if tool_out and tool_out.get("media"):
+        extra["media"] = tool_out["media"]
     ai_msg = await _save_ai_msg(ctx.cid, ctx.persona, full, used, ctx.via, extra)
     yield ctx.sse(final=True, message_id=ai_msg["id"], content=full)
     await notify(ctx.cid, {"type": "message", "role": "assistant", "persona_id": ctx.persona["id"], "message": clean(ai_msg)})

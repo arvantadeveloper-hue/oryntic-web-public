@@ -31,6 +31,11 @@ DEFAULT_PRICING = {
         "gemini-pro": {"in": 2.0, "out": 12.0}, "gemini-3-8-flash": {"in": 0.75, "out": 3.75}, "gemini-3-7-flash": {"in": 0.75, "out": 3.75}, "gemini-3-6-flash": {"in": 0.75, "out": 3.75},
         "gemini-3-5-flash": {"in": 1.5, "out": 9.0}, "gemini-3-flash": {"in": 0.5, "out": 3.0},
     },
+    # provider built-in tools: USD per call (OpenAI web search $10/1k, code interpreter $0.03/container, gpt-image ~$0.04/image;
+    # Gemini grounding $35/1k grounded prompts, code execution billed as tokens only; Anthropic web search $10/1k, code execution ≈ $0.05/container-hour)
+    "tool_prices": {"openai:web_search": 0.01, "openai:code_interpreter": 0.03, "openai:image_generation": 0.04,
+                    "gemini:google_search": 0.035, "gemini:code_execution": 0.0,
+                    "anthropic:web_search": 0.01, "anthropic:code_execution": 0.005},
     # credit packages: price_idr = usd × (1 + package_margin − discount) × (1 + tax) × fx, rounded to package_round_idr
     "package_margin_pct": 15.0, "package_round_idr": 1000,
     "packages": [
@@ -123,6 +128,34 @@ def model_text_credits(p: dict, model_key: str | None, in_chars: int, out_chars:
     cpt = max(1.0, float(p.get("chars_per_token") or 4.0))
     usd = (in_chars / cpt) * float(mp["in"]) / 1_000_000 + (out_chars / cpt) * float(mp["out"]) / 1_000_000
     return usd_to_credits(p, usd, "text")
+
+
+# Provider-hosted tools a persona can switch on (id = "provider:tool"); the model decides when to call them.
+TOOL_CATALOG = [
+    {"id": "openai:web_search", "provider": "openai", "label": "Pencarian web", "desc": "Mencari informasi terbaru di internet dengan sitasi.", "unit": "pencarian"},
+    {"id": "openai:code_interpreter", "provider": "openai", "label": "Code Interpreter", "desc": "Menjalankan Python untuk hitungan, analisis data & grafik.", "unit": "sesi"},
+    {"id": "openai:image_generation", "provider": "openai", "label": "Pembuatan gambar (GPT Image)", "desc": "Membuat/mengedit gambar langsung di dalam jawaban.", "unit": "gambar"},
+    {"id": "gemini:google_search", "provider": "gemini", "label": "Google Search", "desc": "Grounding jawaban dengan hasil Google Search terbaru.", "unit": "permintaan"},
+    {"id": "gemini:code_execution", "provider": "gemini", "label": "Eksekusi kode", "desc": "Menjalankan Python di sandbox Google (hanya biaya token).", "unit": "permintaan"},
+    {"id": "anthropic:web_search", "provider": "anthropic", "label": "Pencarian web", "desc": "Claude mencari di web dan mengutip sumbernya.", "unit": "pencarian"},
+    {"id": "anthropic:code_execution", "provider": "anthropic", "label": "Eksekusi kode", "desc": "Menjalankan Python di sandbox Anthropic.", "unit": "permintaan"},
+]
+TOOL_BY_ID = {t["id"]: t for t in TOOL_CATALOG}
+
+
+def tool_usd(p: dict, tool_id: str) -> float:
+    tp = {**DEFAULT_PRICING["tool_prices"], **(p.get("tool_prices") or {})}
+    return float(tp.get(tool_id) or 0.0)
+
+
+def tool_credits(p: dict, tool_id: str) -> int:
+    """Credits charged for ONE use of a provider tool (0 when the provider bills it as tokens only)."""
+    usd = tool_usd(p, tool_id)
+    return math.ceil(usd_to_credits(p, usd, "text")) if usd > 0 else 0
+
+
+def tool_table(p: dict) -> list:
+    return [{**t, "usd": tool_usd(p, t["id"]), "credits": tool_credits(p, t["id"])} for t in TOOL_CATALOG]
 
 
 def model_table(p: dict, catalog: list) -> list:

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from db import db, now_iso, new_id, clean
 from auth import current_user, require_admin, workspace_id
 from llm import llm_json, generate_image, record_usage, text_credits, MODEL_CATALOG, DEFAULT_MODEL_KEY
-from pricing import rate
+from pricing import rate, TOOL_BY_ID
 from ratelimit import rate_limit
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
@@ -27,7 +27,12 @@ class PersonaIn(BaseModel):
     model: str = DEFAULT_MODEL_KEY
     voice: str = "alloy"
     voice_model: Optional[str] = Field(default=None, pattern="^[a-z0-9.-]+$")  # Realtime voice model (gpt-realtime-2.1 / -2.1-mini / -2.0)
+    tools: list[str] = Field(default_factory=list, max_length=12)  # provider built-in tools ("openai:web_search", …)
     reference_photo: Optional[str] = None
+
+
+def _valid_tools(ids) -> list:
+    return [t for t in dict.fromkeys(ids or []) if t in TOOL_BY_ID]
 
 
 class PortraitIn(BaseModel):
@@ -89,6 +94,7 @@ async def create_persona(x: PersonaIn, u: dict = Depends(require_admin)):
         "model": _valid_model(x.model),
         "voice": x.voice or "alloy",
         "voice_model": x.voice_model or "gpt-realtime-2.1-mini",
+        "tools": _valid_tools(x.tools),
         "portrait": None,
         "reference_photo": x.reference_photo,
         "version": 1,
@@ -162,6 +168,7 @@ async def update_persona(pid: str, body: dict, u: dict = Depends(require_admin))
         "model": _valid_model(body.get("model", p.get("model"))),
         "voice": body.get("voice", p.get("voice", "alloy")),
         "voice_model": body.get("voice_model") or p.get("voice_model") or "gpt-realtime-2.1-mini",
+        "tools": _valid_tools(body["tools"]) if isinstance(body.get("tools"), list) else p.get("tools", []),
         "version": p.get("version", 1) + 1,
         "versions": versions[-10:],
         "updated_at": now_iso(),

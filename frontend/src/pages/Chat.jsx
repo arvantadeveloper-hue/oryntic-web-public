@@ -10,7 +10,7 @@ import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
 import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
-import { MediaList, ToolRequestCard, ModelBadge, RenderingBox, MessageCta, downloadUrl } from "../components/MessageExtras";
+import { MediaList, ToolRequestCard, ModelBadge, ToolUsage, RenderingBox, MessageCta, downloadUrl } from "../components/MessageExtras";
 import { GalleryPicker } from "../components/GalleryPicker";
 import { DrivePicker } from "../components/DrivePicker";
 import { SummaryPrompt } from "../components/ConversationTools";
@@ -430,6 +430,7 @@ export default function Chat() {
                     {m.tool === "model_choice" && m.choice && <ModelChoiceCard m={m} onPick={(mid) => send({ text: m.choice.user_text, choice_msg_id: m.id, extra: { model_choice: mid, replay: true, choice_msg_id: m.id } })} />}
                   </div>
                   <ModelBadge m={m} />
+                  <ToolUsage m={m} />
                   <div className="mt-1.5 flex gap-3 opacity-0 transition group-hover:opacity-100">
                     <button onClick={() => setReplyTo({ id: m.id, name: m.persona_name, content: m.content })} title="Balas (kutip)" aria-label="Balas" data-testid="msg-reply-btn" className="text-slate-400 hover:text-slate-700"><Reply size={14} /></button>
                     <button onClick={() => setForwardMsg(m)} title="Teruskan pesan" aria-label="Teruskan" data-testid="msg-forward-btn" className="text-slate-400 hover:text-slate-700"><Forward size={14} /></button>

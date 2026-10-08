@@ -4,6 +4,7 @@ import { ArrowLeft, MessageSquare, RefreshCw, Wand2, Copy, Trash2, Brain, Plus, 
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { VoiceModelPicker } from "../components/VoiceModelPicker";
+import { ToolsPicker } from "../components/ToolsPicker";
 import { KnowledgeTab } from "../components/KnowledgeTab";
 import { useAuth } from "../context/AuthContext";
 
@@ -34,6 +35,7 @@ export default function PersonaDetail() {
   const modelLabel = (key) => (models.find((m) => m.id === key) || {}).label || key;
   const changeModel = async (key) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, model: key }); setP(r.data); toast.success("Model diperbarui"); };
   const changeVoiceModel = async (vm) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, voice_model: vm }); setP(r.data); toast.success("Model suara diperbarui"); };
+  const changeTools = async (tools) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, tools }); setP(r.data); toast.success("Kemampuan tambahan diperbarui"); };
   const changeVoice = async (v) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, voice: v }); setP(r.data); toast.success("Suara diperbarui"); };
   const previewVoice = async (v) => {
     try { previewAudioRef.current?.pause(); } catch (e) {}
@@ -111,6 +113,7 @@ export default function PersonaDetail() {
               ))}
             </select>
           </div>
+          <div className="mt-3"><ToolsPicker modelKey={p.model} value={p.tools || []} onChange={changeTools} compact /></div>
           <div className="mt-3"><VoiceModelPicker value={p.voice_model} onChange={changeVoiceModel} compact /></div>
           <div className="mt-3">
             <div className="mb-1.5 flex items-center justify-between">

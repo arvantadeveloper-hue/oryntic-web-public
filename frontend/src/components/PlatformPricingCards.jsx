@@ -12,7 +12,7 @@ const PRICE_FIELDS = [
 ];
 const RATE_LABELS = { text_per_1k: "kredit / 1k karakter", image: "kredit / gambar", profile: "kredit / profil", stt: "kredit / transkripsi", tts: "kredit / TTS", realtime_per_min: "kredit / menit koneksi realtime (+ token audio aktual)", vision: "kredit / cuplikan layar", bandwidth_per_mb: "kredit / MB data panggilan", video_per_sec: "kredit / detik video" };
 
-export function PlatformPricingCard({ pricing, rates, rtModels, onSaved }) {
+export function PlatformPricingCard({ pricing, rates, rtModels, tools, onSaved }) {
   const [form, setForm] = useState(pricing);
   const [saving, setSaving] = useState(false);
   useEffect(() => setForm(pricing), [pricing]);
@@ -43,6 +43,18 @@ export function PlatformPricingCard({ pricing, rates, rtModels, onSaved }) {
             return <tr key={m.id} className="border-t border-[#E7ECF3]"><td className="py-1 pr-3 font-semibold text-slate-800">{m.label}</td>{["audio_in", "audio_out", "text_in", "text_out", "cached_in"].map(cell)}<td className="font-bold text-[#2F6BFF]" data-testid={`pp-rt-${m.id}-cpm`}>~{m.credits_per_min}</td></tr>;
           })}</tbody></table></div>
       </div>
+      {tools && (
+        <div className="mt-5" data-testid="pp-tools">
+          <p className="mb-2 text-xs font-bold text-slate-700">Alat bawaan provider — biaya provider (USD / pemakaian) → kredit yang ditagih</p>
+          <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left text-slate-500"><th className="py-1 pr-3">Alat</th><th className="pr-3">Provider</th><th className="pr-3">USD / pemakaian</th><th>Kredit</th></tr></thead>
+            <tbody>{tools.map((t) => {
+              const v = (form.tool_prices || {})[t.id];
+              return <tr key={t.id} className="border-t border-[#E7ECF3]"><td className="py-1 pr-3 font-semibold text-slate-800">{t.label}</td><td className="pr-3 text-slate-500">{t.provider}</td>
+                <td className="pr-3 py-1"><input type="number" step="0.001" min="0" value={v ?? t.usd} data-testid={`pp-tool-${t.id.replace(":", "-")}`} onChange={(e) => setForm({ ...form, tool_prices: { ...(form.tool_prices || {}), [t.id]: parseFloat(e.target.value) || 0 } })} className="input-dark w-24 py-1.5 text-xs" /></td>
+                <td className="font-bold text-[#2F6BFF]" data-testid={`pp-tool-${t.id.replace(":", "-")}-credits`}>{t.credits > 0 ? t.credits : "token saja"}</td></tr>;
+            })}</tbody></table></div>
+        </div>
+      )}
       {rates && (
         <div className="mt-4 flex flex-wrap gap-2" data-testid="pp-rates">
           {Object.entries(RATE_LABELS).map(([k, l]) => <span key={k} className="rounded-full bg-[#EEF3FF] px-3 py-1 text-xs font-semibold text-[#2F6BFF]">{rates[k]} {l}</span>)}

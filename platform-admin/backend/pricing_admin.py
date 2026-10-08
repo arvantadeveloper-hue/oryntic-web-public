@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from auth import require_platform_admin, require_platform_staff
 from model_catalog import MODEL_CATALOG, GPT_MODEL, IMAGE_MODEL
-from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES, DEFAULT_PRICING, feature_table, build_packages, model_table, REALTIME_MODELS, realtime_model_prices, realtime_credits_per_min
+from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES, DEFAULT_PRICING, FEATURES, feature_table, build_packages, model_table, REALTIME_MODELS, realtime_model_prices, realtime_credits_per_min, tool_table
 from ratelimit import get_limits, set_limits
 from behaviour import get_behaviour, set_behaviour, BehaviourIn
 
@@ -55,6 +55,7 @@ class PlatformPricingIn(BaseModel):
     margin_overrides: dict[str, float] = Field(default_factory=lambda: {"call_bandwidth": 50.0})
     chars_per_token: float = Field(default=4.0, ge=1, le=10)
     model_prices: dict[str, dict[str, float]] = Field(default_factory=lambda: dict(DEFAULT_PRICING["model_prices"]))
+    tool_prices: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_PRICING["tool_prices"]))  # USD per use of a provider built-in tool
     package_margin_pct: float = Field(default=15.0, ge=0, le=500)
     package_round_idr: int = Field(default=1000, ge=1, le=1_000_000)
     packages: list[PackageTierIn] = Field(default_factory=lambda: [PackageTierIn(**t) for t in DEFAULT_PRICING["packages"]], min_length=1, max_length=12)
@@ -93,6 +94,7 @@ async def pricing(_: dict = Depends(require_platform_staff)):
         "features": feature_table(p),
         "models": model_table(p, MODEL_CATALOG),
         "realtime_models": [{"id": k, **realtime_model_prices(p, k), "credits_per_min": realtime_credits_per_min(p, k)} for k in REALTIME_MODELS],
+        "tools": tool_table(p),
         "trial": await get_trial(),
         "providers": [
             {"provider": "OpenAI", "model": GPT_MODEL, "capability": "text", "unit": "1k chars", "rate_credits_per_1k_chars": RATES["text_per_1k"], "status": "active"},
@@ -110,14 +112,14 @@ async def pricing(_: dict = Depends(require_platform_staff)):
 @router.put("/pricing")
 async def put_pricing(x: PlatformPricingIn, _: dict = Depends(require_platform_admin)):
     p = await set_pricing(x.model_dump())
-    return {"pricing": p, "rates": compute_rates(p), "features": feature_table(p), "models": model_table(p, MODEL_CATALOG), "packages": build_packages(p)}
+    return {"pricing": p, "rates": compute_rates(p), "features": feature_table(p), "models": model_table(p, MODEL_CATALOG), "packages": build_packages(p), "tools": tool_table(p)}
 
 
 @router.post("/pricing/preview")
 async def preview_pricing(x: PlatformPricingIn, _: dict = Depends(require_platform_admin)):
     """What-if calculation for the admin platform: nothing is saved."""
     p = {**DEFAULT_PRICING, **x.model_dump()}
-    return {"rates": compute_rates(p), "features": feature_table(p), "models": model_table(p, MODEL_CATALOG), "packages": build_packages(p)}
+    return {"rates": compute_rates(p), "features": feature_table(p), "models": model_table(p, MODEL_CATALOG), "packages": build_packages(p), "tools": tool_table(p)}
 
 
 @router.put("/trial")

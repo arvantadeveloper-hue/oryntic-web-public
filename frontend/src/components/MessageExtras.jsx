@@ -189,6 +189,31 @@ export function ToolRequestCard({ m, cid, onDone, dark = false }) {
 
 const REASON = { it: "topik IT/coding", research: "riset & analisis panjang" };
 
+// Provider built-in tools the assistant used for this reply (+ credits) and the sources it cited.
+export function ToolUsage({ m, dark = false }) {
+  const used = (m.tools_used || []).filter((t) => t.count > 0);
+  const cites = m.citations || [];
+  if (!used.length && !cites.length) return null;
+  const pill = dark ? "bg-white/10 text-white/70" : "bg-[#EEF3FF] text-[#2F6BFF]";
+  return (
+    <div className="mt-1 space-y-1" data-testid="tool-usage">
+      {used.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {used.map((t) => <span key={t.id} data-testid={`tool-used-${t.id.replace(":", "-")}`} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pill}`}><Sparkles size={10} /> {t.label}{t.count > 1 ? ` ×${t.count}` : ""}{t.credits ? ` · ${t.credits} kredit` : ""}</span>)}
+        </div>
+      )}
+      {cites.length > 0 && (
+        <details className={`text-[11px] ${dark ? "text-white/60" : "text-slate-500"}`} data-testid="tool-citations">
+          <summary className="cursor-pointer select-none font-semibold">Sumber ({cites.length})</summary>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-4">
+            {cites.map((c, i) => <li key={i}><a href={c.url} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">{c.title || c.url}</a></li>)}
+          </ol>
+        </details>
+      )}
+    </div>
+  );
+}
+
 export function ModelBadge({ m, dark = false }) {
   if (!m.routed || !m.model_label) return null;
   return (

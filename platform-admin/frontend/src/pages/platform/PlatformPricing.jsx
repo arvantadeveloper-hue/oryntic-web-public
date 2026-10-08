@@ -85,6 +85,17 @@ export default function PlatformPricing({ readOnly }) {
             return <tr key={m.id} className="border-t border-[#E7ECF3]"><td className="py-1 pr-3 font-semibold text-slate-800">{m.label}</td>{["audio_in", "audio_out", "text_in", "text_out", "cached_in"].map(cell)}<td className="font-bold text-[#2F6BFF]" data-testid={`pp-rt-${m.id}-cpm`}>~{m.credits_per_min}</td></tr>;
           })}</tbody></table></div>
       </div>
+      <div className="mt-6 aivora-card p-5" data-testid="pp-tools">
+        <p className="text-sm font-bold text-slate-900">Alat bawaan provider — biaya provider (USD / pemakaian) → kredit yang ditagih</p>
+        <p className="text-xs text-slate-500">Diaktifkan per persona (Kemampuan Tambahan). Harga resmi: OpenAI web search $10/1k, Code Interpreter $0,03/sesi, GPT Image ≈ $0,04/gambar; Gemini grounding $35/1k permintaan, eksekusi kode hanya token; Claude web search $10/1k, eksekusi kode ≈ $0,05/jam container. Kredit memakai margin fitur "Teks / chat".</p>
+        <div className="mt-3 overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left text-slate-500"><th className="py-1 pr-3">Alat</th><th className="pr-3">Provider</th><th className="pr-3">Satuan</th><th className="pr-3">USD / pemakaian</th><th>Kredit</th></tr></thead>
+          <tbody>{(preview?.tools || []).map((t) => {
+            const v = (draft.tool_prices || {})[t.id];
+            return <tr key={t.id} className="border-t border-[#E7ECF3]"><td className="py-1 pr-3 font-semibold text-slate-800">{t.label}</td><td className="pr-3 text-slate-500">{t.provider}</td><td className="pr-3 text-slate-500">{t.unit}</td>
+              <td className="py-1 pr-3"><input type="number" step="0.001" min="0" disabled={readOnly} value={v ?? t.usd} data-testid={`pp-tool-${t.id.replace(":", "-")}`} onChange={(e) => update({ tool_prices: { ...(draft.tool_prices || {}), [t.id]: parseFloat(e.target.value) || 0 } })} className="input-dark w-24 py-1.5 text-xs" /></td>
+              <td className="font-bold text-[#2F6BFF]" data-testid={`pp-tool-${t.id.replace(":", "-")}-credits`}>{t.credits > 0 ? t.credits : "token saja"}</td></tr>;
+          })}</tbody></table></div>
+      </div>
     </div>
   );
 }

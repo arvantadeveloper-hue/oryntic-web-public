@@ -4,6 +4,7 @@ import { Sparkles, Image as ImageIcon, Layers, ArrowLeft, Upload, Wand2, Check, 
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { VoiceModelPicker } from "../components/VoiceModelPicker";
+import { ToolsPicker } from "../components/ToolsPicker";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 
@@ -37,6 +38,7 @@ export default function CreatePersona() {
   const [voiceMeta, setVoiceMeta] = useState({ info: {}, realtime: [] });
   const [voice, setVoice] = useState("nova");
   const [voiceModel, setVoiceModel] = useState("gpt-realtime-2.1-mini");
+  const [tools, setTools] = useState([]);
   const [previewing, setPreviewing] = useState(null);
   const previewAudioRef = useRef(null);
 
@@ -91,7 +93,7 @@ export default function CreatePersona() {
   const saveAndPortrait = async () => {
     setBusy(true);
     try {
-      const r = await api.post("/personas", { profile, reference_photo: photo || null, model: modelKey, voice, voice_model: voiceModel });
+      const r = await api.post("/personas", { profile, reference_photo: photo || null, model: modelKey, voice, voice_model: voiceModel, tools });
       const pid = r.data.id;
       toast.success("Persona disimpan, membuat potret...");
       try {
@@ -189,6 +191,7 @@ export default function CreatePersona() {
             ))}
           </div>
           <div>
+            <div className="mb-5"><ToolsPicker modelKey={modelKey} value={tools} onChange={setTools} /></div>
             <VoiceModelPicker value={voiceModel} onChange={setVoiceModel} />
             <label className="mb-1 mt-5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Karakter Suara</label>
             <p className="mb-2 text-xs text-slate-400">Warna suara asisten di panggilan. Tekan ikon speaker untuk mendengar contoh.</p>
