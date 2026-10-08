@@ -141,6 +141,15 @@ class PlatformPricingIn(BaseModel):
     chars_per_token: float = Field(default=4.0, ge=1, le=10)
     model_prices: dict[str, dict[str, float]] = Field(default_factory=lambda: dict(DEFAULT_PRICING["model_prices"]))
     tool_prices: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_PRICING["tool_prices"]))  # USD per use of a provider built-in tool
+
+    @field_validator("tool_prices")
+    @classmethod
+    def _tools_known(cls, v):
+        from pricing import TOOL_BY_ID
+        bad = [k for k in v if k not in TOOL_BY_ID]
+        if bad or any(x < 0 or x > 10 for x in v.values()):
+            raise ValueError(f"tool_prices tidak valid: {bad or 'nilai harus 0–10 USD'}")
+        return v
     package_margin_pct: float = Field(default=15.0, ge=0, le=500)
     package_round_idr: int = Field(default=1000, ge=1, le=1_000_000)
     packages: list[PackageTierIn] = Field(default_factory=lambda: [PackageTierIn(**t) for t in DEFAULT_PRICING["packages"]], min_length=1, max_length=12)

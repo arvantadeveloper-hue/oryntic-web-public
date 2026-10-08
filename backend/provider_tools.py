@@ -33,7 +33,8 @@ async def _hold(uid: str, name: str, mime: str, data: bytes, meta: dict) -> dict
 
 async def _container_files(client, r, uid: str) -> list:
     """Code Interpreter outputs (charts, CSV, XLSX…) referenced by the answer → downloaded and HELD for the user's Simpan confirmation."""
-    seen, hashes, held = set(), set(), []
+    import hashlib
+    seen, hashes, found = set(), set(), []
     for o in r.output:
         if o.type != "message":
             continue
@@ -46,19 +47,24 @@ async def _container_files(client, r, uid: str) -> list:
                         data = await resp.aread() if hasattr(resp, "aread") else resp.content
                     except Exception:
                         continue
-                    import hashlib
                     h = hashlib.sha1(data).hexdigest()
                     if h in hashes:
-                        continue  # the same chart cited twice (by id and by name)
+                        continue  # the same chart cited twice
                     hashes.add(h)
-                    name = getattr(a, "filename", None) or f"hasil-{len(held) + 1}.png"
+                    name = getattr(a, "filename", None) or f"hasil-{len(found) + 1}.png"
                     ext = os.path.splitext(name)[1].lower()
                     mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".csv": "text/csv", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             ".pdf": "application/pdf", ".json": "application/json", ".txt": "text/plain", ".md": "text/markdown", ".html": "text/html"}.get(ext, "application/octet-stream")
-                    held.append(await _hold(uid, name, mime, data, {"source": "code_interpreter", "named": bool(getattr(a, "filename", None))}))
-    if any(h.get("named") for h in held):  # drop auto-captured inline figures when the model also saved a named file
-        held = [h for h in held if h.get("named")]
-    return [{k: v for k, v in h.items() if k != "named"} for h in held]
+                    found.append((name, mime, data))
+    # plt.show() auto-captures an unnamed "cfile_….png"; drop it when the model also saved a named image of its own
+    if any(n.startswith("cfile_") and m.startswith("image/") for n, m, _ in found) and any(not n.startswith("cfile_") and m.startswith("image/") for n, m, _ in found):
+        found = [f for f in found if not (f[0].startswith("cfile_") and f[1].startswith("image/"))]
+    held = []
+    for name, mime, data in found:
+        if name.startswith("cfile_"):
+            name = f"grafik-{len(held) + 1}{os.path.splitext(name)[1] or '.png'}"
+        held.append(await _hold(uid, name, mime, data, {"source": "code_interpreter"}))
+    return held
 
 
 async def _run_openai(system: str, prompt: str, model: str, tool_ids: list, uid: str) -> dict:

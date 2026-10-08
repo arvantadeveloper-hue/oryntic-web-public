@@ -56,6 +56,15 @@ class PlatformPricingIn(BaseModel):
     chars_per_token: float = Field(default=4.0, ge=1, le=10)
     model_prices: dict[str, dict[str, float]] = Field(default_factory=lambda: dict(DEFAULT_PRICING["model_prices"]))
     tool_prices: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_PRICING["tool_prices"]))  # USD per use of a provider built-in tool
+
+    @field_validator("tool_prices")
+    @classmethod
+    def _tools_known(cls, v):
+        from pricing import TOOL_BY_ID
+        bad = [k for k in v if k not in TOOL_BY_ID]
+        if bad or any(x < 0 or x > 10 for x in v.values()):
+            raise ValueError(f"tool_prices tidak valid: {bad or 'nilai harus 0–10 USD'}")
+        return v
     package_margin_pct: float = Field(default=15.0, ge=0, le=500)
     package_round_idr: int = Field(default=1000, ge=1, le=1_000_000)
     packages: list[PackageTierIn] = Field(default_factory=lambda: [PackageTierIn(**t) for t in DEFAULT_PRICING["packages"]], min_length=1, max_length=12)
@@ -151,12 +160,12 @@ async def admin_set_limits(x: LimitsIn, _: dict = Depends(require_platform_admin
 
 
 @router.get("/rate-limits")
-async def admin_limits(_: dict = Depends(require_platform_admin)):
+async def limits_alias(_: dict = Depends(require_platform_admin)):
     return await get_limits()
 
 
 @router.put("/rate-limits")
-async def admin_set_limits(x: LimitsIn, _: dict = Depends(require_platform_admin)):
+async def set_limits_alias(x: LimitsIn, _: dict = Depends(require_platform_admin)):
     return await set_limits(x.model_dump())
 
 
