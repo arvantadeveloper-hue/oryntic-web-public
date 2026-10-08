@@ -95,21 +95,27 @@ export default function PersonaDetail() {
           <div className="h-10 w-10 overflow-hidden rounded-full bg-[#EEF3FF]">{p.portrait ? <img src={p.portrait} alt={p.name} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-sm font-bold text-slate-600">{p.name[0]}</div>}</div>
           <div><h1 className="text-lg font-bold leading-tight text-slate-900">{p.name}</h1><p className="text-xs text-slate-500">v{p.version} · {modelLabel(p.model)}</p></div>
         </div>
-        <button onClick={startChat} data-testid="persona-start-chat" className="btn-grad flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm"><MessageSquare size={16} /> Mulai Chat</button>
+        <div className="flex items-center gap-2">
+          <button onClick={dup} data-testid="persona-duplicate" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100"><Copy size={14} /> <span className="hidden sm:inline">Duplikat</span></button>
+          <button onClick={del} data-testid="persona-delete" className="flex items-center gap-1.5 rounded-xl border border-[#EF4444]/40 bg-white px-3 py-2.5 text-sm text-[#EF4444] hover:bg-[#EF4444]/10"><Trash2 size={15} /> <span className="hidden sm:inline">Hapus</span></button>
+          <button onClick={startChat} data-testid="persona-start-chat" className="btn-grad flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm"><MessageSquare size={16} /> Mulai Chat</button>
+        </div>
       </div>
 
-      <div className="mb-5 flex gap-1 overflow-x-auto border-b border-slate-200">
+      <div className="aivora-card overflow-hidden" data-testid="persona-tabs-card">
+      <div className="flex gap-1 overflow-x-auto border-b border-[#E7ECF3] bg-slate-50/70 px-3">
         {[["profile", "Profil"], ["settings", "Pengaturan"], ["appearance", "Penampilan"], ["memory", "Memori"], ["knowledge", "Pengetahuan"]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} data-testid={`persona-tab-${k}`}
-            className={`-mb-px shrink-0 border-b-2 px-4 py-2.5 text-sm font-medium transition ${tab === k ? "border-[#00D1FF] text-slate-900" : "border-transparent text-slate-500"}`}>{l}</button>
+            className={`-mb-px shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition ${tab === k ? "border-[#2F6BFF] text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"}`}>{l}</button>
         ))}
       </div>
+      <div className="bg-white p-5 sm:p-6">
 
       {tab === "profile" && (
         <div className="grid gap-6 md:grid-cols-[280px_1fr]" data-testid="persona-profile-tab">
           <div>
-            <div className="aivora-card overflow-hidden">
-              <div className="aspect-square bg-slate-50">
+            <div className="overflow-hidden rounded-2xl border border-[#E7ECF3] bg-slate-50">
+              <div className="aspect-square">
                 {p.portrait ? <img src={p.portrait} alt={p.name} className="h-full w-full object-cover" data-testid="persona-portrait" />
                   : <div className="flex h-full w-full items-center justify-center text-5xl font-bold text-slate-600">{p.name[0]}</div>}
               </div>
@@ -175,10 +181,6 @@ export default function PersonaDetail() {
                 })}
               </div>
             </div>
-            <div className="flex gap-2 border-t border-slate-200 pt-4">
-              <button onClick={dup} className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-slate-200 py-2.5 text-sm text-slate-700 hover:bg-slate-100"><Copy size={14} /> Duplikat</button>
-              <button onClick={del} data-testid="persona-delete" className="flex items-center gap-1 rounded-xl border border-[#EF4444]/40 px-4 text-sm text-[#EF4444] hover:bg-[#EF4444]/10"><Trash2 size={16} /> Hapus</button>
-            </div>
           </div>
         </div>
       )}
@@ -193,7 +195,7 @@ export default function PersonaDetail() {
           <Row label="Gaya visual" value={prof.appearance?.visual_style} />
         </div>
       )}
-      {tab === "knowledge" && <div className="aivora-card p-6"><KnowledgeTab personaId={id} /></div>}
+      {tab === "knowledge" && <KnowledgeTab personaId={id} />}
       {tab === "memory" && (
         <div>
           <div className="mb-4 flex gap-2">
@@ -213,6 +215,9 @@ export default function PersonaDetail() {
           ))}
         </div>
       )}
+
+      </div>
+      </div>
 
       {(tab === "profile" || tab === "appearance") && (
         <div className="mt-6 aivora-card p-4">

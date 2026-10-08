@@ -271,13 +271,48 @@ def _safe_name(title: str) -> str:
 EDIT_RE = re.compile(r"\b(ubah|ganti|rubah|jadikan|bikin jadi|buat jadi|tambah(kan|in)?|hapus|hilangkan|kurangi|perbesar|perkecil|lebih (terang|gelap|cerah|tajam|halus)|versi|gaya|style|warna|latar|background|edit|variasi|crop|potong|zoom|make it|change|turn it|add|remove|more|less)\b", re.I)
 
 
-async def run_image_tool(uid: str, prompt: str, reference_path: Optional[str] = None) -> dict:
+IMAGE_MODELS = {
+    "gemini-image": {"label": "Nano Banana (Gemini)", "desc": "Cepat, cocok untuk ilustrasi & edit foto"},
+    "gpt-image": {"label": "GPT Image (OpenAI)", "desc": "Detail tinggi, teks di gambar lebih akurat"},
+}
+
+
+async def image_model_options() -> list:
+    """Models offered on the image confirmation card, with credits per image and availability."""
+    from pricing import get_pricing, tool_credits
+    p = await get_pricing()
+    gpt_ok = bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    return [{"id": "gemini-image", **IMAGE_MODELS["gemini-image"], "credits": rate("image"), "available": True},
+            {"id": "gpt-image", **IMAGE_MODELS["gpt-image"], "credits": tool_credits(p, "openai:image_generation"), "available": gpt_ok}]
+
+
+async def _gpt_image(prompt: str, ref_b64: Optional[str]) -> str:
+    """OpenAI gpt-image-1 (BYOK) → data URL. With a reference → edit, else generate."""
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    if ref_b64:
+        import io
+        f = io.BytesIO(base64.b64decode(ref_b64)); f.name = "reference.png"
+        r = await client.images.edit(model="gpt-image-1", image=f, prompt=prompt[:4000], size="1024x1024", quality="medium")
+    else:
+        r = await client.images.generate(model="gpt-image-1", prompt=prompt[:4000], size="1024x1024", quality="medium")
+    return "data:image/png;base64," + r.data[0].b64_json
+
+
+async def run_image_tool(uid: str, prompt: str, reference_path: Optional[str] = None, model: str = "gemini-image") -> dict:
     ref_b64 = None
     if reference_path:
         from storage import get_object
         raw_ref, _ct = await asyncio.to_thread(get_object, reference_path)
         ref_b64 = base64.b64encode(raw_ref).decode()
-    data_url = await generate_image(prompt, ref_b64)
+    model = model if model in IMAGE_MODELS else "gemini-image"
+    if model == "gpt-image":
+        data_url = await _gpt_image(prompt, ref_b64)
+        from pricing import get_pricing, tool_credits
+        credits = tool_credits(await get_pricing(), "openai:image_generation")
+    else:
+        data_url = await generate_image(prompt, ref_b64)
+        credits = rate("image")
     if not data_url:
         raise RuntimeError("image generation returned nothing")
     header, b64 = data_url.split(",", 1)
@@ -289,10 +324,10 @@ async def run_image_tool(uid: str, prompt: str, reference_path: Optional[str] = 
     await assert_quota(uid, len(raw))
     await asyncio.to_thread(put_object, path, raw, mime)
     await add_storage(uid, len(raw))
-    media = {"type": "image", "path": path, "name": f"gambar.{ext}", "prompt": prompt[:400]}
+    media = {"type": "image", "path": path, "name": f"gambar.{ext}", "prompt": prompt[:400], "model": IMAGE_MODELS[model]["label"]}
     if reference_path:
         media["edited_from"] = reference_path
-    return {"media": [media], "credits": rate("image")}
+    return {"media": [media], "credits": credits}
 
 
 async def run_document_tool(uid: str, system: str, title: str, instructions: str, history: str, model_key: Optional[str]) -> dict:

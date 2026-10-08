@@ -605,11 +605,14 @@ async def _image_turn(ctx, plan: dict, confirm_threshold: int):
     n = 1 if ref else len(prompts)
     yield ctx.sse(start=True)
     if credits * n >= confirm_threshold:
-        text = (f"Siap, aku ubah gambar terakhirnya sesuai permintaanmu! 🎨 Perkiraan biaya ±{credits} kredit. Lanjutkan?" if ref
+        text = (f"Siap, aku ubah gambar terakhirnya sesuai permintaanmu! 🎨 Mau pakai model yang mana?" if ref
                 else f"Siap, aku bisa buatkan {n} gambarnya! 🎨 Perkiraan biaya ±{credits * n} kredit. Lanjutkan?" if n > 1
-                else f"Siap, aku bisa buatkan gambarnya! 🎨 Perkiraan biaya ±{credits} kredit. Lanjutkan?")
+                else "Siap, aku bisa buatkan gambarnya! 🎨 Mau pakai model yang mana?")
         yield ctx.sse(delta=text)
         pt = {"kind": "image_edit" if ref else "image_set" if n > 1 else "image", "prompt": prompt, "prompts": prompts, "credits": credits * n, "count": n, "request": ctx.user_text[:300]}
+        if n == 1:
+            from tools import image_model_options
+            pt["options"] = await image_model_options()
         if ref:
             pt["reference_path"] = ref["path"]
         async for ev in _emit_final(ctx, text, 0, {"pending_tool": pt}):
@@ -1774,13 +1777,14 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
         await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})
         await notify(cid, {"type": "message", "role": "assistant", "persona_id": msg.get("persona_id"), "message": clean({**msg, **upd, "pending_tool": None})})
         return {**msg, **upd, "pending_tool": None}
+    model = choice if choice in {o["id"] for o in pt.get("options") or [] if o.get("available")} else "gemini-image"
     try:
-        out = await run_image_tool(u["id"], pt["prompt"], pt.get("reference_path"))
+        out = await run_image_tool(u["id"], pt["prompt"], pt.get("reference_path"), model)
     except Exception as exc:
         logging.getLogger("chat").warning("run-tool image failed: %s", exc)
         await db.messages.update_one({"id": mid}, {"$unset": {"pending_tool.running": ""}})
         raise HTTPException(502, "Gambar belum berhasil dibuat, coba lagi") from exc
-    await record_usage(u["id"], "image_generation", out["credits"], {"conversation_id": cid, "persona_id": msg.get("persona_id")})
+    await record_usage(u["id"], "image_generation" if model == "gemini-image" else "tool:openai:image_generation", out["credits"], {"conversation_id": cid, "persona_id": msg.get("persona_id"), "model": model})
     edited = bool(pt.get("reference_path"))
     out["media"][0]["request"] = pt.get("request") or ""
     upd = {"content": IMAGE_EDIT_DONE_TEXT if edited else IMAGE_DONE_TEXT, "media": out["media"], "tool": "image_edit" if edited else "image", "credits": out["credits"]}

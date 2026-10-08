@@ -168,10 +168,39 @@ function VideoChoiceCard({ m, cid, onDone, dark }) {
   );
 }
 
+// Image confirmation with model choice (Nano Banana vs GPT Image) — picking a model runs the tool.
+function ImageChoiceCard({ m, cid, onDone, dark = false }) {
+  const [busy, setBusy] = useState(m.pending_tool?.running ? "run" : "");
+  const pt = m.pending_tool;
+  if (busy === "run") return <RenderingBox kind={pt.kind} dark={dark} />;
+  const pick = async (id) => {
+    setBusy("run");
+    try { await api.post(`/conversations/${cid}/messages/${m.id}/run-tool`, null, { params: { choice: id, app_url: window.location.origin } }); await onDone?.(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Gagal membuat gambar"); setBusy(""); }
+  };
+  const cancel = async () => { setBusy("cancel"); try { await api.post(`/conversations/${cid}/messages/${m.id}/cancel-tool`); await onDone?.(); } catch (e) { setBusy(""); } };
+  return (
+    <div data-testid="tool-request-card" className={`mt-2 rounded-xl border p-3 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+      <p className="mb-2 flex items-center gap-1.5 font-semibold"><ImageIcon size={14} /> {pt.kind === "image_edit" ? "Edit gambar terakhir" : "Buat gambar"} — pilih model:</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {pt.options.map((o) => (
+          <button key={o.id} type="button" disabled={!o.available || !!busy} onClick={() => pick(o.id)} data-testid={`image-choice-${o.id}`}
+            className={`rounded-xl border p-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${dark ? "border-white/15 bg-white/5 hover:bg-white/10" : "border-amber-200 bg-white hover:border-[#2F6BFF]"}`}>
+            <span className="flex items-center justify-between gap-2"><span className="font-bold">{o.label}</span><span className="inline-flex items-center gap-1 font-semibold text-[#2F6BFF]"><Coins size={11} /> {o.credits} kredit</span></span>
+            <span className={`block text-[11px] ${dark ? "text-white/60" : "text-slate-500"}`}>{o.desc}{!o.available ? " · kunci provider belum diatur" : ""}</span>
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 flex justify-end"><button onClick={cancel} disabled={!!busy} data-testid="tool-cancel-btn" className={`rounded-lg px-3 py-1.5 font-semibold disabled:opacity-60 ${dark ? "bg-white/10" : "bg-white"}`}>Batal</button></div>
+    </div>
+  );
+}
+
 export function ToolRequestCard({ m, cid, onDone, dark = false }) {
   const [busy, setBusy] = useState(m.pending_tool?.running ? "run" : "");
   if (!m.pending_tool) return null;
   if (m.pending_tool.kind === "video" && m.pending_tool.options) return <VideoChoiceCard m={m} cid={cid} onDone={onDone} dark={dark} />;
+  if (["image", "image_edit"].includes(m.pending_tool.kind) && m.pending_tool.options?.length) return <ImageChoiceCard m={m} cid={cid} onDone={onDone} dark={dark} />;
   if (busy === "run" && ["image", "image_edit", "video"].includes(m.pending_tool.kind)) return <RenderingBox kind={m.pending_tool.kind} dark={dark} />;
   const act = async (kind) => {
     setBusy(kind);
