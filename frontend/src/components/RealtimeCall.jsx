@@ -170,6 +170,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
           if (out.ok && ev.name === "assign_task") toast.success(`Tugas dicatat ke Ruang Kerja (${out.when})`);
           if (out.ok && ev.name === "web_search") { toast.success("Sumber pencarian web dikirim ke chat"); onRefresh && onRefresh(); }
           if (out.ok && ev.name === "run_code") { toast.success("Hasil perhitungan dikirim ke chat"); onRefresh && onRefresh(); }
+          if (out.ok && ev.name === "add_calendar_event") { toast.success("Tercatat di kalender"); onRefresh && onRefresh(); }
           if (out.ok && ev.name === "search_workspace") { toast.success(`${out.count} hasil Ruang Kerja dikirim ke chat`); onRefresh && onRefresh(); }
           send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: ev.call_id, output: JSON.stringify(out) } });
           createResponse({ type: "response.create", response: { instructions: "In one casual spoken sentence, tell the user what you just did (from the tool result). No follow-up question unless needed." } });

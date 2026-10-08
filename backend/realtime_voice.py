@@ -152,6 +152,16 @@ RUN_CODE_TOOL = {"type": "function", "name": "run_code",
                  "description": "Run Python to compute something precisely: arithmetic, percentages, loan/installment math, unit or currency conversion, statistics over numbers the user gives, date differences, etc. "
                                 "Use it instead of estimating whenever a number must be exact. Returns the computed result in plain words; read it back naturally (round long decimals when speaking) and mention briefly that you calculated it. Never say you cannot run code.",
                  "parameters": {"type": "object", "properties": {"task": {"type": "string", "description": "The calculation to perform, with all numbers and assumptions, in the user's words"}}, "required": ["task"]}}
+CALENDAR_TOOL = {"type": "function", "name": "add_calendar_event",
+                 "description": "Record an activity, meeting, appointment, deadline or reminder the user mentions into their calendar. Use whenever the user asks you to note/schedule/remind them about something at a time. "
+                                "If the date or time is missing, ASK first. Confirm verbally afterwards (title, when, how they will be reminded).",
+                 "parameters": {"type": "object", "properties": {
+                     "title": {"type": "string", "description": "Short Indonesian title (max 8 words)"},
+                     "start_at": {"type": "string", "description": "ISO-8601 datetime WITH timezone offset, resolved from the user's words (e.g. 'besok jam 10' → tomorrow 10:00 +07:00)"},
+                     "notes": {"type": "string", "description": "Place, people, agenda or other details; empty if none"},
+                     "remind_mode": {"type": "string", "enum": ["call", "chat", "none"], "description": "How to remind: call = the assistant phones them, chat = sends a chat message, none = no reminder. Default 'call' when unspecified"},
+                     "remind_offsets": {"type": "array", "items": {"type": "integer"}, "description": "Minutes before start to remind, e.g. [30] or [30, 60] when the user asks for 30 minutes AND 1 hour. Default [30]"}},
+                     "required": ["title", "start_at"]}}
 SEARCH_TOOL = {"type": "function", "name": "search_workspace",
                "description": "Search the user's Workspace (saved task results, documents, meeting minutes) by keywords and drop clickable links into the chat panel. Use when the user asks to find or look up existing material.",
                "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Keywords to search for"}}, "required": ["query"]}}
@@ -389,7 +399,7 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         from provider_tools import web_search_tool, code_tool
         call_persona = await db.personas.find_one({"id": call["persona_id"]}, {"_id": 0, "model": 1, "tools": 1}) or {}
         web_on, code_on = bool(web_search_tool(call_persona)), bool(code_tool(call_persona))
-        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + ([RUN_CODE_TOOL] if code_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        tools = [ASSIGN_TOOL, SEARCH_TOOL, CALENDAR_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + ([RUN_CODE_TOOL] if code_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:

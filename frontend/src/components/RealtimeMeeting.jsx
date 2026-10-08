@@ -287,7 +287,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
       case "response.function_call_arguments.done": {
         let a = {}; try { a = JSON.parse(ev.arguments || "{}"); } catch (e) {}
         if (s === mod() && ev.name === "delegate") { delegationRef.current = { call_id: ev.call_id, ...a }; break; }
-        if (["assign_task", "update_task", "search_workspace", "web_search", "run_code"].includes(ev.name)) {
+        if (["assign_task", "update_task", "search_workspace", "web_search", "run_code", "add_calendar_event"].includes(ev.name)) {
           toolRef.current = { callId: s.callId, call_id: ev.call_id, name: ev.name, promise: runVoiceTool(ev.name, { ...a, persona_id: s.persona.id }, cid, s.callId) };
         }
         break;

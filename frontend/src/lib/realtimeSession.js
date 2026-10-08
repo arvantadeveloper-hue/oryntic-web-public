@@ -198,6 +198,12 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       const r = await api.post(`/realtime/calls/${callId}/run-code`, { task: args.task });
       return { ok: true, result: r.data.answer, note: "read the result back naturally in speech (round long decimals), mention you calculated it; the full result card is already in the chat panel" };
     }
+    if (name === "add_calendar_event") {
+      const mode = args.remind_mode === "none" ? null : (args.remind_mode || "call");
+      const offsets = mode ? ((args.remind_offsets || []).filter((n) => n > 0).length ? args.remind_offsets.filter((n) => n > 0) : [30]) : [];
+      const r = await api.post("/events", { title: args.title, start_at: args.start_at, notes: args.notes || "", remind_mode: mode, remind_offsets: offsets, conversation_id: cid });
+      return { ok: true, event: { title: r.data.title, start_at: r.data.start_at, remind: r.data.remind }, note: "confirm briefly: title, day & time, and how/when they will be reminded; the card is already in the chat panel" };
+    }
     const gitProv = name.startsWith("gitlab_") ? "gitlab" : "github";
     const gitLabel = gitProv === "gitlab" ? "GitLab" : "GitHub";
     if (name === "github_repos" || name === "gitlab_repos") {

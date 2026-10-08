@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Plus, ClipboardList, Bell, Video, CalendarDa
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { DailyDigestCard } from "../components/DailyDigestCard";
+import { RemindOptions, RemindSummary } from "../components/RemindOptions";
 
 const KIND = {
   task: { label: "Tugas", color: "#2F6BFF", Icon: ClipboardList },
@@ -15,17 +16,24 @@ const DAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
 const MONTHS = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
 const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const timeStr = (iso) => new Date(iso).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-const STATUS_ID = { scheduled: "terjadwal", completed: "selesai", running: "berjalan", queued: "antre", failed: "gagal", ringing: "berdering", done: "selesai" };
+const STATUS_ID = { scheduled: "terjadwal", completed: "selesai", running: "berjalan", queued: "antre", failed: "gagal", ringing: "berdering", done: "selesai", sent: "terkirim", answered: "dijawab", declined: "ditolak", missed: "terlewat" };
 
 function EventForm({ date, onClose, onSaved }) {
   const [f, setF] = useState({ title: "", time: "09:00", notes: "" });
+  const [remind, setRemind] = useState(false);
+  const [mode, setMode] = useState("call");
+  const [offsets, setOffsets] = useState([30]);
+  const [personaId, setPersonaId] = useState("");
+  const [personas, setPersonas] = useState([]);
   const [busy, setBusy] = useState(false);
+  useEffect(() => { api.get("/personas").then((r) => setPersonas(r.data)).catch(() => {}); }, []);
   const save = async (e) => {
     e.preventDefault(); setBusy(true);
     try {
       const start = new Date(`${dayKey(date)}T${f.time}:00`);
-      await api.post("/events", { title: f.title, start_at: start.toISOString(), notes: f.notes });
-      toast.success("Event ditambahkan"); onSaved(); onClose();
+      if (remind && !offsets.length) { toast.error("Pilih minimal satu waktu ingatkan"); setBusy(false); return; }
+      await api.post("/events", { title: f.title, start_at: start.toISOString(), notes: f.notes, remind_mode: remind ? mode : null, remind_offsets: remind ? offsets : [], persona_id: personaId || null });
+      toast.success(remind ? "Event + pengingat ditambahkan" : "Event ditambahkan"); onSaved(); onClose();
     } catch (err) { toast.error(err?.response?.data?.detail || "Gagal menyimpan"); } finally { setBusy(false); }
   };
   return (
@@ -35,6 +43,10 @@ function EventForm({ date, onClose, onSaved }) {
         <input type="time" className="input-dark w-32 py-2 text-sm" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} data-testid="event-time" />
         <input className="input-dark flex-1 py-2 text-sm" placeholder="Catatan (opsional)" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} data-testid="event-notes" />
       </div>
+      <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700">
+        <input type="checkbox" checked={remind} onChange={(e) => setRemind(e.target.checked)} data-testid="event-remind-toggle" className="h-4 w-4 accent-[#2F6BFF]" /> <Bell size={12} /> Ingatkan saya
+      </label>
+      {remind && <RemindOptions compact mode={mode} offsets={offsets} onMode={setMode} onOffsets={setOffsets} personas={personas} personaId={personaId} onPersona={setPersonaId} />}
       <div className="flex gap-2"><button disabled={busy} className="btn-grad rounded-lg px-4 py-1.5 text-xs" data-testid="event-save">{busy ? <Loader2 size={12} className="animate-spin" /> : "Simpan"}</button><button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-xs text-slate-500">Batal</button></div>
     </form>
   );
@@ -121,6 +133,7 @@ export default function Calendar() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-slate-900">{it.title}</p>
                     <p className="text-[11px] text-slate-500">{timeStr(it.at)} · {K.label}{it.status ? ` · ${STATUS_ID[it.status] || it.status}` : ""}{it.who ? ` · ${it.who}` : ""}</p>
+                    {it.remind && <p className="mt-0.5 text-[11px] text-[#F59E0B]"><RemindSummary remind={it.remind} /></p>}
                     {it.notes && <p className="mt-1 text-xs text-slate-500">{it.notes}</p>}
                   </div>
                   {it.link && <button onClick={() => nav(it.link)} className="text-xs font-semibold text-[#2F6BFF]">Buka</button>}

@@ -9,13 +9,17 @@ from llm import llm_text, record_usage, text_credits
 from realtime import notify_user
 
 router = APIRouter(prefix="/api/reminders", tags=["reminders"])
+MODES = ("call", "chat")
+OFFSETS = (5, 10, 15, 30, 60, 120, 1440)
 
 
 class ReminderIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: Optional[str] = ""
     start_at: str  # ISO datetime
-    remind_minutes: int = 30
+    remind_minutes: int = 30  # legacy single offset
+    offsets: Optional[list[int]] = None  # e.g. [30, 60] → 30 min AND 1 h before
+    mode: str = "call"  # call = assistant rings; chat = assistant sends a message
     persona_id: Optional[str] = None
 
 
@@ -42,19 +46,33 @@ def _parse(dt: str) -> datetime:
     return d
 
 
-@router.post("")
-async def create_reminder(x: ReminderIn, u: dict = Depends(current_user)):
-    start = _parse(x.start_at)
-    remind_at = start - timedelta(minutes=x.remind_minutes)
-    rid = new_id()
+def _offsets(offsets, legacy: int) -> list:
+    vals = sorted({int(o) for o in (offsets if offsets else [legacy]) if 0 < int(o) <= 7 * 1440})
+    return vals or [30]
+
+
+def build_alerts(start: datetime, offsets: list) -> list:
+    return [{"minutes": m, "remind_at": (start - timedelta(minutes=m)).isoformat(), "status": "scheduled"} for m in offsets]
+
+
+async def create_reminder_doc(uid: str, title: str, description: str, start: datetime, offsets: list, mode: str, persona_id: Optional[str], event_id: Optional[str] = None) -> dict:
+    """Shared by the Reminders form, calendar events and the assistant's calendar tool."""
+    offsets = _offsets(offsets, 30)
+    mode = mode if mode in MODES else "call"
     doc = {
-        "id": rid, "user_id": u["id"], "title": x.title, "description": x.description or "",
-        "start_at": start.isoformat(), "remind_minutes": x.remind_minutes,
-        "remind_at": remind_at.isoformat(), "persona_id": x.persona_id,
+        "id": new_id(), "user_id": uid, "title": title, "description": description or "",
+        "start_at": start.isoformat(), "remind_minutes": min(offsets), "offsets": offsets, "mode": mode,
+        "remind_at": (start - timedelta(minutes=min(offsets))).isoformat(), "alerts": build_alerts(start, offsets),
+        "persona_id": persona_id, "event_id": event_id,
         "status": "scheduled", "message": "", "created_at": now_iso(),
     }
     await db.reminders.insert_one(dict(doc))
     return clean(doc)
+
+
+@router.post("")
+async def create_reminder(x: ReminderIn, u: dict = Depends(current_user)):
+    return await create_reminder_doc(u["id"], x.title, x.description or "", _parse(x.start_at), _offsets(x.offsets, x.remind_minutes), x.mode, x.persona_id)
 
 
 @router.get("")
@@ -78,35 +96,47 @@ async def update_reminder(rid: str, body: dict, u: dict = Depends(current_user))
     if not r:
         raise HTTPException(404, "Reminder not found")
     fields = {}
-    for k in ("title", "description", "remind_minutes", "persona_id"):
+    for k in ("title", "description", "persona_id"):
         if k in body:
             fields[k] = body[k]
-    if "start_at" in body:
-        start = _parse(body["start_at"])
-        fields["start_at"] = start.isoformat()
-        mins = body.get("remind_minutes", r["remind_minutes"])
-        fields["remind_at"] = (start - timedelta(minutes=mins)).isoformat()
-        fields["status"] = "scheduled"
+    if body.get("mode") in MODES:
+        fields["mode"] = body["mode"]
+    start = _parse(body["start_at"]) if "start_at" in body else _parse(r["start_at"])
+    if "start_at" in body or "offsets" in body or "remind_minutes" in body:
+        offsets = _offsets(body.get("offsets", r.get("offsets")), body.get("remind_minutes", r.get("remind_minutes", 30)))
+        fields.update({"start_at": start.isoformat(), "offsets": offsets, "remind_minutes": min(offsets), "remind_at": (start - timedelta(minutes=min(offsets))).isoformat(),
+                       "alerts": build_alerts(start, offsets), "status": "scheduled"})
     await db.reminders.update_one({"id": rid}, {"$set": fields})
+    if r.get("event_id") and ("title" in fields or "start_at" in fields):
+        await db.events.update_one({"id": r["event_id"]}, {"$set": {k: v for k, v in fields.items() if k in ("title", "start_at")}})
     return await db.reminders.find_one({"id": rid}, {"_id": 0})
 
 
 @router.delete("/{rid}")
 async def delete_reminder(rid: str, u: dict = Depends(current_user)):
+    r = await db.reminders.find_one({"id": rid, "user_id": u["id"]}, {"_id": 0, "event_id": 1})
     await db.reminders.delete_one({"id": rid, "user_id": u["id"]})
+    if r and r.get("event_id"):
+        await db.events.delete_one({"id": r["event_id"], "user_id": u["id"]})
     return {"ok": True}
 
 
-async def _reminder_message(r: dict, u: dict, persona_name: str, pending: int):
-    """LLM-spoken reminder (TTS path). Returns (message, credits)."""
+def _minutes_label(m: int) -> str:
+    return f"{m // 1440} hari" if m >= 1440 and m % 1440 == 0 else (f"{m // 60} jam" if m >= 60 and m % 60 == 0 else f"{m} menit")
+
+
+async def _reminder_message(r: dict, u: dict, persona_name: str, pending: int, minutes: Optional[int] = None, chat: bool = False):
+    """LLM-spoken reminder (TTS / chat path). Returns (message, credits)."""
+    channel = "a short, warm, friendly PROACTIVE chat message" if chat else "a short, warm, friendly PROACTIVE VOICE reminder, as if speaking on a phone call"
     sys = (
-        f"You are {persona_name}, delivering a short, warm, friendly PROACTIVE VOICE reminder, as if speaking on a phone call. "
-        f"You MUST speak in {_lang_name(u)}. Sound human, caring and natural (not robotic). Greet the user by name. "
-        "Use ONLY the data given. Do not invent agenda items, flight status, or completed tasks. 2-3 short spoken sentences."
+        f"You are {persona_name}, delivering {channel}. "
+        f"You MUST write in {_lang_name(u)}. Sound human, caring and natural (not robotic). Greet the user by name. "
+        "Use ONLY the data given. Do not invent agenda items, flight status, or completed tasks. 2-3 short sentences."
     )
+    lead = f" This reminder fires {_minutes_label(minutes)} before the start." if minutes else ""
     prompt = (
-        f"User name: {u.get('name')}. Reminder title: {r['title']}. Details: {r['description']}. "
-        f"Scheduled start: {r['start_at']}. The user currently has {pending} task(s) still in progress."
+        f"User name: {u.get('name')}. Reminder title: {r['title']}. Details: {r.get('description') or '-'}. "
+        f"Scheduled start: {r['start_at']}.{lead} The user currently has {pending} task(s) still in progress."
     )
     msg = await llm_text(sys, prompt)
     used = text_credits(prompt, msg)
@@ -130,11 +160,11 @@ async def _private_conv(u: dict, persona: dict) -> dict:
     return conv
 
 
-async def _store_opening(conv: dict, persona: dict, msg: str, used: int):
+async def _store_opening(conv: dict, persona: dict, msg: str, used: int, extra: Optional[dict] = None):
     await db.messages.insert_one({
         "id": new_id(), "conversation_id": conv["id"], "role": "assistant", "content": msg,
         "persona_id": persona["id"], "persona_name": persona["name"], "portrait": persona.get("portrait"),
-        "credits": used, "created_at": now_iso(),
+        "credits": used, "created_at": now_iso(), **(extra or {}),
     })
     await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "last_message": msg[:120]}})
 
@@ -152,7 +182,7 @@ async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
     pending = await db.tasks.count_documents({"user_id": u["id"], "status": {"$in": ["queued", "running"]}})
     opening = (f"Judul pengingat: {r['title']}. Detail: {r.get('description') or '-'}. Jadwal mulai: {r['start_at']}. "
                f"Tugas yang masih berjalan: {pending}.")
-    msg, used = (None, 0) if (x.realtime and persona) else await _reminder_message(r, u, persona_name, pending)
+    msg, used = (None, 0) if (x.realtime and persona) else await _reminder_message(r, u, persona_name, pending, r.get("ringing_minutes"))
     await db.reminders.update_one({"id": rid}, {"$set": {"status": "answered", "message": msg or ""}})
     result = {"status": "answered", "message": msg, "persona_name": persona_name, "opening": opening}
     if persona:
@@ -165,19 +195,54 @@ async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
 
 
 # ---------- scheduler (called from server loop) ----------
+async def _fire_chat(r: dict, u: dict, minutes: int):
+    """Chat mode: the persona posts the reminder into the 1:1 chat + in-app/push notification."""
+    persona = await _reminder_persona(r, u)
+    if not persona:
+        return
+    pending = await db.tasks.count_documents({"user_id": u["id"], "status": {"$in": ["queued", "running"]}})
+    try:
+        msg, used = await _reminder_message(r, u, persona["name"], pending, minutes, chat=True)
+    except Exception:
+        msg, used = f"Halo {u.get('name') or ''}! Pengingat: {r['title']} dimulai {_minutes_label(minutes)} lagi.", 0
+    conv = await _private_conv(u, persona)
+    await _store_opening(conv, persona, msg, used, {"tool": "reminder", "reminder": {"id": r["id"], "title": r["title"], "start_at": r["start_at"], "minutes": minutes},
+                                                    "cta": {"label": "Lihat pengingat", "href": "/reminders"}})
+    await notify_user(u["id"], {"type": "message_new", "conversation_id": conv["id"]})
+    await notify_user(u["id"], {"type": "notification"})
+    from push import send_push
+    await send_push(u["id"], f"Pengingat: {r.get('title') or 'Agenda'}", f"{persona['name']}: dimulai {_minutes_label(minutes)} lagi.", {"link": f"/chat/{conv['id']}", "tag": f"reminder-{r['id']}-{minutes}"}, kind="reminders")
+
+
 async def scheduler_tick():
     now = datetime.now(timezone.utc)
-    cursor = db.reminders.find({"status": "scheduled", "remind_at": {"$lte": now.isoformat()}})
-    async for r in cursor:
-        # skip reminders whose start is far in the past (>1 day) to avoid old spam
+    now_s = now.isoformat()
+    q = {"$or": [{"alerts": {"$elemMatch": {"status": "scheduled", "remind_at": {"$lte": now_s}}}},
+                 {"alerts": {"$exists": False}, "status": "scheduled", "remind_at": {"$lte": now_s}}]}
+    async for r in db.reminders.find(q):
         try:
             start = _parse(r["start_at"])
         except Exception:
             start = now
-        if start < now - timedelta(hours=6):
-            await db.reminders.update_one({"id": r["id"]}, {"$set": {"status": "missed"}})
+        if start < now - timedelta(hours=6):  # stale → do not spam
+            await db.reminders.update_one({"id": r["id"]}, {"$set": {"status": "missed", "alerts.$[a].status": "missed"}}, array_filters=[{"a.status": "scheduled"}])
             continue
-        await db.reminders.update_one({"id": r["id"]}, {"$set": {"status": "ringing", "ringing_at": now.isoformat()}})
+        alerts = r.get("alerts") or [{"minutes": r.get("remind_minutes", 30), "remind_at": r.get("remind_at"), "status": "scheduled"}]
+        due = [a for a in alerts if a["status"] == "scheduled" and a["remind_at"] <= now_s]
+        if not due:
+            continue
+        minutes = min(a["minutes"] for a in due)
+        for a in alerts:
+            if a in due:
+                a["status"] = "fired"
+        user = await db.users.find_one({"id": r["user_id"]}, {"_id": 0})
+        if not user:
+            continue
+        if r.get("mode") == "chat":
+            await db.reminders.update_one({"id": r["id"]}, {"$set": {"alerts": alerts, "status": "sent", "last_fired_at": now_s}})
+            await _fire_chat(r, user, minutes)
+            continue
+        await db.reminders.update_one({"id": r["id"]}, {"$set": {"alerts": alerts, "status": "ringing", "ringing_at": now_s, "ringing_minutes": minutes}})
         await notify_user(r["user_id"], {"type": "reminder_due", "reminder_id": r["id"], "title": r.get("title")})
         from push import send_push
-        await send_push(r["user_id"], f"Pengingat: {r.get('title') or 'Agenda'}", "Asisten Anda siap menelepon untuk mengingatkan.", {"link": "/reminders", "tag": f"reminder-{r['id']}"}, kind="reminders")
+        await send_push(r["user_id"], f"Pengingat: {r.get('title') or 'Agenda'}", f"Asisten Anda siap menelepon ({_minutes_label(minutes)} sebelum mulai).", {"link": "/reminders", "tag": f"reminder-{r['id']}"}, kind="reminders")

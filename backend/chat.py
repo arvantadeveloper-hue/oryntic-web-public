@@ -16,7 +16,7 @@ from auth import current_user, workspace_id, _lang_name, lang_rule
 from llm import quota_message, llm_text, record_usage, text_credits, describe_image, VISION_CREDITS, quota_exceeded, llm_json
 from realtime import notify
 from ratelimit import rate_limit, throttle_message, inflight_start, inflight_end
-from tools import route_model, wants_tool, plan_tool, GITHUB_RE, SOCIAL_RE, run_image_tool, is_media_refusal, EDIT_RE, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task
+from tools import route_model, wants_tool, plan_tool, GITHUB_RE, SOCIAL_RE, run_image_tool, is_media_refusal, EDIT_RE, run_document_tool, get_routing, TASK_CONTEXT, REVISE_RE, save_revision, revise_with_llm, plan_task, CAL_RE
 from pricing import rate as tool_rate, refresh as pricing_refresh
 import seedance
 from llm import model_label
@@ -1163,6 +1163,41 @@ async def _search_turn(ctx):
         yield ev
 
 
+async def _calendar_turn(ctx):
+    """'Catat rapat besok jam 10, ingatkan 1 jam sebelum lewat chat' → event (+ linked reminder) or a clarifying question."""
+    from tools import plan_calendar
+    from assignments import EventIn, create_event_doc, event_markdown
+    tz = (ctx.user.get("settings") or {}).get("timezone")
+    conv = await db.conversations.find_one({"id": ctx.cid}, {"_id": 0, "pending_calendar": 1}) or {}
+    pending = conv.get("pending_calendar")
+    text = f"{pending['text']}\nJawaban user atas pertanyaan «{pending['question']}»: {ctx.user_text}" if pending else ctx.user_text
+    plan = await plan_calendar(text, tz, ctx.prompt[-600:] if ctx.prompt else "", force=bool(pending))
+    if pending:
+        await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_calendar": None}})
+    if not plan:
+        return
+    yield ctx.sse(start=True)
+    if not plan.get("start_at") or plan.get("question"):
+        q = plan.get("question") or f"Siap, saya catat «{plan.get('title') or 'kegiatan ini'}». Tanggal dan jam berapa tepatnya?"
+        await db.conversations.update_one({"id": ctx.cid}, {"$set": {"pending_calendar": {"text": text[:1500], "question": q[:300], "at": now_iso()}}})
+        async for ev in _emit_final(ctx, q, 0, {"tool": "calendar_question"}):
+            yield ev
+        return
+    offsets = [int(o) for o in (plan.get("remind_offsets") or []) if isinstance(o, (int, float))]
+    no_reminder = offsets == [0]
+    offsets = [o for o in offsets if o > 0] or ([] if no_reminder else [30])
+    mode = plan.get("remind_mode") if plan.get("remind_mode") in ("call", "chat") else "call"
+    try:
+        ev = await create_event_doc(ctx.user, EventIn(title=(plan.get("title") or ctx.user_text[:80]).strip()[:200], start_at=plan["start_at"], notes=(plan.get("notes") or "")[:2000],
+                                                      remind_mode=mode if offsets else None, remind_offsets=offsets, persona_id=ctx.persona["id"]))
+    except Exception:
+        async for e in _emit_final(ctx, "Maaf, waktu yang disebut belum bisa saya pahami. Bisa sebutkan tanggal dan jamnya?", 0, {"tool": "calendar_question"}):
+            yield e
+        return
+    async for e in _emit_final(ctx, event_markdown(ev), 0, {"tool": "calendar_event", "event": ev, "cta": {"label": "Buka Kalender", "href": "/calendar"}}):
+        yield e
+
+
 async def _task_offer_turn(ctx):
     """Long/scheduled delegation → offer 'bahas satu per satu' vs 'terima beres'; a reply to a pending offer is resolved here."""
     conv = await db.conversations.find_one({"id": ctx.cid}, {"_id": 0, "pending_task": 1, "persona_ids": 1}) or {}
@@ -1257,10 +1292,17 @@ async def _typed_intercepts(ctx: ReplyCtx):
         async for ev in _emit_final(ctx, hit["content"], 0, hit["extra"]):
             yield ev
         return
-    if SEARCH_RE.search(ctx.user_text) and not TASK_RE_STRONG.search(ctx.user_text) and not WEB_RE.search(ctx.user_text):
+    if SEARCH_RE.search(ctx.user_text) and not TASK_RE_STRONG.search(ctx.user_text) and not WEB_RE.search(ctx.user_text) and not CAL_RE.search(ctx.user_text):
         async for ev in _search_turn(ctx):
             yield ev
         return
+    if CAL_RE.search(ctx.user_text) or await db.conversations.count_documents({"id": ctx.cid, "pending_calendar": {"$ne": None}}):
+        hit = False
+        async for ev in _calendar_turn(ctx):
+            hit = True
+            yield ev
+        if hit:
+            return
     plan = None
     if GITHUB_RE.search(ctx.user_text) or SOCIAL_RE.search(ctx.user_text):
         # repo/PR/MR and social-media requests are tool calls, never a "big task" offer

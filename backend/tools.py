@@ -384,3 +384,32 @@ async def plan_task(text: str, tz: str, history: str = "") -> dict:
     except Exception:
         return {"is_task": False}
     return r if isinstance(r, dict) else {"is_task": False}
+
+
+CAL_RE = re.compile(r"\b(catat(kan)?|jadwalkan|ingatkan|tambahkan|masukkan|simpan|buat(kan)? pengingat|set pengingat)\b.*\b(kalender|agenda|pengingat|jadwal|rapat|meeting|janji|acara|kegiatan|deadline|tenggat|ulang tahun|appointment|reminder)\b"
+                    r"|\b(ingatkan|remind) (saya|aku|gue|gw|me)\b", re.I | re.S)
+
+
+async def plan_calendar(text: str, tz: str, history: str = "", force: bool = False) -> dict:
+    """Extract a calendar entry (+ reminder preferences) from a chat message. Returns {} when it is not a calendar request."""
+    if not force and not CAL_RE.search(text or ""):
+        return {}
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+    try:
+        now = datetime.now(ZoneInfo(tz or "Asia/Jakarta"))
+    except Exception:
+        now = datetime.now(ZoneInfo("Asia/Jakarta"))
+    try:
+        r = await llm_json(
+            "You extract a CALENDAR ENTRY the user wants recorded (meeting, appointment, activity, deadline, birthday, reminder). Reply JSON only: "
+            "{\"is_calendar\": bool, \"title\": str, \"start_at\": str|null, \"notes\": str, \"remind_mode\": \"call\"|\"chat\"|null, \"remind_offsets\": [int], \"question\": str|null}. "
+            "title: short Indonesian title (max 8 words, no date words). start_at: ISO-8601 WITH timezone offset, resolved from relative words ('besok jam 10', 'Jumat depan sore') using Now; "
+            "null when no usable time was given. notes: extra details (place, people, agenda) or ''. remind_mode: 'call' if the user wants to be called/phoned, 'chat' if via message/chat, "
+            "null if unspecified. remind_offsets: minutes before start the user asked for (e.g. '30 menit dan 1 jam sebelum' → [30, 60]); [] if unspecified; use [0] when the user explicitly wants NO reminder. "
+            "question: when start_at is missing or truly ambiguous (date without time, or 'minggu depan' without a day), ONE short Indonesian question asking exactly what is missing; else null. "
+            "is_calendar=false for anything that is not a request to record/schedule/remind.",
+            f"Now: {now.isoformat()} ({tz}).\nRecent context: {history[-600:]}\nUser message: {text}")
+    except Exception:
+        return {}
+    return r if isinstance(r, dict) and r.get("is_calendar") else {}

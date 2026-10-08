@@ -215,23 +215,64 @@ class EventIn(BaseModel):
     start_at: str
     end_at: Optional[str] = None
     notes: Optional[str] = Field(default=None, max_length=2000)
+    remind_mode: Optional[str] = None  # call | chat → creates a linked reminder
+    remind_offsets: list[int] = Field(default_factory=list)  # minutes before start, e.g. [30, 60]
+    persona_id: Optional[str] = None
+    conversation_id: Optional[str] = None  # when created by the assistant (chat/voice tool): post a confirmation card there
 
 
-@router.post("/events")
-async def create_event(x: EventIn, u: dict = Depends(current_user)):
+async def create_event_doc(u: dict, x: EventIn) -> dict:
+    from reminders import create_reminder_doc, _parse
     start = _utc(x.start_at)
     if not start:
         raise HTTPException(400, "Waktu mulai tidak valid")
-    doc = {"id": new_id(), "user_id": u["id"], "workspace_id": workspace_id(u), "title": x.title, "start_at": start, "end_at": _utc(x.end_at), "notes": x.notes or "", "created_at": now_iso()}
+    eid = new_id()
+    doc = {"id": eid, "user_id": u["id"], "workspace_id": workspace_id(u), "title": x.title, "start_at": start, "end_at": _utc(x.end_at), "notes": x.notes or "",
+           "remind": None, "reminder_id": None, "created_at": now_iso()}
+    if x.remind_mode in ("call", "chat") and x.remind_offsets:
+        rem = await create_reminder_doc(u["id"], x.title, x.notes or "", _parse(start), x.remind_offsets, x.remind_mode, x.persona_id, event_id=eid)
+        doc["remind"] = {"mode": rem["mode"], "offsets": rem["offsets"], "persona_id": x.persona_id}
+        doc["reminder_id"] = rem["id"]
     await db.events.insert_one(dict(doc))
     return clean(doc)
 
 
+@router.post("/events")
+async def create_event(x: EventIn, u: dict = Depends(current_user)):
+    ev = await create_event_doc(u, x)
+    if x.conversation_id:
+        conv = await db.conversations.find_one({"id": x.conversation_id, "participants": u["id"]}, {"_id": 0, "persona_id": 1, "persona_ids": 1})
+        pid = conv and ((conv.get("persona_ids") or [conv.get("persona_id")])[0])
+        persona = pid and await db.personas.find_one({"id": pid}, {"_id": 0})
+        if persona:
+            from chat import _save_ai_msg, notify
+            await _save_ai_msg(x.conversation_id, persona, event_markdown(ev), 0, "meeting_chat", {"tool": "calendar_event", "event": ev, "cta": {"label": "Buka Kalender", "href": "/calendar"}})
+            await notify(x.conversation_id, {"type": "message", "role": "assistant"})
+    return ev
+
+
+def event_markdown(ev: dict) -> str:
+    from reminders import _minutes_label
+    from zoneinfo import ZoneInfo
+    hari = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+    bulan = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+    try:
+        d = datetime.fromisoformat(ev["start_at"]).astimezone(ZoneInfo("Asia/Jakarta"))
+        when = f"{hari[d.weekday()]}, {d.day} {bulan[d.month - 1]} {d.year} {d:%H:%M} WIB"
+    except Exception:
+        when = ev["start_at"]
+    rem = ev.get("remind")
+    line = (f"\n🔔 Ingatkan via **{'panggilan' if rem['mode'] == 'call' else 'chat'}** " + ", ".join(f"{_minutes_label(m)} sebelum" for m in rem["offsets"])) if rem else "\n🔕 Tanpa pengingat"
+    return f"📅 **Tercatat di kalender:** {ev['title']}\n🕒 {when}{line}" + (f"\n📝 {ev['notes']}" if ev.get("notes") else "")
+
+
 @router.delete("/events/{eid}")
 async def delete_event(eid: str, u: dict = Depends(current_user)):
+    ev = await db.events.find_one({"id": eid, "user_id": u["id"]}, {"_id": 0, "reminder_id": 1})
     res = await db.events.delete_one({"id": eid, "user_id": u["id"]})
     if not res.deleted_count:
         raise HTTPException(404, "Event tidak ditemukan")
+    await db.reminders.delete_many({"$or": [{"event_id": eid}, {"id": ev.get("reminder_id") or "-"}], "user_id": u["id"]})
     return {"ok": True}
 
 
@@ -251,13 +292,15 @@ async def calendar_items(u: dict, s: str, e: str) -> list:
                                  {"_id": 0, "id": 1, "goal": 1, "status": 1, "scheduled_at": 1, "completed_at": 1, "persona_name": 1}):
         items.append({"kind": "task", "id": t["id"], "title": t["goal"], "at": t.get("scheduled_at") if t.get("status") == "scheduled" else (t.get("completed_at") or t.get("scheduled_at")),
                       "status": t.get("status"), "who": t.get("persona_name"), "link": f"/workspace/{t['id']}"})
-    async for r in db.reminders.find({"user_id": u["id"], "start_at": {"$gte": s, "$lt": e}}, {"_id": 0, "id": 1, "title": 1, "start_at": 1, "status": 1}):
-        items.append({"kind": "reminder", "id": r["id"], "title": r["title"], "at": r["start_at"], "status": r.get("status"), "link": "/reminders"})
+    async for r in db.reminders.find({"user_id": u["id"], "start_at": {"$gte": s, "$lt": e}, "event_id": {"$in": [None, ""]}}, {"_id": 0, "id": 1, "title": 1, "start_at": 1, "status": 1, "mode": 1, "offsets": 1}):
+        items.append({"kind": "reminder", "id": r["id"], "title": r["title"], "at": r["start_at"], "status": r.get("status"), "link": "/reminders",
+                      "remind": {"mode": r.get("mode", "call"), "offsets": r.get("offsets") or [r.get("remind_minutes", 30)]}})
     async for c in db.conversations.find({"workspace_id": wid, "type": "meeting", "participants": u["id"], "updated_at": {"$gte": s, "$lt": e}},
                                          {"_id": 0, "id": 1, "title": 1, "updated_at": 1, "members": 1}):
         items.append({"kind": "meeting", "id": c["id"], "title": c["title"], "at": c["updated_at"], "who": ", ".join(m["name"] for m in c.get("members") or []), "link": f"/chat/{c['id']}"})
     async for ev in db.events.find({"workspace_id": wid, "start_at": {"$gte": s, "$lt": e}}, {"_id": 0}):
-        items.append({"kind": "event", "id": ev["id"], "title": ev["title"], "at": ev["start_at"], "end_at": ev.get("end_at"), "notes": ev.get("notes"), "mine": ev["user_id"] == u["id"]})
+        items.append({"kind": "event", "id": ev["id"], "title": ev["title"], "at": ev["start_at"], "end_at": ev.get("end_at"), "notes": ev.get("notes"), "mine": ev["user_id"] == u["id"],
+                      "remind": ev.get("remind"), "link": "/reminders" if ev.get("remind") else None})
     items.sort(key=lambda i: i.get("at") or "")
     return items
 
