@@ -13,7 +13,7 @@ import { useAuth } from "../context/AuthContext";
 import { VideoConfirmModal, useAvatarVideo, AvatarVideoView } from "./SupportVideo";
 
 // ChatGPT-Voice style call: speech-to-speech via OpenAI Realtime (WebRTC), negotiated through our backend.
-export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onConvChange, opening = null }) {
+export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onConvChange, opening = null, autoVideo = false }) {
   const { user } = useAuth();
   const persona = (conv.members || [])[0] || {};
   const isHost = !conv.user_id || conv.user_id === user?.id;
@@ -320,6 +320,8 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text: `[Chat panel] ${user?.name || "User"} typed: ${q}\n[Chat panel] You replied in text: ${a.slice(0, 600)}` }] } });
   };
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+  const autoVideoRef = useRef(autoVideo);
+  useEffect(() => { if (autoVideoRef.current && isSupport && video.cfg?.enabled && phase === "listening" && video.state === "off") { autoVideoRef.current = false; video.start(); } }, [phase, video.cfg]); // eslint-disable-line
   useEffect(() => {
     // browser network events: react right away instead of waiting for ICE to notice
     const offline = () => { if (!endedRef.current) scheduleReconnect(runIdRef.current, 2000); };

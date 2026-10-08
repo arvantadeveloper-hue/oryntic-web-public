@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageSquare, FileText, Bot, Users, Images, Sparkles, Plus, ArrowRight, CheckCircle2, Clock, FolderKanban, Mic, Video, Bell, Search, MoreHorizontal, Zap } from "lucide-react";
+import { MessageSquare, FileText, Bot, Users, Images, Sparkles, Plus, ArrowRight, CheckCircle2, Clock, FolderKanban, Mic, Video, Phone, Bell, Search, MoreHorizontal, Zap } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { BRAND_HERO } from "../components/Logo";
 import { TrialBanner } from "../components/TrialBanner";
+import { VideoConfirmModal } from "../components/SupportVideo";
+import { toast } from "sonner";
 
 const statusColor = { completed: "#10B981", running: "#7C3AED", queued: "#F59E0B", failed: "#EF4444", cancelled: "#94A3B8" };
 const ago = (iso) => {
@@ -49,9 +51,11 @@ export default function Home() {
   const [convs, setConvs] = useState([]);
   const isAdmin = user?.role === "admin";
   const support = (personas || []).find((p) => p.builtin);
-  const openSupport = async (call) => {
-    try { const r = await api.post("/conversations", { persona_ids: [support.id], type: "private" }); nav(`/chat/${r.data.id}${call ? "?call=1" : ""}`); } catch (e) {}
+  const openSupport = async (call, withVideo = false) => {
+    try { const r = await api.post("/conversations", { persona_ids: [support.id], type: "private" }); nav(`/chat/${r.data.id}${call ? `?call=1${withVideo ? "&video=1" : ""}` : ""}`); } catch (e) {}
   };
+  const [videoCfg, setVideoCfg] = useState(null);
+  const askVideo = async () => { try { const r = await api.get("/support/video-config"); if (!r.data.enabled) { toast.error("Video interaktif belum tersedia"); return; } setVideoCfg(r.data); } catch (e) { toast.error("Gagal memuat info video"); } };
 
   useEffect(() => {
     api.get("/tasks").then((r) => setTasks(r.data)).catch(() => {});
@@ -88,6 +92,23 @@ export default function Home() {
     <div className="grid grid-cols-1 gap-5 p-4 sm:p-6 xl:grid-cols-[1fr_320px] fade-up" data-testid="home-page">
       <div className="min-w-0 space-y-5">
         <TrialBanner />
+        {support && (
+          <section className="aivora-card flex flex-col items-center gap-4 p-5 text-center sm:flex-row sm:items-center sm:text-left" data-testid="home-support-agent" style={{ background: "linear-gradient(90deg, rgba(47,107,255,.08), rgba(124,58,237,.06))" }}>
+            <div className="relative h-40 w-32 shrink-0 overflow-hidden rounded-2xl shadow-lg ring-2 ring-white">
+              <img src={support.portrait} alt={support.name} className="h-full w-full object-cover" />
+              <span className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Online</span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="flex flex-wrap items-center justify-center gap-2 text-base font-bold text-slate-900 sm:justify-start">{support.name} <span className="rounded-full bg-[#2F6BFF]/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#2F6BFF]">Dukungan</span>{support.video_avatar && <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-600"><Video size={10} /> Video interaktif</span>}</p>
+              <p className="mt-1 text-sm text-slate-600">Butuh bantuan atau teman ngobrol? Hubungi Customer Support Agent kami melalui chat / panggilan (mendukung realtime video interaktif).</p>
+              <div className="mt-3 flex items-center justify-center gap-2 sm:justify-start">
+                <button onClick={() => openSupport(false)} className="btn-primary flex items-center gap-2 py-2" data-testid="home-support-chat"><MessageSquare size={14} /> Chat</button>
+                <button onClick={() => openSupport(true)} title="Panggilan suara dengan Oryntix" className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#2F6BFF]/30 bg-white text-[#2F6BFF] hover:bg-[#EEF3FF]" data-testid="home-support-call"><Phone size={16} /></button>
+                {support.video_avatar && <button onClick={askVideo} title="Panggilan video interaktif dengan Oryntix" className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#7C3AED]/30 bg-white text-[#7C3AED] hover:bg-[#F3EEFF]" data-testid="home-support-video"><Video size={16} /></button>}
+              </div>
+            </div>
+          </section>
+        )}
         {/* hero banner */}
         <section className="relative overflow-hidden rounded-3xl p-6 sm:p-8" style={{ background: "linear-gradient(110deg,#EAF0FF 0%,#F2F5FF 55%,#E6F4FF 100%)" }} data-testid="home-hero">
           <div className="relative z-10 max-w-lg">
@@ -102,19 +123,7 @@ export default function Home() {
           <img src={BRAND_HERO} alt="" className="hero-float pointer-events-none absolute -right-6 top-1/2 hidden w-72 -translate-y-1/2 drop-shadow-2xl md:block lg:w-80" />
         </section>
 
-        {support && (
-          <section className="aivora-card flex flex-col gap-4 p-4 sm:flex-row sm:items-center" data-testid="home-support-agent" style={{ background: "linear-gradient(90deg, rgba(47,107,255,.08), rgba(124,58,237,.06))" }}>
-            <img src={support.portrait} alt={support.name} className="h-16 w-16 shrink-0 rounded-2xl object-cover shadow-md" />
-            <div className="min-w-0 flex-1">
-              <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-900">{support.name} <span className="rounded-full bg-[#2F6BFF]/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#2F6BFF]">Dukungan</span>{support.video_avatar && <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-600"><Video size={10} /> Video interaktif</span>}</p>
-              <p className="mt-1 text-sm text-slate-600">Butuh bantuan atau teman ngobrol? Hubungi Customer Support Agent kami melalui chat / panggilan (mendukung realtime video interaktif).</p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <button onClick={() => openSupport(false)} className="btn-primary flex items-center gap-2 py-2" data-testid="home-support-chat"><MessageSquare size={14} /> Chat</button>
-              <button onClick={() => openSupport(true)} className="flex items-center gap-2 rounded-xl border border-[#2F6BFF]/30 bg-white px-4 py-2 text-sm font-semibold text-[#2F6BFF] hover:bg-[#EEF3FF]" data-testid="home-support-call"><Mic size={14} /> Panggil</button>
-            </div>
-          </section>
-        )}
+        {videoCfg && <VideoConfirmModal cfg={videoCfg} onClose={() => setVideoCfg(null)} onConfirm={() => { setVideoCfg(null); openSupport(true, true); }} />}
 
         {/* stats */}
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">

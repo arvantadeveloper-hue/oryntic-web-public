@@ -76,7 +76,8 @@ export default function Chat() {
   const [forwardMsg, setForwardMsg] = useState(null);
   const [recording, setRecording] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
-  useEffect(() => { if (conv && new URLSearchParams(location.search).get("call") === "1") { setVideoOpen(true); nav(`/chat/${id}`, { replace: true }); } }, [conv?.id]); // eslint-disable-line
+  const [autoVideo, setAutoVideo] = useState(false);
+  useEffect(() => { const q = new URLSearchParams(location.search); if (conv && q.get("call") === "1") { setAutoVideo(q.get("video") === "1"); setVideoOpen(true); nav(`/chat/${id}`, { replace: true }); } }, [conv?.id]); // eslint-disable-line
   const [showConvList, setShowConvList] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [showDrive, setShowDrive] = useState(false);
@@ -370,10 +371,10 @@ export default function Chat() {
           ) : <p className="truncate text-sm font-semibold text-slate-500">Pilih atau mulai percakapan</p>}
           {conv && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              {conv.type === "private" && <button onClick={() => setVideoOpen(true)} title={rt.enabled ? "Panggilan suara realtime" : "Mode panggilan suara"} data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden sm:inline">Panggil{rt.enabled ? " · Realtime" : ""}</span></button>}
+              {conv.type === "private" && <button onClick={() => setVideoOpen(true)} title={rt.enabled ? "Panggilan suara realtime" : "Mode panggilan suara"} data-testid="call-mode-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#10B981] px-2.5 text-xs font-semibold text-white sm:px-3"><Phone size={15} /> <span className="hidden items-center gap-1.5 sm:inline-flex">Panggil{rt.enabled ? " · Realtime" : ""}{conv.members?.[0]?.builtin && <><span className="opacity-60">·</span><Video size={14} /> Video Interaktif</>}</span></button>}
               {conv.type !== "private" && <button onClick={() => setVideoOpen(true)} title="Masuk ruang panggilan" data-testid="video-call-btn" className="flex h-9 items-center gap-1.5 rounded-lg bg-[#2F6BFF] px-2.5 text-xs font-semibold text-white sm:px-3"><Video size={15} /> <span className="hidden sm:inline">Masuk Panggilan</span></button>}
               {conv.type !== "private" && <button onClick={saveNotes} disabled={savingNotes} title="Buat & simpan notulen ke Ruang Kerja" data-testid="save-notes-btn" className="flex h-9 items-center gap-1.5 rounded-lg border border-[#E6EAF2] bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:px-3">{savingNotes ? <RefreshCw size={15} className="animate-spin" /> : <FileText size={15} />} <span className="hidden sm:inline">Notulen</span></button>}
-              <AddPersonaMenu conv={conv} personas={personas || []} onAdded={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />
+              {!conv.members?.[0]?.builtin && <AddPersonaMenu conv={conv} personas={personas || []} onAdded={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />}
             </div>
           )}
         </div>
@@ -496,7 +497,7 @@ export default function Chat() {
       {forwardMsg && <ForwardDialog msg={forwardMsg} convs={convs} currentId={id} onClose={() => setForwardMsg(null)} />}
       {showArchive && conv && <ChatArchivesModal cid={id} onClose={() => setShowArchive(false)} onRestored={() => refreshMsgs()} />}
       {videoOpen && conv && (conv.type === "private" && rt.enabled
-        ? <RealtimeCall conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} onConvChange={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />
+        ? <RealtimeCall conv={conv} cid={id} messages={messages} autoVideo={autoVideo} onClose={() => { setVideoOpen(false); setAutoVideo(false); }} onRefresh={refreshMsgs} onConvChange={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />
         : conv.type !== "private" && (rt.enabled || (conv.humans || []).length > 1)
         ? <RealtimeMeeting conv={conv} cid={id} messages={messages} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} onConvChange={(c) => { setConv(c); refreshMsgs(); loadConvs(); }} />
         : <VideoRoom conv={conv} cid={id} messages={messages} isPrivate={conv.type === "private"} onClose={() => setVideoOpen(false)} onRefresh={refreshMsgs} />)}

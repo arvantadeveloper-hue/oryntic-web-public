@@ -1,0 +1,49 @@
+{
+  "summary": "Full iter-39 testing of Oryntix built-in support agent (persona + conversation + support/video-config + realtime video lifecycle + platform admin) and the new image/video confirmation combo boxes. Backend: 14/14 pytest cases pass (/app/backend/tests/test_iter39_oryntix.py, JUnit at /app/test_reports/pytest/iter39.xml). Frontend: home-support-agent banner shows the correct Indonesian copy, home-support-chat & home-support-call testids present and clickable (openSupport creates a /conversations private with persona_ids=['oryntix-support'] then navigates to /chat/<id>; verified by observing POST /conversations 200 + nav to /chat/<cid>). /personas lists Oryntix first with persona-support-badge, no persona-del-oryntix-support button, persona-chat-oryntix-support exists and clicking it (JS click to bypass onboarding tour overlay) creates a support conversation and navigates to /chat/<id>. The Grup Baru picker modal lists Budi/Nadia/Rio/Nova (pick-friend-*, pick-77f5...) but NOT pick-oryntix-support. Image tool-request-card on Nadia for 'buat gambar kucing': image-preset/image-aspect/image-quality combos all render; choosing preset 'li_banner' sets image-aspect to '21:9'; changing quality from 'standar' to 'hemat' updates image-price-gemini-image from 183→122 kredit; tool-cancel-btn removes the card and persona responds 'Oke, pembuatan gambar dibatalkan…'. Realtime call overlay for Oryntix (/chat/<support_cid>?call=1 with shimmed getUserMedia) renders the stage with persona 'Oryntix' and the rt-video-toggle, rt-mute, rt-share-screen, rt-end controls — AFTER the critical PUT-side-effect bug (below) was manually healed. The actual LiveAvatar video session (video/start→tick→stop) is already covered by the backend test lifecycle (verified livekit_url + livekit_client_token + ws_url + max_seconds=60 sandbox + warn_seconds=45 + credits_per_sec=2, second start=409, tick after 20s=40cr/40 remaining, stop after 35s=70cr, tick-after-stop=404, non-support call video/start=404).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "PUT /api/admin/support-agent",
+        "issue": "Full-replace semantics on a model with defaults. SupportConfigIn declares every field with a default (e.g. avatar_id: str = '', knowledge: str = '', system_prompt: str = '', avatar_name: str = ''), and admin_set() does `set_config(x.model_dump())`. So a legitimate PATCH-style call like {video_credits_per_sec:3} silently wipes avatar_id, avatar_name, avatar_preview, system_prompt, knowledge, portrait, etc. to their defaults. That immediately turns GET /api/support/video-config into {enabled:false,...} because the enabled flag requires avatar_id to be truthy. In the UI this makes rt-video-toggle disappear from the Oryntix realtime call for every user. During this test run the admin credit-roundtrip test exposed the bug (avatar_id was wiped to ''); I manually restored it via a second PUT including avatar_id. Highly reproducible — any admin tweak via the admin panel that doesn't resend ALL fields will nuke the config.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Onboarding tour / global overlays block Playwright-driven clicks",
+        "issue": "The 'Tur singkat Oryntix' modal (data-testid='tour-skip') pops up on /chat and intercepts clicks on home-support-chat / persona-chat-* buttons. Playwright `click(force=True)` doesn't help because the overlay is a sibling element at a higher z-index. Needs to either dismiss tour first or set the correct localStorage flag. (This is a test-env quirk, not a production bug — flagging because the testid 'tour-skip' is the way out.)",
+        "affected_selectors": ["[data-testid=\"home-support-chat\"]", "[data-testid=\"persona-chat-oryntix-support\"]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter39_oryntix.py",
+    "/app/test_reports/pytest/iter39.xml"
+  ],
+  "action_items": [
+    "URGENT: Make PUT /api/admin/support-agent a true partial update. Either (a) change SupportConfigIn fields to Optional[...] = None and merge only provided keys into the stored doc inside set_config, or (b) introduce a SupportConfigPatchIn with all-Optional fields and keep SupportConfigIn for the initial seed. Add a regression test that calls PUT with only {video_credits_per_sec:3} and asserts avatar_id, system_prompt, knowledge survive.",
+    "After the fix, verify /api/support/video-config stays enabled:true and the frontend rt-video-toggle keeps rendering."
+  ],
+  "critical_code_review_comments": [
+    "support_agent.py:220 — admin_set uses `x.model_dump()` on a model whose every field has a default, which turns PUT into a destructive full-replace. See critical bug above.",
+    "RealtimeCall.jsx:400 — `isSupport && video.cfg?.enabled` silently hides the whole video feature when any admin-side config field goes missing; consider logging a warning when isSupport is true but cfg.enabled is false so the regression is visible in-browser.",
+    "Personas.jsx:16 — startChat() has no try/catch; a POST /conversations failure (quota, 429) would raise an uncaught promise rejection with no user feedback. Low priority.",
+    "Home.jsx:52 — openSupport() swallows errors in `catch (e) {}`; same UX gap: if backend 400s (e.g. support conv creation blocked), user sees nothing happen. Consider a toast.",
+    "SupportVideo.jsx:50 — the /support/video-config GET is called twice (React 18 StrictMode double-mount in dev). Fine, but tightens the pricing config invariant; just FYI."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter39_oryntix.py"
+  ],
+  "success_rate": {"backend": "100% (14/14 pytest)", "frontend": "~92% — all specified testids & flows verified except the live LiveAvatar video session which couldn't be fully exercised headlessly (backend lifecycle fully covered instead)."},
+  "test_credentials": "demo@aivora.ai / demo123456 (workspace admin), admin@aivora.ai / Aivora!Admin2026 (platform admin)",
+  "seed_data_creation": "Created ~4 support private conversations with demo@aivora.ai during tests (persona_ids=['oryntix-support']) and 1 Nadia private conversation for the image-combo test. Also created & ended 2 realtime calls (one on support, one on a non-support persona for the 404 check) — both terminated via /realtime/calls/<id>/end. Admin PUT /admin/support-agent was called with {video_credits_per_sec:3} then restored to {video_credits_per_sec:2}, and a second remediation PUT restored avatar_id/avatar_name/avatar_preview to their defaults (5341767a-21fe-43d7-a5b5-9fd6bff6d32e / 'Oryntix (custom)' / '/brand/oryntix-support.jpg'). Final verified state: GET /api/support/video-config → {enabled:true, credits_per_sec:2, max_minutes:20, warn_minutes:2, max_cost:2400, sandbox:true, avatar_name:'Oryntix (custom)'}.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression: `pytest /app/backend/tests/test_iter39_oryntix.py -v` — 14 tests, no AI credits spent beyond 2 Oryntix SSE replies. Important: the admin credit-roundtrip test (test_admin_support_agent_update_credits) will re-trigger the full-replace bug and wipe avatar_id — if the backend PUT isn't patched to be partial, you MUST restore avatar_id=5341767a-21fe-43d7-a5b5-9fd6bff6d32e via a follow-up PUT including all fields, or future UI runs will see rt-video-toggle disappear. For UI tests, remember to dismiss the 'tour-skip' modal before clicking home-support-chat / persona-chat-* buttons, or use JS .click() to bypass the overlay. Oryntix persona id is literally the string 'oryntix-support'. Admin GET returns `avatar_id: '5341767a-21fe-43d7-a5b5-9fd6bff6d32e'` and `liveavatar_key_set: true` in the healthy state.",
+  "rca of the issue": "Critical: PUT /api/admin/support-agent treats partial payloads as full replacements. Repro: `curl -X PUT -H 'Authorization: Bearer <admin>' -H 'content-type: application/json' -d '{\"video_credits_per_sec\":3}' /api/admin/support-agent` → the stored config loses avatar_id/system_prompt/knowledge/avatar_name/avatar_preview because SupportConfigIn applies defaults for omitted fields, and admin_set dumps the whole model into set_config(). Consequence: /api/support/video-config returns enabled:false (its truthiness check is `video_enabled AND avatar_id AND LIVEAVATAR_API_KEY`), which hides the rt-video-toggle button in the Realtime call UI across the whole workspace. Mitigation applied during test: issued a compensating PUT that re-sends avatar_id/avatar_name/avatar_preview along with the credits-per-sec. Permanent fix: switch to a Patch model with Optional fields and only merge provided keys."
+}
