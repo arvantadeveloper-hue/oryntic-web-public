@@ -10,7 +10,7 @@ import { Markdown } from "../components/Markdown";
 import { VideoRoom } from "../components/VideoRoom";
 import { RealtimeCall } from "../components/RealtimeCall";
 import { RealtimeMeeting } from "../components/RealtimeMeeting";
-import { MediaList, ToolRequestCard, ModelBadge, ToolUsage, PendingFiles, RenderingBox, MessageCta, downloadUrl } from "../components/MessageExtras";
+import { MediaList, ToolRequestCard, ModelBadge, ToolUsage, PendingFiles, ReminderCard, RenderingBox, MessageCta, downloadUrl } from "../components/MessageExtras";
 import { GalleryPicker } from "../components/GalleryPicker";
 import { DrivePicker } from "../components/DrivePicker";
 import { SummaryPrompt } from "../components/ConversationTools";
@@ -425,6 +425,7 @@ export default function Chat() {
                     {m.task_id && <TaskCard m={m} onOpen={setPanelTask} />}
                     <ToolRequestCard m={m} cid={id} onDone={refreshMsgs} />
                     <MessageCta m={m} />
+                    <ReminderCard m={m} />
                     <TaskOfferButtons m={m} cid={id} onDone={refreshMsgs} isLast={i === messages.length - 1} />
                     <WorkspaceResults m={m} />
                     <ArchiveResults m={m} cid={id} onDone={refreshMsgs} isLast={i === messages.length - 1} />

@@ -7,8 +7,8 @@ import { api } from "../lib/api";
 import { useI18n } from "../i18n";
 import { RemindOptions, RemindSummary } from "../components/RemindOptions";
 
-const statusColor = { scheduled: "#00D1FF", ringing: "#F59E0B", answered: "#10B981", sent: "#10B981", declined: "#94A3B8", missed: "#EF4444" };
-const STATUS_ID = { scheduled: "terjadwal", ringing: "berdering", answered: "dijawab", sent: "terkirim", declined: "ditolak", missed: "terlewat" };
+const statusColor = { scheduled: "#00D1FF", ringing: "#F59E0B", snoozed: "#F59E0B", answered: "#10B981", sent: "#10B981", declined: "#94A3B8", missed: "#EF4444" };
+const STATUS_ID = { scheduled: "terjadwal", ringing: "berdering", snoozed: "ditunda", answered: "dijawab", sent: "terkirim", declined: "ditolak", missed: "terlewat" };
 
 const toLocalInput = (iso) => { const d = new Date(iso); const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
 

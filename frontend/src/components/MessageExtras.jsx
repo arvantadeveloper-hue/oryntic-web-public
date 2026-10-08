@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
-import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins, X, UserRound, ShieldCheck, Volume2, VolumeX, Save } from "lucide-react";
+import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins, X, UserRound, ShieldCheck, Volume2, VolumeX, Save, AlarmClock } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 
@@ -188,6 +188,23 @@ export function ToolRequestCard({ m, cid, onDone, dark = false }) {
 }
 
 const REASON = { it: "topik IT/coding", research: "riset & analisis panjang" };
+
+// Chat-mode reminder message → "Ingatkan lagi 10 menit" (snooze) button.
+export function ReminderCard({ m, dark = false }) {
+  const [done, setDone] = useState(false);
+  if (m.tool !== "reminder" || !m.reminder?.id) return null;
+  const snooze = async () => {
+    try { await api.post(`/reminders/${m.reminder.id}/snooze`, { minutes: 10 }); setDone(true); toast.success("Oke, akan diingatkan lagi 10 menit lagi"); }
+    catch (e) { toast.error(e?.response?.status === 404 ? "Pengingat ini sudah tidak aktif" : "Gagal menunda"); }
+  };
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="reminder-card">
+      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${dark ? "bg-white/10 text-white/70" : "bg-amber-50 text-amber-700"}`}><AlarmClock size={10} /> Pengingat{m.reminder.snoozed ? " ulang" : ""}: {m.reminder.title}</span>
+      {!done && <button type="button" onClick={snooze} data-testid="reminder-snooze-btn" className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${dark ? "bg-white text-slate-900 hover:bg-white/90" : "bg-[#0B132B] text-white hover:bg-[#1c2749]"}`}><AlarmClock size={11} /> Ingatkan lagi 10 menit</button>}
+      {done && <span className={`text-[11px] ${dark ? "text-white/60" : "text-slate-500"}`} data-testid="reminder-snoozed">Ditunda 10 menit ✓</span>}
+    </div>
+  );
+}
 
 export const pendingUrl = (id) => `${API_BASE}/pending-files/${id}?auth=${getToken()}`;
 const fmtSize = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);

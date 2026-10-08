@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { onUserEvent, coalesce } from "../lib/userEvents";
-import { Phone, PhoneOff, X, Volume2 } from "lucide-react";
+import { Phone, PhoneOff, X, Volume2, AlarmClock } from "lucide-react";
+import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { Mark } from "./Logo";
 import { useAuth } from "../context/AuthContext";
@@ -48,6 +49,11 @@ export function IncomingCall() {
   const decline = async () => {
     dismissed.current.add(call.id);
     try { await api.post(`/reminders/${call.id}/respond`, { action: "decline" }); } catch (e) {}
+    setCall(null);
+  };
+  const snooze = async (minutes = 10) => {
+    dismissed.current.add(call.id);
+    try { await api.post(`/reminders/${call.id}/snooze`, { minutes }); toast.success(`Oke, ${name} akan mengingatkan lagi ${minutes} menit lagi`); } catch (e) { toast.error("Gagal menunda"); }
     setCall(null);
   };
 
@@ -102,6 +108,7 @@ export function IncomingCall() {
               <button onClick={decline} data-testid="call-decline-btn" className="flex h-16 w-16 items-center justify-center rounded-full bg-[#EF4444] text-white transition hover:scale-105"><PhoneOff size={26} /></button>
               <button onClick={accept} disabled={busy} data-testid="call-accept-btn" className="flex h-16 w-16 items-center justify-center rounded-full bg-[#10B981] text-white transition hover:scale-105 disabled:opacity-50"><Phone size={26} /></button>
             </div>
+            <button onClick={() => snooze(10)} data-testid="call-snooze-btn" className="mt-5 inline-flex items-center gap-1.5 rounded-full border border-[#E7ECF3] px-4 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"><AlarmClock size={14} /> Ingatkan lagi 10 menit</button>
           </>
         ) : (
           <>

@@ -16,7 +16,7 @@ const DAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
 const MONTHS = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
 const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const timeStr = (iso) => new Date(iso).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-const STATUS_ID = { scheduled: "terjadwal", completed: "selesai", running: "berjalan", queued: "antre", failed: "gagal", ringing: "berdering", done: "selesai", sent: "terkirim", answered: "dijawab", declined: "ditolak", missed: "terlewat" };
+const STATUS_ID = { scheduled: "terjadwal", completed: "selesai", running: "berjalan", queued: "antre", failed: "gagal", ringing: "berdering", done: "selesai", sent: "terkirim", answered: "dijawab", declined: "ditolak", missed: "terlewat", snoozed: "ditunda" };
 
 function EventForm({ date, onClose, onSaved }) {
   const [f, setF] = useState({ title: "", time: "09:00", notes: "" });

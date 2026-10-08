@@ -157,7 +157,7 @@ def _minutes_label(m: int) -> str:
     return f"{m // 1440} hari" if m >= 1440 and m % 1440 == 0 else (f"{m // 60} jam" if m >= 60 and m % 60 == 0 else f"{m} menit")
 
 
-async def _reminder_message(r: dict, u: dict, persona_name: str, pending: int, minutes: Optional[int] = None, chat: bool = False):
+async def _reminder_message(r: dict, u: dict, persona_name: str, pending: int, minutes: Optional[int] = None, chat: bool = False, snoozed: bool = False):
     """LLM-spoken reminder (TTS / chat path). Returns (message, credits)."""
     channel = "a short, warm, friendly PROACTIVE chat message" if chat else "a short, warm, friendly PROACTIVE VOICE reminder, as if speaking on a phone call"
     sys = (
@@ -165,7 +165,7 @@ async def _reminder_message(r: dict, u: dict, persona_name: str, pending: int, m
         f"You MUST write in {_lang_name(u)}. Sound human, caring and natural (not robotic). Greet the user by name. "
         "Use ONLY the data given. Do not invent agenda items, flight status, or completed tasks. 2-3 short sentences."
     )
-    lead = f" This reminder fires {_minutes_label(minutes)} before the start." if minutes else ""
+    lead = " This is a SNOOZED reminder: the user asked to be reminded again, so acknowledge that briefly." if snoozed else (f" This reminder fires {_minutes_label(minutes)} before the start." if minutes else "")
     prompt = (
         f"User name: {u.get('name')}. Reminder title: {r['title']}. Details: {r.get('description') or '-'}. "
         f"Scheduled start: {r['start_at']}.{lead} The user currently has {pending} task(s) still in progress."
@@ -201,6 +201,29 @@ async def _store_opening(conv: dict, persona: dict, msg: str, used: int, extra: 
     await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "last_message": msg[:120]}})
 
 
+class SnoozeIn(BaseModel):
+    minutes: int = Field(default=10, ge=1, le=1440)
+
+
+@router.post("/{rid}/snooze")
+async def snooze(rid: str, x: SnoozeIn, u: dict = Depends(current_user)):
+    """'Ingatkan lagi N menit': schedule one extra alert N minutes from now (same mode); a ringing call is dismissed."""
+    r = await db.reminders.find_one({"id": rid, "user_id": u["id"]}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Reminder not found")
+    now = datetime.now(timezone.utc)
+    at = now + timedelta(minutes=x.minutes)
+    try:
+        before = max(0, int((_parse(r["start_at"]) - at).total_seconds() // 60))
+    except Exception:
+        before = 0
+    alert = {"minutes": before, "remind_at": at.isoformat(), "status": "scheduled", "snoozed": True}
+    alerts = [a for a in (r.get("alerts") or []) if not (a.get("snoozed") and a.get("status") == "scheduled")] + [alert]
+    await db.reminders.update_one({"id": rid}, {"$set": {"alerts": alerts, "status": "snoozed", "snoozed_until": at.isoformat()}})
+    await notify_user(u["id"], {"type": "reminder_due", "reminder_id": rid, "snoozed": True})  # thin trigger → pages re-fetch
+    return {"ok": True, "status": "snoozed", "remind_at": at.isoformat(), "minutes": x.minutes}
+
+
 @router.post("/{rid}/respond")
 async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
     r = await db.reminders.find_one({"id": rid, "user_id": u["id"]})
@@ -214,7 +237,7 @@ async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
     pending = await db.tasks.count_documents({"user_id": u["id"], "status": {"$in": ["queued", "running"]}})
     opening = (f"Judul pengingat: {r['title']}. Detail: {r.get('description') or '-'}. Jadwal mulai: {r['start_at']}. "
                f"Tugas yang masih berjalan: {pending}.")
-    msg, used = (None, 0) if (x.realtime and persona) else await _reminder_message(r, u, persona_name, pending, r.get("ringing_minutes"))
+    msg, used = (None, 0) if (x.realtime and persona) else await _reminder_message(r, u, persona_name, pending, r.get("ringing_minutes"), snoozed=bool(r.get("ringing_snoozed")))
     await db.reminders.update_one({"id": rid}, {"$set": {"status": "answered", "message": msg or ""}})
     result = {"status": "answered", "message": msg, "persona_name": persona_name, "opening": opening}
     if persona:
@@ -227,18 +250,18 @@ async def respond(rid: str, x: RespondIn, u: dict = Depends(current_user)):
 
 
 # ---------- scheduler (called from server loop) ----------
-async def _fire_chat(r: dict, u: dict, minutes: int):
+async def _fire_chat(r: dict, u: dict, minutes: int, snoozed: bool = False):
     """Chat mode: the persona posts the reminder into the 1:1 chat + in-app/push notification."""
     persona = await _reminder_persona(r, u)
     if not persona:
         return
     pending = await db.tasks.count_documents({"user_id": u["id"], "status": {"$in": ["queued", "running"]}})
     try:
-        msg, used = await _reminder_message(r, u, persona["name"], pending, minutes, chat=True)
+        msg, used = await _reminder_message(r, u, persona["name"], pending, minutes, chat=True, snoozed=snoozed)
     except Exception:
-        msg, used = f"Halo {u.get('name') or ''}! Pengingat: {r['title']} dimulai {_minutes_label(minutes)} lagi.", 0
+        msg, used = f"Halo {u.get('name') or ''}! Pengingat{' ulang' if snoozed else ''}: {r['title']} dimulai {_minutes_label(minutes)} lagi.", 0
     conv = await _private_conv(u, persona)
-    await _store_opening(conv, persona, msg, used, {"tool": "reminder", "reminder": {"id": r["id"], "title": r["title"], "start_at": r["start_at"], "minutes": minutes},
+    await _store_opening(conv, persona, msg, used, {"tool": "reminder", "reminder": {"id": r["id"], "title": r["title"], "start_at": r["start_at"], "minutes": minutes, "snoozed": snoozed},
                                                     "cta": {"label": "Lihat pengingat", "href": "/reminders"}})
     await notify_user(u["id"], {"type": "message_new", "conversation_id": conv["id"]})
     await notify_user(u["id"], {"type": "notification"})
@@ -248,7 +271,7 @@ async def _fire_chat(r: dict, u: dict, minutes: int):
 
 async def _roll_repeating(now: datetime):
     """Repeating reminders whose start has passed (and are not ringing) → schedule the next occurrence."""
-    async for r in db.reminders.find({"repeat": {"$in": ["daily", "weekly", "monthly"]}, "start_at": {"$lte": now.isoformat()}, "status": {"$ne": "ringing"}}):
+    async for r in db.reminders.find({"repeat": {"$in": ["daily", "weekly", "monthly"]}, "start_at": {"$lte": now.isoformat()}, "status": {"$nin": ["ringing", "snoozed"]}}):
         try:
             nxt = next_occurrence(_parse(r["start_at"]), r["repeat"], now)
         except Exception:
@@ -263,7 +286,8 @@ async def _roll_repeating(now: datetime):
 async def _purge_past(now: datetime):
     """Non-repeating reminders whose start passed ≥1 h ago (delivered, declined, missed or never answered) are deleted; linked calendar events stay as history."""
     cutoff = (now - timedelta(hours=1)).isoformat()
-    await db.reminders.delete_many({"repeat": {"$nin": ["daily", "weekly", "monthly"]}, "start_at": {"$lte": cutoff}, "status": {"$ne": "ringing"}})
+    await db.reminders.delete_many({"repeat": {"$nin": ["daily", "weekly", "monthly"]}, "start_at": {"$lte": cutoff}, "status": {"$ne": "ringing"},
+                                    "alerts": {"$not": {"$elemMatch": {"status": "scheduled", "remind_at": {"$gt": now.isoformat()}}}}})
 
 
 async def scheduler_tick():
@@ -286,6 +310,7 @@ async def scheduler_tick():
         if not due:
             continue
         minutes = min(a["minutes"] for a in due)
+        snoozed = any(a.get("snoozed") for a in due)
         for a in alerts:
             if a in due:
                 a["status"] = "fired"
@@ -294,9 +319,10 @@ async def scheduler_tick():
             continue
         if r.get("mode") == "chat":
             await db.reminders.update_one({"id": r["id"]}, {"$set": {"alerts": alerts, "status": "sent", "last_fired_at": now_s}})
-            await _fire_chat(r, user, minutes)
+            await _fire_chat(r, user, minutes, snoozed)
             continue
-        await db.reminders.update_one({"id": r["id"]}, {"$set": {"alerts": alerts, "status": "ringing", "ringing_at": now_s, "ringing_minutes": minutes}})
+        await db.reminders.update_one({"id": r["id"]}, {"$set": {"alerts": alerts, "status": "ringing", "ringing_at": now_s, "ringing_minutes": minutes, "ringing_snoozed": snoozed}})
         await notify_user(r["user_id"], {"type": "reminder_due", "reminder_id": r["id"], "title": r.get("title")})
         from push import send_push
-        await send_push(r["user_id"], f"Pengingat: {r.get('title') or 'Agenda'}", f"Asisten Anda siap menelepon ({_minutes_label(minutes)} sebelum mulai).", {"link": "/reminders", "tag": f"reminder-{r['id']}"}, kind="reminders")
+        body = "Pengingat ulang: asisten Anda menelepon lagi." if snoozed else f"Asisten Anda siap menelepon ({_minutes_label(minutes)} sebelum mulai)."
+        await send_push(r["user_id"], f"Pengingat: {r.get('title') or 'Agenda'}", body, {"link": "/reminders", "tag": f"reminder-{r['id']}"}, kind="reminders")
