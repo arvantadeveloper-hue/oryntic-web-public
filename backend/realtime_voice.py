@@ -148,6 +148,10 @@ WEB_SEARCH_TOOL = {"type": "function", "name": "web_search",
                    "description": "Search the LIVE web for current facts (news, prices, rates, scores, who/what/when questions about recent events, anything you are unsure is up to date). "
                                   "Returns a short answer plus sources. Then answer the user in 1-3 spoken sentences and SAY the source name aloud (e.g. 'menurut Kompas'); the clickable links are posted to the chat panel automatically. Never claim you cannot access the internet.",
                    "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "What to search for, in the user's words"}}, "required": ["query"]}}
+RUN_CODE_TOOL = {"type": "function", "name": "run_code",
+                 "description": "Run Python to compute something precisely: arithmetic, percentages, loan/installment math, unit or currency conversion, statistics over numbers the user gives, date differences, etc. "
+                                "Use it instead of estimating whenever a number must be exact. Returns the computed result in plain words; read it back naturally (round long decimals when speaking) and mention briefly that you calculated it. Never say you cannot run code.",
+                 "parameters": {"type": "object", "properties": {"task": {"type": "string", "description": "The calculation to perform, with all numbers and assumptions, in the user's words"}}, "required": ["task"]}}
 SEARCH_TOOL = {"type": "function", "name": "search_workspace",
                "description": "Search the user's Workspace (saved task results, documents, meeting minutes) by keywords and drop clickable links into the chat panel. Use when the user asks to find or look up existing material.",
                "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Keywords to search for"}}, "required": ["query"]}}
@@ -382,10 +386,10 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         gh_on = bool(await db.github_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
         gl_on = bool(await db.gitlab_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
         social_on = bool(await db.social_accounts.find_one({"user_id": u["id"]}, {"_id": 1}))
-        from provider_tools import web_search_tool
+        from provider_tools import web_search_tool, code_tool
         call_persona = await db.personas.find_one({"id": call["persona_id"]}, {"_id": 0, "model": 1, "tools": 1}) or {}
-        web_on = bool(web_search_tool(call_persona))
-        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        web_on, code_on = bool(web_search_tool(call_persona)), bool(code_tool(call_persona))
+        tools = [ASSIGN_TOOL, SEARCH_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + ([RUN_CODE_TOOL] if code_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     async with httpx.AsyncClient(timeout=30) as client:
@@ -428,10 +432,12 @@ class WebSearchIn(BaseModel):
     query: str = Field(min_length=2, max_length=400)
 
 
-@router.post("/realtime/calls/{call_id}/web-search")
-async def call_web_search(call_id: str, x: WebSearchIn, u: dict = Depends(current_user)):
-    """Voice tool: live web search via the persona's provider tool; the spoken answer goes back to the model, the sources are posted to the chat panel."""
-    from provider_tools import voice_web_search
+class RunCodeIn(BaseModel):
+    task: str = Field(min_length=2, max_length=1500)
+
+
+async def _voice_provider_tool(call_id: str, u: dict, runner, text: str, tool: str, card_title: str, not_enabled: str, failed: str, via: str) -> dict:
+    """Shared voice-tool flow: run the persona's provider tool, bill tool + text credits, post a card to the chat panel, return the spoken answer."""
     from auth import _lang_name
     from chat import _save_ai_msg
     from llm import text_credits
@@ -441,25 +447,41 @@ async def call_web_search(call_id: str, x: WebSearchIn, u: dict = Depends(curren
     if over:
         raise HTTPException(402, quota_message(over))
     try:
-        out = await voice_web_search(persona, _lang_name(u), x.query, u["id"])
+        out = await runner(persona, _lang_name(u), text, u["id"])
     except ValueError:
-        raise HTTPException(400, "Pencarian web tidak diaktifkan untuk asisten ini.")
+        raise HTTPException(400, not_enabled)
     except Exception as exc:
-        logging.getLogger(__name__).warning("voice web search failed: %s", str(exc)[:200])
-        raise HTTPException(502, "Pencarian web gagal, coba lagi.") from exc
-    credits = text_credits(x.query, out["text"], persona.get("model"))
+        logging.getLogger(__name__).warning("voice tool %s failed: %s", tool, str(exc)[:200])
+        raise HTTPException(502, failed) from exc
+    credits = text_credits(text, out["text"], persona.get("model"))
     for t in out["tools_used"]:
         if t["credits"]:
             await record_usage(u["id"], f"tool:{t['id']}", t["credits"], {"conversation_id": call["conversation_id"], "persona_id": persona.get("id"), "count": t["count"], "via": "realtime"})
-    await record_usage(u["id"], "chat", credits, {"conversation_id": call["conversation_id"], "persona_id": persona.get("id"), "model": persona.get("model"), "via": "realtime_web_search"})
+    await record_usage(u["id"], "chat", credits, {"conversation_id": call["conversation_id"], "persona_id": persona.get("id"), "model": persona.get("model"), "via": via})
     credits += out["tool_credits"]
     sources = out["citations"]
     spoken = re.sub(r"\s*\(\[[^\]]*\]\([^)]*\)\)", "", out["text"])  # drop inline "([site](url))" so the voice model doesn't read URLs aloud
     spoken = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", spoken).strip()
-    md = f"🔎 **Pencarian web:** «{x.query}»\n\n{out['text']}"
-    await _save_ai_msg(call["conversation_id"], persona, md, credits, "meeting_chat", {"tool": "web_search", "tools_used": out["tools_used"], "citations": sources})
+    md = f"{card_title} «{text}»\n\n{out['text']}"
+    await _save_ai_msg(call["conversation_id"], persona, md, credits, "meeting_chat", {"tool": tool, "tools_used": out["tools_used"], "citations": sources, **({"media": out["media"]} if out.get("media") else {})})
     await notify(call["conversation_id"], {"type": "message", "role": "assistant"})
     return {"answer": spoken, "sources": [{"title": s["title"], "url": s["url"]} for s in sources[:5]], "credits": credits}
+
+
+@router.post("/realtime/calls/{call_id}/web-search")
+async def call_web_search(call_id: str, x: WebSearchIn, u: dict = Depends(current_user)):
+    """Voice tool: live web search via the persona's provider tool; the spoken answer goes back to the model, the sources are posted to the chat panel."""
+    from provider_tools import voice_web_search
+    return await _voice_provider_tool(call_id, u, voice_web_search, x.query, "web_search", "🔎 **Pencarian web:**",
+                                      "Pencarian web tidak diaktifkan untuk asisten ini.", "Pencarian web gagal, coba lagi.", "realtime_web_search")
+
+
+@router.post("/realtime/calls/{call_id}/run-code")
+async def call_run_code(call_id: str, x: RunCodeIn, u: dict = Depends(current_user)):
+    """Voice tool: solve a calculation/data task by running Python via the persona's provider code tool; result is spoken + posted to the chat panel."""
+    from provider_tools import voice_run_code
+    return await _voice_provider_tool(call_id, u, voice_run_code, x.task, "run_code", "🧮 **Perhitungan (Python):**",
+                                      "Eksekusi kode tidak diaktifkan untuk asisten ini.", "Perhitungan gagal, coba lagi.", "realtime_run_code")
 
 
 

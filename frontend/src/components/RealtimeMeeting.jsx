@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Captions, Zap, Gavel, VolumeX, Volume2, MonitorUp, MonitorOff, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { RealtimeSession, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL , removeAllCallAudio } from "../lib/realtimeSession";
+import { RealtimeSession, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL, removeAllCallAudio, bargeMs, loadBehaviour, BEHAVIOUR } from "../lib/realtimeSession";
 import { PeerMesh, createMixer, captureFrame } from "../lib/peerAudio";
 import { PresentationPanel } from "./PresentationPanel";
 import { InviteButton, InviteDialog } from "./InviteToCall";
@@ -287,7 +287,7 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
       case "response.function_call_arguments.done": {
         let a = {}; try { a = JSON.parse(ev.arguments || "{}"); } catch (e) {}
         if (s === mod() && ev.name === "delegate") { delegationRef.current = { call_id: ev.call_id, ...a }; break; }
-        if (["assign_task", "update_task", "search_workspace", "web_search"].includes(ev.name)) {
+        if (["assign_task", "update_task", "search_workspace", "web_search", "run_code"].includes(ev.name)) {
           toolRef.current = { callId: s.callId, call_id: ev.call_id, name: ev.name, promise: runVoiceTool(ev.name, { ...a, persona_id: s.persona.id }, cid, s.callId) };
         }
         break;

@@ -194,6 +194,10 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       const r = await api.post(`/realtime/calls/${callId}/web-search`, { query: args.query });
       return { ok: true, answer: r.data.answer, sources: (r.data.sources || []).map((s) => s.title), note: "answer briefly in speech and say the source name(s) aloud; the clickable links are already in the chat panel" };
     }
+    if (name === "run_code") {
+      const r = await api.post(`/realtime/calls/${callId}/run-code`, { task: args.task });
+      return { ok: true, result: r.data.answer, note: "read the result back naturally in speech (round long decimals), mention you calculated it; the full result card is already in the chat panel" };
+    }
     const gitProv = name.startsWith("gitlab_") ? "gitlab" : "github";
     const gitLabel = gitProv === "gitlab" ? "GitLab" : "GitHub";
     if (name === "github_repos" || name === "gitlab_repos") {

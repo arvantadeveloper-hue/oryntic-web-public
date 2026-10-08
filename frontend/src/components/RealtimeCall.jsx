@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Loader2, Zap, MonitorUp, MonitorOff, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
-import { vadUpdate, reportUsage, ContextPruner, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL , removeAllCallAudio } from "../lib/realtimeSession";
+import { vadUpdate, reportUsage, ContextPruner, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL, removeAllCallAudio, bargeMs, loadBehaviour, BEHAVIOUR } from "../lib/realtimeSession";
 import { captureFrame } from "../lib/peerAudio";
 import { MicPipeline, loadMicPrefs, saveMicPrefs } from "../lib/micPipeline";
 import { MicSettingsMenu } from "./MicSettingsMenu";
@@ -169,6 +169,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
           if (out.ok && ev.name === "update_task") { toast.success(`Revisi v${out.version} tersimpan di Ruang Kerja`); onRefresh && onRefresh(); }
           if (out.ok && ev.name === "assign_task") toast.success(`Tugas dicatat ke Ruang Kerja (${out.when})`);
           if (out.ok && ev.name === "web_search") { toast.success("Sumber pencarian web dikirim ke chat"); onRefresh && onRefresh(); }
+          if (out.ok && ev.name === "run_code") { toast.success("Hasil perhitungan dikirim ke chat"); onRefresh && onRefresh(); }
           if (out.ok && ev.name === "search_workspace") { toast.success(`${out.count} hasil Ruang Kerja dikirim ke chat`); onRefresh && onRefresh(); }
           send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: ev.call_id, output: JSON.stringify(out) } });
           createResponse({ type: "response.create", response: { instructions: "In one casual spoken sentence, tell the user what you just did (from the tool result). No follow-up question unless needed." } });
