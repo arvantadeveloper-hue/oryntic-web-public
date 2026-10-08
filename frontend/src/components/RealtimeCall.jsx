@@ -165,9 +165,10 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       case "response.function_call_arguments.done": {
         let args = {}; try { args = JSON.parse(ev.arguments || "{}"); } catch (e) {}
         setPhase("thinking");
-        runVoiceTool(ev.name, args, cid).then((out) => {
+        runVoiceTool(ev.name, args, cid, callIdRef.current).then((out) => {
           if (out.ok && ev.name === "update_task") { toast.success(`Revisi v${out.version} tersimpan di Ruang Kerja`); onRefresh && onRefresh(); }
           if (out.ok && ev.name === "assign_task") toast.success(`Tugas dicatat ke Ruang Kerja (${out.when})`);
+          if (out.ok && ev.name === "web_search") { toast.success("Sumber pencarian web dikirim ke chat"); onRefresh && onRefresh(); }
           if (out.ok && ev.name === "search_workspace") { toast.success(`${out.count} hasil Ruang Kerja dikirim ke chat`); onRefresh && onRefresh(); }
           send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: ev.call_id, output: JSON.stringify(out) } });
           createResponse({ type: "response.create", response: { instructions: "In one casual spoken sentence, tell the user what you just did (from the tool result). No follow-up question unless needed." } });

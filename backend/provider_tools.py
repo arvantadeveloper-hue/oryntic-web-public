@@ -92,6 +92,26 @@ async def _run_litellm(system: str, prompt: str, provider: str, model: str, tool
     return {"text": (resp.content or "").strip(), "counts": counts, "citations": citations, "media": []}
 
 
+WEB_SEARCH_TOOLS = {"openai": "openai:web_search", "gemini": "gemini:google_search", "anthropic": "anthropic:web_search"}
+
+
+def web_search_tool(persona: dict) -> Optional[str]:
+    """The web-search tool enabled for this persona's model provider (used by voice calls), else None."""
+    ids = persona_tools(persona, persona.get("model"))
+    tid = WEB_SEARCH_TOOLS[resolve_model(persona.get("model"))[0]]
+    return tid if tid in ids else None
+
+
+async def voice_web_search(persona: dict, lang_name: str, query: str, uid: str) -> dict:
+    """Voice-call helper: search the live web with the persona's provider tool → short spoken-style answer + sources."""
+    tid = web_search_tool(persona)
+    if not tid:
+        raise ValueError("web search not enabled")
+    system = (f"You are {persona.get('name')}'s research helper. Search the web and answer the question in {lang_name} in at most 3 short spoken sentences "
+              "(no markdown, no bullet lists, no URLs in the text). Name the source site briefly in words (e.g. 'menurut Kompas'). Facts must come from the search results.")
+    return await run_with_tools(system, query, persona.get("model"), [tid], uid)
+
+
 async def run_with_tools(system: str, prompt: str, model_key: Optional[str], tool_ids: list, uid: str) -> dict:
     """→ {text, tools_used:[{id,label,count,credits}], tool_credits, citations, media}. Raises on provider failure (caller falls back)."""
     provider, model = resolve_model(model_key)

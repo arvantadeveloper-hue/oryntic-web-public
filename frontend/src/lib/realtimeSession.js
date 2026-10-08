@@ -190,6 +190,10 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       return { ok: true, needs_choice: r.data.needs_choice, options: r.data.options, summary: r.data.summary, note: r.data.needs_choice ? "a card to pick Seedance 2.0 or 2.5 was posted to the chat panel — tell the user the prices briefly and ask them to tap one" : "a notice was posted to the chat panel — explain it briefly" };
     }
     if (name === "search_workspace") { const r = await api.post(`/conversations/${cid}/workspace-search`, { query: args.query }); return { ok: true, ...r.data, note: "links were posted to the chat panel" }; }
+    if (name === "web_search") {
+      const r = await api.post(`/realtime/calls/${callId}/web-search`, { query: args.query });
+      return { ok: true, answer: r.data.answer, sources: (r.data.sources || []).map((s) => s.title), note: "answer briefly in speech and say the source name(s) aloud; the clickable links are already in the chat panel" };
+    }
     const gitProv = name.startsWith("gitlab_") ? "gitlab" : "github";
     const gitLabel = gitProv === "gitlab" ? "GitLab" : "GitHub";
     if (name === "github_repos" || name === "gitlab_repos") {
