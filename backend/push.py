@@ -2,11 +2,14 @@ import base64
 import json
 import logging
 import os
-from typing import Optional
+import time
+from datetime import timedelta
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+import apns_voip
 from auth import current_user
 from db import db, now_iso, new_id
 from realtime import user_manager
@@ -15,6 +18,10 @@ from realtime import user_manager
 router = APIRouter(prefix="/api/push", tags=["push"])
 log = logging.getLogger("push")
 KINDS = ("reminders", "calls", "messages", "tasks")
+# Android notification channels the mobile app must create with matching ids (calls = IMPORTANCE_HIGH + full-screen intent).
+CHANNELS = {"calls": "oryntix_calls", "reminders": "oryntix_reminders", "messages": "oryntix_messages", "tasks": "oryntix_tasks", "friends": "oryntix_social"}
+CATEGORIES = {"calls": "ORYNTIX_CALL", "reminders": "ORYNTIX_REMINDER", "messages": "ORYNTIX_MESSAGE", "tasks": "ORYNTIX_TASK", "friends": "ORYNTIX_SOCIAL"}
+CALL_TTL_SEC = 45
 _app = {"inst": None, "tried": False}
 
 
@@ -57,7 +64,9 @@ async def _prefs(uid: str) -> dict:
 @router.get("/status")
 async def status(u: dict = Depends(current_user)):
     n = await db.push_tokens.count_documents({"user_id": u["id"]})
-    return {"configured": configured(), "devices": n, "prefs": await _prefs(u["id"])}
+    voip = await db.voip_tokens.count_documents({"user_id": u["id"], "active": {"$ne": False}})
+    return {"configured": configured(), "devices": n, "prefs": await _prefs(u["id"]),
+            "voip_configured": apns_voip.configured(), "voip_devices": voip, "voip_env": apns_voip.cfg()["env"]}
 
 
 @router.post("/tokens")
@@ -83,6 +92,43 @@ async def set_prefs(x: PrefsIn, u: dict = Depends(current_user)):
 async def test_push(u: dict = Depends(current_user)):
     sent = await send_push(u["id"], "Oryntix", "Notifikasi push aktif di perangkat ini.", {"link": "/home"}, kind=None, force=True)
     return {"sent": sent}
+
+
+class VoipTokenIn(BaseModel):
+    token: str = Field(min_length=32, max_length=512, pattern="^[0-9a-fA-F]+$")  # PushKit token as lowercase hex
+    environment: Literal["sandbox", "production"] = "sandbox"
+    bundle_id: Optional[str] = Field(default=None, max_length=120)
+
+
+@router.post("/voip-tokens")
+async def register_voip(x: VoipTokenIn, u: dict = Depends(current_user)):
+    await apns_voip.register(u["id"], x.token.lower(), x.environment, x.bundle_id)
+    return {"ok": True, "configured": apns_voip.configured()}
+
+
+@router.delete("/voip-tokens")
+async def unregister_voip(x: VoipTokenIn, u: dict = Depends(current_user)):
+    await apns_voip.unregister(u["id"], x.token.lower())
+    return {"ok": True}
+
+
+@router.post("/voip-test")
+async def test_voip(u: dict = Depends(current_user)):
+    """Rings this user's own iPhone with a VoIP push so the mobile app can verify PushKit + CallKit."""
+    return await apns_voip.send_voip(u["id"], {"call_id": new_id(), "conversation_id": "", "caller": "Oryntix", "caller_id": u["id"],
+                                               "handle": u.get("email") or "oryntix", "kind": "calls", "test": "1", "link": "/home"})
+
+
+async def send_call_push(uid: str, *, caller: str, conversation_id: str, call_id: str, persona_id: Optional[str] = None,
+                         title: Optional[str] = None, body: Optional[str] = None) -> dict:
+    """Ring one user: PushKit VoIP (iOS, works with the app terminated) + high-priority FCM (Android/web)."""
+    data = {"link": f"/chat/{conversation_id}", "tag": f"call-{conversation_id}", "call_id": call_id,
+            "conversation_id": conversation_id, "caller": caller, "handle": caller}
+    if persona_id:
+        data["persona_id"] = persona_id
+    voip = await apns_voip.send_voip(uid, {**data, "kind": "calls"})
+    fcm = await send_push(uid, title or f"Panggilan masuk dari {caller}", body or "Ketuk untuk bergabung", data, kind="calls")
+    return {"voip": voip, "fcm": fcm}
 
 
 async def log_notification(uid: str, title: str, body: str, data: Optional[dict], kind: Optional[str]) -> None:
@@ -116,14 +162,41 @@ async def send_push(uid: str, title: str, body: str, data: Optional[dict] = None
     muted = bool((urow.get("settings") or {}).get("mute_sounds"))
     from firebase_admin import messaging
     link = (data or {}).get("link") or "/home"
+    tag = (data or {}).get("tag")
+    is_call = kind == "calls"
+    channel = CHANNELS.get(kind or "", "oryntix_default")
+    bundle = os.environ.get("APNS_BUNDLE_ID", "").strip()
+    apns_headers = {"apns-priority": "10", "apns-push-type": "alert"}
+    if bundle:
+        apns_headers["apns-topic"] = bundle
+    if tag:
+        apns_headers["apns-collapse-id"] = str(tag)[:64]
+    if is_call:
+        apns_headers["apns-expiration"] = str(int(time.time()) + CALL_TTL_SEC)
     msg = messaging.MulticastMessage(
         tokens=tokens,
         data={k: str(v) for k, v in {**(data or {}), "title": title, "body": body, "kind": kind or "system", "silent": "1" if muted else "0"}.items()},
         notification=messaging.Notification(title=title, body=body[:300]) if any_native else None,  # Android/iOS system tray; web uses webpush below
-        android=messaging.AndroidConfig(priority="high", notification=messaging.AndroidNotification(tag=(data or {}).get("tag"), click_action="FLUTTER_NOTIFICATION_CLICK", **({"default_sound": False, "default_vibrate_timings": False} if muted else {"default_sound": True, "default_vibrate_timings": True}))) if any_native else None,
-        apns=messaging.APNSConfig(payload=messaging.APNSPayload(aps=messaging.Aps(sound=None if muted else "default", thread_id=(data or {}).get("tag")))) if any_native else None,
+        android=messaging.AndroidConfig(
+            priority="high",  # wake the app even when swiped away / in Doze
+            ttl=timedelta(seconds=CALL_TTL_SEC) if is_call else timedelta(hours=6),
+            collapse_key=str(tag) if tag else None,
+            direct_boot_ok=True,
+            notification=messaging.AndroidNotification(
+                tag=tag, channel_id=channel, priority="max" if is_call else "high", visibility="public",
+                notification_count=None, icon="ic_notification", color="#2F6BFF",
+                **({"default_sound": False, "default_vibrate_timings": False} if muted else {"default_sound": True, "default_vibrate_timings": True}))) if any_native else None,
+        apns=messaging.APNSConfig(
+            headers=apns_headers,
+            payload=messaging.APNSPayload(aps=messaging.Aps(
+                alert=messaging.ApsAlert(title=title, body=body[:300]),
+                sound=None if muted else "default",
+                content_available=True,   # lets the app refresh state in the background
+                mutable_content=True,     # notification-service-extension can enrich (avatar, caller photo)
+                category=CATEGORIES.get(kind or "", "ORYNTIX"),
+                thread_id=tag))) if any_native else None,
         webpush=messaging.WebpushConfig(
-            notification=messaging.WebpushNotification(title=title, body=body[:300], icon="/brand/mark-512.png", badge="/brand/mark-512.png", tag=(data or {}).get("tag"), renotify=bool((data or {}).get("tag")) and not muted, silent=muted, vibrate=[] if muted else None),
+            notification=messaging.WebpushNotification(title=title, body=body[:300], icon="/brand/mark-512.png", badge="/brand/mark-512.png", tag=tag, renotify=bool(tag) and not muted, silent=muted, vibrate=[] if muted else None),
             fcm_options=messaging.WebpushFCMOptions(link=link if link.startswith("http") else f"{os.environ.get('APP_URL', '').rstrip('/')}{link}" if os.environ.get("APP_URL") else link)),
     )
     try:

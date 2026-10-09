@@ -625,3 +625,11 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Mengatur: aktif/nonaktif, nama, ringkasan, URL foto (+preview), model chat/suara/voice, system prompt, knowledge base, video LiveAvatar (harga/detik, durasi maks, peringatan, sandbox + catatan peringatan sandbox), avatar picker (avatar saya/publik) & input avatar_id manual, stempel `updated_at`.
 - Endpoint yang dipakai sudah ada: GET/PUT `/api/admin/support-agent`, GET `/api/admin/support-agent/avatars`. Diuji: render tab via screenshot (admin@aivora.ai) + PUT via curl → tersimpan, prompt/knowledge tidak lagi kosong.
 - Catatan: ini panel SEMENTARA di app utama (karena DB preview app utama & oryntix-admin terpisah). Setelah kedua app memakai satu MongoDB, panel ini bisa tetap ada sebagai cadangan.
+
+## Update 2026-10-09 (push-mobile) — FCM payload high-priority + VoIP push APNs (PushKit)
+- `push.py`: tambah `android.ttl` (45s utk calls, 6 jam lainnya), `collapse_key`, `direct_boot_ok`, `notification.channel_id` (oryntix_calls/reminders/messages/tasks/social/default), `notification_priority` MAX utk calls, `visibility PUBLIC`, icon `ic_notification`, color #2F6BFF. Blok `apns` kini lengkap: headers `apns-priority:10`, `apns-push-type:alert`, `apns-topic` (APNS_BUNDLE_ID), `apns-collapse-id`, `apns-expiration` (calls), aps `alert`+`sound`+`content-available`+`mutable-content`+`category`+`thread-id`.
+- Baru `apns_voip.py`: pengirim VoIP PushKit langsung ke APNs (httpx HTTP/2 + PyJWT ES256, cache JWT 50 mnt, retry 1x saat Expired/InvalidProviderToken, prune token pada 410/BadDeviceToken/Unregistered/DeviceTokenNotForTopic). No-op bila APNS_* kosong.
+- `push.py` endpoint baru: `POST/DELETE /api/push/voip-tokens`, `POST /api/push/voip-test`; `/api/push/status` kini melaporkan `voip_configured`, `voip_devices`, `voip_env`. Helper `send_call_push()` = VoIP (iOS) + FCM high-priority (Android/web), dipakai di `rtc.py` saat panggilan dimulai.
+- Env baru yang harus diisi user: `APNS_P8`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_ENV`.
+- Kontrak payload lengkap untuk developer mobile: `/app/memory/MOBILE_PUSH_SPEC.md`.
+- Uji: payload FCM diverifikasi via encoder firebase-admin; jalur APNs diuji end-to-end dgn kunci ES256 dummy → Apple balas 403 InvalidProviderToken (jalur HTTP/2+JWT benar). Perlu uji ulang dgn kunci asli + iPhone fisik.

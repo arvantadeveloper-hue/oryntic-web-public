@@ -79,13 +79,14 @@ async def call_presence(cid: str, x: PresenceIn = PresenceIn(), u: dict = Depend
     if not session_id:
         session_id = new_id()
     upd = {f"active_call.{u['id']}": {"name": u.get("name") or "Peserta", "at": now_iso()}, "call_host": host, "call_session_id": session_id}
-    if not live:  # call just started → ring the other participants (in-app event + push)
+    if not live:  # call just started → ring the other participants (in-app event + VoIP/FCM push)
         from realtime import notify_users
-        from push import send_push
+        from push import send_call_push
         others = [p for p in (conv.get("participants") or []) + [conv.get("user_id")] if p and p != u["id"]]
         await notify_users(others, {"type": "incoming_call", "conversation_id": cid, "from_name": u.get("name") or "Teman", "title": conv.get("title")})
         for o in set(others):
-            await send_push(o, f"Panggilan masuk dari {u.get('name') or 'teman'}", conv.get("title") or "Ketuk untuk bergabung", {"link": f"/chat/{cid}", "tag": f"call-{cid}"}, kind="calls")
+            await send_call_push(o, caller=u.get("name") or "Teman", conversation_id=cid, call_id=session_id,
+                                 persona_id=conv.get("persona_id"), body=conv.get("title") or "Ketuk untuk bergabung")
     charged = 0
     if host == u["id"] and x.bytes_delta:
         p = await get_pricing()
