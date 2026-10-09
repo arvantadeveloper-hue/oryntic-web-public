@@ -633,3 +633,10 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Env baru yang harus diisi user: `APNS_P8`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_ENV`.
 - Kontrak payload lengkap untuk developer mobile: `/app/memory/MOBILE_PUSH_SPEC.md`.
 - Uji: payload FCM diverifikasi via encoder firebase-admin; jalur APNs diuji end-to-end dgn kunci ES256 dummy → Apple balas 403 InvalidProviderToken (jalur HTTP/2+JWT benar). Perlu uji ulang dgn kunci asli + iPhone fisik.
+
+## Update 2026-10-09 (pricing-catalog) — Katalog harga hierarkis provider → layanan → komponen → satuan
+- Baru `backend/pricing_catalog.py`: DEFAULT_CATALOG (5 provider, 38 layanan) dengan harga dari docs OpenAI/Gemini/Claude, satu fungsi `quote()` (base = usd×qty÷qty_basis, lalu ×(1+margin)×(1+PPN)÷usd_per_credit, urutan di `PIPELINE`), `flat_qty` untuk token flat per gambar, rantai override margin/PPN komponen→layanan→provider→global, merge default+edit admin per id, importir diff dari halaman docs (`doc_cols` per provider; Gemini manual karena harga promo bertanggal).
+- `pricing.py`: `model_price`, `model_text_credits`, `tool_usd`, `realtime_model_prices`, `compute_rates`, `feature_table` kini membaca katalog (fallback field lama). Tarif baru aktif: gambar 56 kredit, realtime $0,05/menit → 73 kredit/menit, web_search $0,01/panggilan.
+- `admin.py`: GET/PUT `/api/admin/pricing-catalog`, POST `/pricing-catalog/quote`, `/import`, `/import/apply`.
+- Frontend: `components/PricingCatalogCard.jsx` + tab **Katalog Harga** di `/admin` (tree editable, kolom biaya→margin→PPN→kredit, simulator harga, modal diff impor).
+- Dokumentasi: `/app/memory/PRICING_CATALOG.md`. Uji: testing agent iter40 — 16/16 backend + 9/9 frontend lulus, regresi chat & kredit normal.
