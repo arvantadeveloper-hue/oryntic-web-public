@@ -9,14 +9,15 @@ import time
 import pytest
 import requests
 from pymongo import MongoClient
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 assert BASE, "REACT_APP_BACKEND_URL must be set"
 
 ADMIN_EMAIL = "admin@aivora.ai"
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or "Aivora!Admin2026"
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ADMIN_PASSWORD
 DEMO_EMAIL = "demo@aivora.ai"
-DEMO_PASSWORD = "demo123456"
 
 MONGO_URL = "mongodb://localhost:27017"
 DB_NAME = "test_database"

@@ -3,11 +3,13 @@ import os
 import pytest
 import requests
 from dotenv import load_dotenv
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 load_dotenv("/app/frontend/.env")
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
-DEMO = {"email": "demo@aivora.ai", "password": "demo123456"}
-BUDI = {"email": "budi@aivora.ai", "password": "budi123456"}
+DEMO = {"email": "demo@aivora.ai", "password": DEMO_PASSWORD}
+BUDI = {"email": "budi@aivora.ai", "password": BUDI_PASSWORD}
 BUDI_ID = "0a0e91ef-25fc-4900-b74e-dfe988a5b031"
 RIO = "e93a66a6-59b1-4a12-8c16-0c9dba6c3348"
 NOVA = "4d4b348c-ce16-431d-8927-5a76d66ae9ef"

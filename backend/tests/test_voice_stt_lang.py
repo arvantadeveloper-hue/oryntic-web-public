@@ -7,6 +7,8 @@ import os
 import base64
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL")
 if not BASE_URL:
@@ -18,7 +20,7 @@ BASE_URL = BASE_URL.rstrip("/")
 API = f"{BASE_URL}/api"
 
 DEMO_EMAIL = "demo@aivora.ai"
-DEMO_PASSWORD = os.environ.get("TEST_DEMO_PASSWORD", os.environ.get("TEST_ADMIN_PASSWORD", "demo123456"))
+DEMO_PASSWORD = os.environ.get("TEST_DEMO_PASSWORD", os.environ.get("TEST_ADMIN_PASSWORD", DEMO_PASSWORD))
 
 ID_TEXT = "Halo, apa kabar hari ini? Aku ingin bercerita tentang pekerjaanku."
 ID_KEYWORDS = ["halo", "apa", "kabar", "hari", "aku", "ingin", "tentang"]

@@ -4,6 +4,8 @@ import re
 import time
 import requests
 import pytest
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 def _load_frontend_env():
     try:
@@ -28,7 +30,7 @@ def _tok_from_link(link: str, key: str) -> str:
 
 @pytest.fixture(scope="module")
 def demo_token():
-    r = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": "demo123456"})
+    r = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": DEMO_PASSWORD})
     assert r.status_code == 200, r.text
     return r.json()["access_token"]
 
@@ -300,7 +302,7 @@ class TestInviteRejectResendCancelRemove:
 # ---------- legacy regression ----------
 class TestLegacyBudi:
     def test_login_and_workspaces(self):
-        r = requests.post(f"{API}/auth/login", json={"email": "budi@aivora.ai", "password": "budi123456"})
+        r = requests.post(f"{API}/auth/login", json={"email": "budi@aivora.ai", "password": BUDI_PASSWORD})
         assert r.status_code == 200, r.text
         tok = r.json()["access_token"]
         ws = requests.get(f"{API}/auth/workspaces", headers={"Authorization": f"Bearer {tok}"}).json()

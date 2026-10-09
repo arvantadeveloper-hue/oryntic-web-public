@@ -3,6 +3,8 @@ import os
 import json
 import requests
 import pytest
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ai-companion-test-5.preview.emergentagent.com").rstrip("/")
 MEETING_CID = "bcf72bc8-1c0d-4c5f-bb3c-e7d15dbee9f6"  # 'Meeting: Rio, Nova' (demo workspace)
@@ -12,7 +14,7 @@ MEETING_CID = "bcf72bc8-1c0d-4c5f-bb3c-e7d15dbee9f6"  # 'Meeting: Rio, Nova' (de
 @pytest.fixture(scope="module")
 def demo_token():
     r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"email": "demo@aivora.ai", "password": "demo123456"}, timeout=30)
+                      json={"email": "demo@aivora.ai", "password": DEMO_PASSWORD}, timeout=30)
     assert r.status_code == 200, r.text
     return r.json()["access_token"]
 

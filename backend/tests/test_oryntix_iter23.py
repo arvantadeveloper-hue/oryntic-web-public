@@ -1,6 +1,6 @@
 """Iter 23 — Workspace keyword search + Team delegation flow.
 
-Credentials: demo@aivora.ai / demo123456
+Credentials: demo@aivora.ai / $TEST_DEMO_PASSWORD (backend/.env)
 """
 import os
 import json
@@ -8,6 +8,8 @@ import time
 
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
@@ -30,7 +32,7 @@ def H(tok):
 
 @pytest.fixture(scope="module")
 def tok():
-    return _login("demo@aivora.ai", "demo123456")
+    return _login("demo@aivora.ai", DEMO_PASSWORD)
 
 
 @pytest.fixture(scope="module")

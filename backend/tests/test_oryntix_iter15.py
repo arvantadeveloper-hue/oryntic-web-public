@@ -6,6 +6,8 @@ import pytest
 import requests
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 load_dotenv("/app/backend/.env")
 load_dotenv("/app/frontend/.env")
@@ -15,9 +17,9 @@ API = f"{BASE}/api"
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 
-DEMO = ("demo@aivora.ai", "demo123456")
-BUDI = ("budi@aivora.ai", "budi123456")
-PLATFORM = ("admin@aivora.ai", "Aivora!Admin2026")
+DEMO = ("demo@aivora.ai", DEMO_PASSWORD)
+BUDI = ("budi@aivora.ai", BUDI_PASSWORD)
+PLATFORM = ("admin@aivora.ai", ADMIN_PASSWORD)
 
 S = requests.Session()
 S.headers["Content-Type"] = "application/json"

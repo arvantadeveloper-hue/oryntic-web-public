@@ -4,14 +4,16 @@ Backend tests for Oryntix support agent (persona + conversation + video) + admin
 import os, json, time
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE = os.environ.get("REACT_APP_BACKEND_URL") or [
     l.split("=", 1)[1].strip() for l in open("/app/frontend/.env") if l.startswith("REACT_APP_BACKEND_URL")
 ][0]
 API = BASE.rstrip("/") + "/api"
 
-DEMO = {"email": "demo@aivora.ai", "password": "demo123456"}
-ADMIN = {"email": "admin@aivora.ai", "password": "Aivora!Admin2026"}
+DEMO = {"email": "demo@aivora.ai", "password": DEMO_PASSWORD}
+ADMIN = {"email": "admin@aivora.ai", "password": ADMIN_PASSWORD}
 
 
 @pytest.fixture(scope="module")

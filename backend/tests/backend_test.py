@@ -8,6 +8,8 @@ import json
 import uuid
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/") if os.environ.get(
     "REACT_APP_BACKEND_URL"
@@ -22,7 +24,7 @@ if not BASE_URL:
 API = f"{BASE_URL}/api"
 
 ADMIN_EMAIL = "admin@aivora.ai"
-ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "Aivora!Admin2026")
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", ADMIN_PASSWORD)
 
 # unique test user per run
 RUN_ID = uuid.uuid4().hex[:8]

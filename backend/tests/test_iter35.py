@@ -6,9 +6,11 @@ import time
 import uuid
 import requests
 import pytest
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE = os.environ.get("REACT_APP_BACKEND_URL", "https://ai-companion-test-5.preview.emergentagent.com").rstrip("/")
-DEMO = {"email": "demo@aivora.ai", "password": "demo123456"}
+DEMO = {"email": "demo@aivora.ai", "password": DEMO_PASSWORD}
 
 
 @pytest.fixture(scope="module")

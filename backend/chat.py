@@ -473,7 +473,6 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     parts.append(f"VIDEO PRICING (platform credits, from the admin price list): {await video_pricing_text()}; default clip {seedance.DEFAULT_DUR} s at 720p, Seedance 2.0 up to 15 s, Seedance 2.5 up to 30 s; resolution 480p (×{seedance.multipliers()['res'].get('480p')}) / 720p / 1080p (×{seedance.multipliers()['res'].get('1080p')}); real-person mode (Seedance 2.0, image-to-video only, ×{seedance.multipliers()['real_person']}); generated sound/ambience ×{seedance.multipliers()['audio']}. "
                  "Rendered videos are saved to the user's Google Drive (must be connected). When the user asks how much a video / Seedance costs, quote exactly these credits per second and the total for their duration.")
     parts.append("CAPABILITIES: You CAN create and show images (photorealistic photos, renders, illustrations, logos, posters), short videos/clips and downloadable documents directly in this chat — the platform renders them for you automatically whenever the user asks. NEVER say you cannot render, generate, display or send images or videos. If the user asks for one and it has not appeared yet, simply say briefly that you are preparing it.")
-    pers = prof.get("personality", {})
     mems = _relevant_memories(await db.memory_items.find({"user_id": user["id"], "persona_id": persona["id"], "enabled": True}).to_list(50), query)
     if mems:
         parts.append("Saved memory about the user: " + "; ".join(m["content"] for m in mems))

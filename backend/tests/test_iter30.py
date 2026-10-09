@@ -5,6 +5,8 @@ import time
 
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 DM_CID = "5e6c2fc5-1f37-4c25-9932-2ca64929dfa8"  # demo <-> budi
@@ -24,12 +26,12 @@ def H(t):
 
 @pytest.fixture(scope="module")
 def demo_token():
-    return _login("demo@aivora.ai", "demo123456")
+    return _login("demo@aivora.ai", DEMO_PASSWORD)
 
 
 @pytest.fixture(scope="module")
 def budi_token():
-    return _login("budi@aivora.ai", "budi123456")
+    return _login("budi@aivora.ai", BUDI_PASSWORD)
 
 
 # -------------------- Knowledge --------------------

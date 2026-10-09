@@ -3,12 +3,14 @@ import os
 import time
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE}/api"
 
-DEMO = ("demo@aivora.ai", "demo123456")
-BUDI = ("budi@aivora.ai", "budi123456")
+DEMO = ("demo@aivora.ai", DEMO_PASSWORD)
+BUDI = ("budi@aivora.ai", BUDI_PASSWORD)
 RIO = "e93a66a6-59b1-4a12-8c16-0c9dba6c3348"
 MIXED_GROUP = "90435108-e7d4-429c-9daa-f488d70035b7"
 RIO_DIRECT_CID = "4e36eefc-3ae9-4f48-98b5-e1a0fc7828e9"

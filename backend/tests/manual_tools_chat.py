@@ -1,6 +1,8 @@
 import json, os, sys, time, requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 API = open("/app/frontend/.env").read().split("REACT_APP_BACKEND_URL=")[1].split("\n")[0].strip() + "/api"
-tok = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": "demo123456"}).json()["access_token"]
+tok = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": DEMO_PASSWORD}).json()["access_token"]
 H = {"Authorization": f"Bearer {tok}"}
 personas = requests.get(f"{API}/personas", headers=H).json()
 model_key = sys.argv[1] if len(sys.argv) > 1 else "gpt-terra"

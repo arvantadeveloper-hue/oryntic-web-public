@@ -1,7 +1,9 @@
 import json, sys, requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 API = [l.split("=", 1)[1].strip() for l in open("/app/frontend/.env") if l.startswith("REACT_APP_BACKEND_URL")][0] + "/api"
-tok = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": "demo123456"}).json()["access_token"]
+tok = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": DEMO_PASSWORD}).json()["access_token"]
 H = {"Authorization": f"Bearer {tok}"}
 r = requests.post(f"{API}/conversations", json={"persona_ids": ["oryntix-support"], "type": "private"}, headers=H)
 print("conv", r.status_code, r.json().get("title"), r.json().get("members", [{}])[0].get("builtin"))

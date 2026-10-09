@@ -5,17 +5,19 @@ import string
 import time
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL") or open("/app/frontend/.env").read().split("REACT_APP_BACKEND_URL=")[1].splitlines()[0].strip()
 BASE_URL = BASE_URL.rstrip("/")
 API = f"{BASE_URL}/api"
 
 ADMIN_EMAIL = "admin@aivora.ai"
-ADMIN_PASS = "Aivora!Admin2026"
+ADMIN_PASS = ADMIN_PASSWORD
 DEMO_EMAIL = "demo@aivora.ai"
-DEMO_PASS = "demo123456"
+DEMO_PASS = DEMO_PASSWORD
 BUDI_EMAIL = "budi@aivora.ai"
-BUDI_PASS = "budi123456"
+BUDI_PASS = BUDI_PASSWORD
 CID = "4e36eefc-3ae9-4f48-98b5-e1a0fc7828e9"
 
 

@@ -5,12 +5,14 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE}/api"
 
 DEMO_EMAIL = "demo@aivora.ai"
-DEMO_PASS = "demo123456"
+DEMO_PASS = DEMO_PASSWORD
 RIO = "e93a66a6-59b1-4a12-8c16-0c9dba6c3348"
 NOVA = "4d4b348c-ce16-431d-8927-5a76d66ae9ef"
 NADIA = "77f5be90-dd50-407c-b9b9-5f604e13447c"
@@ -205,7 +207,7 @@ def test_settings_auto_archive_hours_valid_and_restore(h) -> None:
 
 def test_login_budi_regression() -> None:
     time.sleep(1)
-    r = requests.post(f"{API}/auth/login", json={"email": "budi@aivora.ai", "password": "budi123456"}, timeout=30)
+    r = requests.post(f"{API}/auth/login", json={"email": "budi@aivora.ai", "password": BUDI_PASSWORD}, timeout=30)
     assert r.status_code == 200, r.text
     assert "access_token" in r.json()
 

@@ -8,6 +8,8 @@ import json
 import uuid
 import requests
 import pytest
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
 API = f"{BASE_URL}/api"
@@ -16,7 +18,7 @@ LEGACY_MEETING_CID = "dba6c41f-ca3b-4cf6-b7e9-bfab1f47e40d"
 
 @pytest.fixture(scope="module")
 def token():
-    r = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": os.environ.get("TEST_ADMIN_PASSWORD", "demo123456")})
+    r = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": os.environ.get("TEST_ADMIN_PASSWORD", DEMO_PASSWORD)})
     assert r.status_code == 200, r.text
     j = r.json()
     return j.get("access_token") or j.get("token")

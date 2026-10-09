@@ -6,13 +6,15 @@ import asyncio
 import pytest
 import requests
 import websockets
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE}/api"
 WS_BASE = BASE.replace("https://", "wss://").replace("http://", "ws://") + "/api/ws"
 
-DEMO = ("demo@aivora.ai", "demo123456")
-BUDI = ("budi@aivora.ai", "budi123456")
+DEMO = ("demo@aivora.ai", DEMO_PASSWORD)
+BUDI = ("budi@aivora.ai", BUDI_PASSWORD)
 
 
 def _login(email, pw):

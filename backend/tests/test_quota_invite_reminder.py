@@ -3,12 +3,14 @@ import os
 import uuid
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE}/api"
 
-ADMIN = {"email": "demo@aivora.ai", "password": os.environ.get("TEST_ADMIN_PASSWORD", "demo123456")}
-BUDI = {"email": "budi@aivora.ai", "password": os.environ.get("TEST_BUDI_PASSWORD", "budi123456")}
+ADMIN = {"email": "demo@aivora.ai", "password": os.environ.get("TEST_ADMIN_PASSWORD", DEMO_PASSWORD)}
+BUDI = {"email": "budi@aivora.ai", "password": os.environ.get("TEST_BUDI_PASSWORD", BUDI_PASSWORD)}
 
 
 def _login(creds):

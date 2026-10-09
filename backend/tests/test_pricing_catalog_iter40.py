@@ -3,10 +3,12 @@ import os
 import math
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/") + "/api"
-ADMIN = ("admin@aivora.ai", "Aivora!Admin2026")
-DEMO = ("demo@aivora.ai", "demo123456")
+ADMIN = ("admin@aivora.ai", ADMIN_PASSWORD)
+DEMO = ("demo@aivora.ai", DEMO_PASSWORD)
 
 
 def _login(email, pw):
@@ -49,23 +51,23 @@ def test_quote_gpt_live_3_min(admin_tok):
     assert q["credits"] == 217, q
 
 
-def test_quote_flat_qty_gpt_image_high(admin_tok):
+def test_quote_per_image_gpt_image(admin_tok):
+    """Catalog v3: image prices are flat per image (unit image, qty_basis 1) — no flat_qty/variant."""
     r = requests.post(f"{BASE}/admin/pricing-catalog/quote", headers=H(admin_tok),
-                      json={"service_id": "gpt-image", "component_id": "image_out", "qty": None,
-                            "variant": "1024x1024:high"}, timeout=20)
+                      json={"service_id": "gpt-image", "component_id": "image_out", "qty": None}, timeout=20)
     assert r.status_code == 200
     q = r.json()
-    assert q["qty"] == 4160
-    # 30 * 4160/1_000_000 * 1.30 * 1.11 / 0.001 ≈ 180.07 → ceil 181
-    assert q["credits"] == 181, q
+    assert q["qty"] == 1
+    # 0.032 * 1.30 * 1.11 / 0.001 ≈ 46.18 → ceil 47
+    assert q["credits"] == 47, q
 
 
-def test_quote_flat_qty_gemini_nano_banana(admin_tok):
+def test_quote_per_image_gemini_nano_banana(admin_tok):
     r = requests.post(f"{BASE}/admin/pricing-catalog/quote", headers=H(admin_tok),
                       json={"service_id": "gemini-nano-banana", "component_id": "image_out", "qty": None}, timeout=20)
     assert r.status_code == 200
     q = r.json()
-    assert q["qty"] == 1290
+    assert q["qty"] == 1  # per image (flat)
 
 
 def test_quote_404(admin_tok):

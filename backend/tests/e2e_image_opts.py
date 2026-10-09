@@ -1,7 +1,9 @@
 import json, os, sys, requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 API = [l.split("=", 1)[1].strip() for l in open("/app/frontend/.env") if l.startswith("REACT_APP_BACKEND_URL")][0] + "/api"
-tok = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": "demo123456"}).json()["access_token"]
+tok = requests.post(f"{API}/auth/login", json={"email": "demo@aivora.ai", "password": DEMO_PASSWORD}).json()["access_token"]
 H = {"Authorization": f"Bearer {tok}"}
 convs = requests.get(f"{API}/conversations", headers=H).json()
 conv = next(c for c in (convs if isinstance(convs, list) else convs.get("items", [])) if c.get("type") == "private")

@@ -4,6 +4,8 @@ import time
 import pytest
 import requests
 from pathlib import Path
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 def _load_base():
     env = Path("/app/frontend/.env").read_text()
@@ -13,8 +15,8 @@ def _load_base():
     raise RuntimeError("REACT_APP_BACKEND_URL not set")
 
 BASE = _load_base()
-ADMIN = {"email": "demo@aivora.ai", "password": os.environ.get("TEST_ADMIN_PASSWORD", "demo123456")}
-BUDI = {"email": "budi@aivora.ai", "password": os.environ.get("TEST_BUDI_PASSWORD", "budi123456")}
+ADMIN = {"email": "demo@aivora.ai", "password": os.environ.get("TEST_ADMIN_PASSWORD", DEMO_PASSWORD)}
+BUDI = {"email": "budi@aivora.ai", "password": os.environ.get("TEST_BUDI_PASSWORD", BUDI_PASSWORD)}
 
 
 def _login(creds):

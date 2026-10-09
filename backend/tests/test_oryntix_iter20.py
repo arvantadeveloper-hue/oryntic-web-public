@@ -1,13 +1,15 @@
 """Iter 20 - Workspace overhaul: exports, revisions, discuss, add persona, chat-doc, member access.
 
 Credentials:
-  demo@aivora.ai / demo123456  (workspace owner)
+  demo@aivora.ai / $TEST_DEMO_PASSWORD  (workspace owner, see backend/.env)
   budi@aivora.ai / budi123456  (member of demo workspace)
 """
 import os
 import json
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ai-companion-test-5.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
@@ -22,12 +24,12 @@ def _login(email, password):
 
 @pytest.fixture(scope="module")
 def demo_token():
-    return _login("demo@aivora.ai", "demo123456")
+    return _login("demo@aivora.ai", DEMO_PASSWORD)
 
 
 @pytest.fixture(scope="module")
 def budi_token():
-    return _login("budi@aivora.ai", "budi123456")
+    return _login("budi@aivora.ai", BUDI_PASSWORD)
 
 
 def H(tok):

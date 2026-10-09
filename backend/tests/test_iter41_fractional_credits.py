@@ -6,14 +6,16 @@ import time
 import pytest
 import requests
 import websockets
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 WS_URL = BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
 
 DEMO_EMAIL = "demo@aivora.ai"
-DEMO_PASS = "demo123456"
+DEMO_PASS = DEMO_PASSWORD
 ADMIN_EMAIL = "admin@aivora.ai"
-ADMIN_PASS = "Aivora!Admin2026"
+ADMIN_PASS = ADMIN_PASSWORD
 
 
 # ------------------------------- fixtures -------------------------------

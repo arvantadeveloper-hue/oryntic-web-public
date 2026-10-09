@@ -4,6 +4,7 @@ import re
 import math
 import base64
 import asyncio
+from mdblocks import md_blocks
 from typing import Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -158,26 +159,6 @@ async def plan_tool(text: str, history: str, tz: str | None = None) -> dict:
     return plan
 
 
-def _md_blocks(md: str):
-    for raw in md.split("\n"):
-        line = raw.rstrip()
-        if not line.strip():
-            yield ("blank", "")
-        elif line.startswith("```"):
-            yield ("fence", "")
-        elif re.match(r"^#{1,3}\s", line):
-            yield ("h%d" % len(re.match(r"^#+", line).group()), re.sub(r"^#+\s", "", line))
-        elif re.match(r"^\s*[-*]\s", line):
-            yield ("li", re.sub(r"^\s*[-*]\s", "", line))
-        elif re.match(r"^\s*\d+\.\s", line):
-            yield ("li", re.sub(r"^\s*", "", line))
-        elif re.match(r"^\s*\|.*\|\s*$", line):
-            if not re.match(r"^\s*\|[\s:|-]+\|\s*$", line):
-                yield ("row", [c.strip() for c in line.strip()[1:-1].split("|")])
-        else:
-            yield ("p", line)
-
-
 _inline = re.compile(r"\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`")
 
 
@@ -202,7 +183,7 @@ def build_docx(title: str, md: str) -> bytes:
                 cells[i].text = _plain(c)
         table_rows.clear()
 
-    for kind, val in _md_blocks(md):
+    for kind, val in md_blocks(md):
         if kind != "row":
             flush_table()
         if kind == "row":
@@ -257,7 +238,7 @@ def build_pdf(title: str, md: str) -> bytes:
         rows.clear()
         pdf.ln(2)
 
-    for kind, val in _md_blocks(md):
+    for kind, val in md_blocks(md):
         if kind != "row":
             flush_rows()
         if kind == "row":

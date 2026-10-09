@@ -4,6 +4,8 @@ import time
 import json
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
@@ -12,8 +14,8 @@ if not BASE_URL:
             if line.startswith("REACT_APP_BACKEND_URL="):
                 BASE_URL = line.split("=", 1)[1].strip().rstrip("/")
 
-DEMO = {"email": "demo@aivora.ai", "password": "demo123456"}
-ADMIN = {"email": "admin@aivora.ai", "password": "Aivora!Admin2026"}
+DEMO = {"email": "demo@aivora.ai", "password": DEMO_PASSWORD}
+ADMIN = {"email": "admin@aivora.ai", "password": ADMIN_PASSWORD}
 NADIA_PID = "77f5be90-dd50-407c-b9b9-5f604e13447c"
 
 EXPECTED_CREDITS = {

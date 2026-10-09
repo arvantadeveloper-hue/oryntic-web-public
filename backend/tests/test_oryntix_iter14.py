@@ -5,6 +5,8 @@ import pytest
 import requests
 from motor.motor_asyncio import AsyncIOMotorClient
 import asyncio
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 def _read_base():
     v = os.environ.get("REACT_APP_BACKEND_URL")
@@ -22,8 +24,8 @@ BASE = _read_base()
 MONGO_URL = "mongodb://localhost:27017"
 DB_NAME = "test_database"
 
-DEMO = ("demo@aivora.ai", "demo123456")
-ADMIN = ("admin@aivora.ai", "Aivora!Admin2026")
+DEMO = ("demo@aivora.ai", DEMO_PASSWORD)
+ADMIN = ("admin@aivora.ai", ADMIN_PASSWORD)
 
 
 def _login(email, pw):

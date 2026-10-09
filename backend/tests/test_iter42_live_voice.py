@@ -10,6 +10,8 @@ import time
 import pytest
 import requests
 from pymongo import MongoClient
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = open("/app/frontend/.env").read().split("REACT_APP_BACKEND_URL=")[1].split("\n")[0].strip()
 API = BASE_URL.rstrip("/") + "/api"
@@ -18,9 +20,8 @@ DB_NAME = os.environ.get("DB_NAME", "test_database")
 db = MONGO[DB_NAME]
 
 DEMO_EMAIL = "demo@aivora.ai"
-DEMO_PASSWORD = "demo123456"
+
 ADMIN_EMAIL = "admin@aivora.ai"
-ADMIN_PASSWORD = "Aivora!Admin2026"
 
 SDP_OFFER = open("/tmp/offer.sdp").read()
 

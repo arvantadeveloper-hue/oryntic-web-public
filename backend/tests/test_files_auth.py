@@ -1,12 +1,14 @@
 """Test /api/files auth matrix for Aivora."""
 import os
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ai-companion-test-5.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
 DEMO_EMAIL = "demo@aivora.ai"
-DEMO_PASSWORD = os.environ.get("TEST_DEMO_PASSWORD", os.environ.get("TEST_ADMIN_PASSWORD", "demo123456"))
+DEMO_PASSWORD = os.environ.get("TEST_DEMO_PASSWORD", os.environ.get("TEST_ADMIN_PASSWORD", DEMO_PASSWORD))
 DEMO_USER_ID = "fb1a64ce-ff1c-4376-b090-e90b286a5024"
 DEMO_PATH = f"aivora/videos/{DEMO_USER_ID}/demo.mp4"
 

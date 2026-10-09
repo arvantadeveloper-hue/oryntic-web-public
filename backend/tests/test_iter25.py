@@ -2,6 +2,8 @@
 import os
 import pytest
 import requests
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 def _load_backend_url():
     v = os.environ.get("REACT_APP_BACKEND_URL")
@@ -19,8 +21,8 @@ def _load_backend_url():
 BASE = _load_backend_url()
 API = f"{BASE}/api"
 
-DEMO = {"email": "demo@aivora.ai", "password": "demo123456"}
-BUDI = {"email": "budi@aivora.ai", "password": "budi123456"}
+DEMO = {"email": "demo@aivora.ai", "password": DEMO_PASSWORD}
+BUDI = {"email": "budi@aivora.ai", "password": BUDI_PASSWORD}
 
 
 def _login(creds):

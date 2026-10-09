@@ -3,6 +3,8 @@ import json
 import os
 import subprocess
 import websockets
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 API = "https://ai-companion-test-5.preview.emergentagent.com/api"
 WS_BASE = "wss://ai-companion-test-5.preview.emergentagent.com/api/ws/"
@@ -18,8 +20,8 @@ def login(email, pw):
 
 async def main():
     cid = open("/tmp/mcid.txt").read().strip()
-    admin = login("demo@aivora.ai", os.environ.get("TEST_ADMIN_PASSWORD", "demo123456"))
-    budi = login("budi@aivora.ai", os.environ.get("TEST_BUDI_PASSWORD", "budi123456"))
+    admin = login("demo@aivora.ai", os.environ.get("TEST_ADMIN_PASSWORD", DEMO_PASSWORD))
+    budi = login("budi@aivora.ai", os.environ.get("TEST_BUDI_PASSWORD", BUDI_PASSWORD))
     url = f"{WS_BASE}{cid}?token={budi}"
     async with websockets.connect(url, open_timeout=15) as ws:
         print("budi WS connected")

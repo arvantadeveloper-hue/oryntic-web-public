@@ -209,7 +209,6 @@ class QuoteIn(BaseModel):
     service_id: str
     component_id: str
     qty: Optional[float] = None  # None → use the flat quantity from the docs (e.g. tokens per image)
-    variant: Optional[str] = None
     feature: Optional[str] = None
 
 
@@ -238,7 +237,7 @@ async def put_pricing_catalog(x: CatalogIn, _: dict = Depends(require_platform_a
 @router.post("/pricing-catalog/quote")
 async def quote_component(x: QuoteIn, _: dict = Depends(require_platform_staff)):
     p = await get_pricing()
-    q = pricing_catalog.quote(x.service_id, x.component_id, x.qty, p, x.feature, x.variant)
+    q = pricing_catalog.quote(x.service_id, x.component_id, x.qty, p, x.feature)
     if not q:
         raise HTTPException(404, "Komponen harga tidak ditemukan atau dinonaktifkan")
     return q

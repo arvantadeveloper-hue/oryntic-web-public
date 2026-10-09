@@ -14,6 +14,8 @@ import requests
 import websockets
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timezone, timedelta
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 def _load_frontend_env():
     try:
@@ -36,7 +38,7 @@ FRONT_REDIRECT = BASE + "/auth/google"
 @pytest.fixture(scope="module")
 def demo_token():
     # Try login first; fall back to minting a JWT directly (shared rate limit with /google/start).
-    r = requests.post(f"{BASE}/api/auth/login", json={"email": "demo@aivora.ai", "password": "demo123456"}, timeout=20)
+    r = requests.post(f"{BASE}/api/auth/login", json={"email": "demo@aivora.ai", "password": DEMO_PASSWORD}, timeout=20)
     if r.status_code == 200:
         return r.json()["access_token"]
     # Fallback: mint via backend auth module

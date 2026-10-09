@@ -1,5 +1,7 @@
 import asyncio, sys, json
 from playwright.async_api import async_playwright
+import sys as _sys; _sys.path.insert(0, '/app/backend/tests')  # noqa: E702
+from creds import DEMO_PASSWORD, ADMIN_PASSWORD, BUDI_PASSWORD  # noqa: E402,F401
 
 URL = "https://ai-companion-test-5.preview.emergentagent.com"
 CID = sys.argv[1] if len(sys.argv) > 1 else "403c8205-7477-48af-af44-0b6bf83258e5"
@@ -17,7 +19,7 @@ async def main():
         await page.add_init_script("localStorage.setItem('oryntix_tour_done','1')")
         await page.goto(URL, wait_until="networkidle")
         await page.fill("input[type=email]", "demo@aivora.ai")
-        await page.fill("input[type=password]", "demo123456")
+        await page.fill("input[type=password]", DEMO_PASSWORD)
         await page.click("[data-testid=auth-submit-btn]")
         await page.wait_for_timeout(3000)
         # tap the data channel traffic so we can see raw GPT-Live events

@@ -2,9 +2,11 @@ import base64
 import csv
 import hashlib
 import io
+import json
 import os
 import re
 import time
+from mdblocks import md_blocks
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -164,9 +166,8 @@ def _inline(s: str) -> str:
 
 
 def _md_tables(md: str) -> list:
-    from tools import _md_blocks
     tables, cur = [], []
-    for kind, val in list(_md_blocks(md)) + [("blank", "")]:
+    for kind, val in list(md_blocks(md)) + [("blank", "")]:
         if kind == "row":
             if not (cur and all(re.fullmatch(r":?-{2,}:?", c) for c in val)):
                 cur.append(val)
@@ -176,9 +177,8 @@ def _md_tables(md: str) -> list:
 
 
 def _md_to_html(md: str) -> str:
-    from tools import _md_blocks
     out, in_ul, in_tbl = [], False, False
-    for kind, val in list(_md_blocks(md)) + [("blank", "")]:
+    for kind, val in list(md_blocks(md)) + [("blank", "")]:
         if in_ul and kind != "li":
             out.append("</ul>"); in_ul = False
         if in_tbl and kind != "row":
@@ -227,7 +227,7 @@ async def _app_folder(uid: str) -> Optional[str]:
 async def _multipart_upload(uid: str, name: str, data: bytes, src_mime: str, target_mime: Optional[str]) -> dict:
     folder = await _app_folder(uid)
     meta = {"name": name, **({"mimeType": target_mime} if target_mime else {}), **({"parents": [folder]} if folder else {})}
-    files = {"metadata": ("metadata", io.BytesIO(__import__("json").dumps(meta).encode()), "application/json; charset=UTF-8"), "file": (name, io.BytesIO(data), src_mime)}
+    files = {"metadata": ("metadata", io.BytesIO(json.dumps(meta).encode()), "application/json; charset=UTF-8"), "file": (name, io.BytesIO(data), src_mime)}
     tk = await access_token(uid)
     async with httpx.AsyncClient(timeout=120) as c:
         r = await c.post(f"{UPLOAD}/files?uploadType=multipart&fields=id,name,mimeType,webViewLink", headers={"Authorization": f"Bearer {tk}"}, files=files)
