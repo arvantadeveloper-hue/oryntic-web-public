@@ -8,6 +8,7 @@ from llm import GPT_MODEL, IMAGE_MODEL, user_today_usage
 from behaviour import get_behaviour, set_behaviour, BehaviourIn
 from pricing import get_pricing, set_pricing, get_trial, set_trial, compute_rates, RATES, DEFAULT_PRICING, FEATURES, feature_table, build_packages, model_table, REALTIME_MODELS, realtime_model_prices, realtime_credits_per_min, tool_table
 from llm import MODEL_CATALOG
+import pricing_catalog
 
 
 class PackageTierIn(BaseModel):
@@ -219,6 +220,67 @@ async def preview_pricing(x: PlatformPricingIn, _: dict = Depends(require_platfo
 @router.put("/trial")
 async def put_trial(x: TrialIn, _: dict = Depends(require_platform_admin)):
     return {"trial": await set_trial(x.model_dump())}
+
+
+# ---------- hierarchical price catalog: provider → service/model → component → unit ----------
+class CatalogIn(BaseModel):
+    version: int = 2
+    providers: list[dict] = Field(default_factory=list)
+
+
+class QuoteIn(BaseModel):
+    service_id: str
+    component_id: str
+    qty: Optional[float] = None  # None → use the flat quantity from the docs (e.g. tokens per image)
+    variant: Optional[str] = None
+    feature: Optional[str] = None
+
+
+class ImportApplyIn(BaseModel):
+    provider_id: str
+    rows: list[dict] = Field(default_factory=list)
+
+
+@router.get("/pricing-catalog")
+async def get_pricing_catalog(_: dict = Depends(require_platform_staff)):
+    p = await get_pricing()
+    return {"catalog": await pricing_catalog.get_catalog(), "table": pricing_catalog.table(p),
+            "units": pricing_catalog.UNITS, "pipeline": pricing_catalog.PIPELINE,
+            "globals": {"margin_pct": p["margin_pct"], "tax_pct": p["tax_pct"], "usd_per_credit": p["usd_per_credit"]},
+            "feature_map": pricing_catalog.FEATURE_COMPONENT}
+
+
+@router.put("/pricing-catalog")
+async def put_pricing_catalog(x: CatalogIn, _: dict = Depends(require_platform_admin)):
+    cat = await pricing_catalog.set_catalog(x.model_dump())
+    p = await get_pricing()
+    return {"catalog": cat, "table": pricing_catalog.table(p), "rates": compute_rates(p), "features": feature_table(p),
+            "models": model_table(p, MODEL_CATALOG), "tools": tool_table(p)}
+
+
+@router.post("/pricing-catalog/quote")
+async def quote_component(x: QuoteIn, _: dict = Depends(require_platform_staff)):
+    p = await get_pricing()
+    q = pricing_catalog.quote(x.service_id, x.component_id, x.qty, p, x.feature, x.variant)
+    if not q:
+        raise HTTPException(404, "Komponen harga tidak ditemukan atau dinonaktifkan")
+    return q
+
+
+@router.post("/pricing-catalog/import")
+async def import_pricing_catalog(provider_id: str, _: dict = Depends(require_platform_admin)):
+    """Scrape the provider's public pricing page and return a diff — nothing is saved yet."""
+    try:
+        return await pricing_catalog.import_diff(provider_id, await get_pricing())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Gagal membaca halaman harga: {str(e)[:160]}")
+
+
+@router.post("/pricing-catalog/import/apply")
+async def apply_pricing_catalog_import(x: ImportApplyIn, _: dict = Depends(require_platform_admin)):
+    cat = await pricing_catalog.apply_import(x.provider_id, x.rows)
+    p = await get_pricing()
+    return {"catalog": cat, "table": pricing_catalog.table(p), "rates": compute_rates(p)}
 
 
 FEATURE_LABELS = {"chat": "Chat", "meeting_moderation": "Moderator", "meeting_summary": "Notulen", "realtime_call": "Panggilan Realtime",

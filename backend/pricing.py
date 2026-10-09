@@ -1,5 +1,6 @@
 import math
 import time
+import pricing_catalog as pc
 from db import db, now_iso
 
 # Platform-wide tariff engine. ONE rule for every feature:
@@ -84,6 +85,12 @@ def _cost(p: dict, key: str) -> float:
     return float(p.get(key) if p.get(key) is not None else DEFAULT_PRICING[key])
 
 
+def feature_cost(p: dict, feature: str, legacy_key: str) -> float:
+    """Provider cost of one unit of a feature: price catalog first, legacy field as fallback."""
+    usd = pc.feature_usd(feature, p)
+    return usd if usd is not None else _cost(p, legacy_key)
+
+
 # Realtime voice models a persona can use; USD per 1M tokens (OpenAI list prices) — overridable per model in platform_pricing.realtime_models
 REALTIME_MODELS = {
     "gpt-realtime-2.1": {"label": "GPT Realtime 2.1", "tagline": "Kualitas terbaik", "audio_in": 32.0, "audio_out": 64.0, "text_in": 4.0, "text_out": 24.0, "cached_in": 0.4},
@@ -94,8 +101,16 @@ DEFAULT_REALTIME_MODEL = "gpt-realtime-2.1-mini"
 
 
 def realtime_model_prices(p: dict, model: str | None) -> dict:
-    base = REALTIME_MODELS.get(model or DEFAULT_REALTIME_MODEL) or REALTIME_MODELS[DEFAULT_REALTIME_MODEL]
-    return {**base, **((p.get("realtime_models") or {}).get(model or DEFAULT_REALTIME_MODEL) or {})}
+    """Per-1M-token prices of a Realtime model: price catalog first, then the legacy overrides/constants."""
+    key = model or DEFAULT_REALTIME_MODEL
+    base = REALTIME_MODELS.get(key) or REALTIME_MODELS[DEFAULT_REALTIME_MODEL]
+    out = {**base, **((p.get("realtime_models") or {}).get(key) or {})}
+    for comp_id, field in (("audio_in", "audio_in"), ("audio_out", "audio_out"), ("text_in", "text_in"),
+                           ("text_out", "text_out"), ("cached_in", "cached_in")):
+        hit = pc.find(key, comp_id)
+        if hit:
+            out[field] = float(hit[2]["usd"])
+    return out
 
 
 def realtime_credits_per_min(p: dict, model: str | None) -> int:
@@ -116,16 +131,24 @@ def realtime_usage_usd(p: dict, usage: dict, model: str | None = None) -> float:
 
 
 def model_price(p: dict, model_key: str | None) -> dict | None:
+    """In/out USD per 1M tokens for a persona brain: price catalog first, legacy model_prices as fallback."""
+    ci, co = pc.find(model_key or "", "text_in"), pc.find(model_key or "", "text_out")
+    if ci and co:
+        return {"in": float(ci[2]["usd"]), "out": float(co[2]["usd"])}
     mp = {**DEFAULT_PRICING["model_prices"], **(p.get("model_prices") or {})}
     return mp.get(model_key or "")
 
 
 def model_text_credits(p: dict, model_key: str | None, in_chars: int, out_chars: int) -> float | None:
     """Exact credits for one exchange on a specific model (None when the model has no price → caller falls back to the flat text rate)."""
+    cpt = max(1.0, float(p.get("chars_per_token") or 4.0))
+    ci = pc.credits(model_key or "", "text_in", in_chars / cpt, p, "text")
+    co = pc.credits(model_key or "", "text_out", out_chars / cpt, p, "text")
+    if ci is not None and co is not None:
+        return ci + co
     mp = model_price(p, model_key)
     if not mp:
         return None
-    cpt = max(1.0, float(p.get("chars_per_token") or 4.0))
     usd = (in_chars / cpt) * float(mp["in"]) / 1_000_000 + (out_chars / cpt) * float(mp["out"]) / 1_000_000
     return usd_to_credits(p, usd, "text")
 
@@ -144,6 +167,14 @@ TOOL_BY_ID = {t["id"]: t for t in TOOL_CATALOG}
 
 
 def tool_usd(p: dict, tool_id: str) -> float:
+    """Provider cost of ONE use of a tool: price catalog first (per-call basis / flat tokens), legacy map as fallback."""
+    hit = pc.find(tool_id, "per_call") or pc.find(tool_id, "per_search") or pc.find(tool_id, "per_request") \
+        or pc.find(tool_id, "per_session") or pc.find(tool_id, "per_image") or pc.find(tool_id, "per_hour")
+    if hit:
+        _, s, c = hit
+        q = pc.quote(s["id"], c["id"], None if c.get("flat_qty") else 1, p, "text")
+        if q:
+            return q["base_usd"]
     tp = {**DEFAULT_PRICING["tool_prices"], **(p.get("tool_prices") or {})}
     return float(tp.get(tool_id) or 0.0)
 
@@ -172,13 +203,13 @@ def model_table(p: dict, catalog: list) -> list:
 def compute_rates(p: dict) -> dict:
     return {
         "text_per_1k": round(max(0.1, usd_to_credits(p, _cost(p, "text_usd_per_1k_chars"), "text")), 2),
-        "image": _credits(p, _cost(p, "image_usd"), "image"), "profile": _credits(p, _cost(p, "profile_usd"), "profile"),
-        "stt": _credits(p, _cost(p, "stt_usd"), "stt"), "tts": _credits(p, _cost(p, "tts_usd"), "tts"),
-        "realtime_per_min": _credits(p, _cost(p, "provider_usd_per_min"), "realtime_call"),
-        "vision": _credits(p, _cost(p, "vision_usd"), "vision"),
-        "bandwidth_per_mb": round(usd_to_credits(p, _cost(p, "bandwidth_usd_per_gb") / 1024, "call_bandwidth"), 4),
-        "video_per_sec": round(usd_to_credits(p, _cost(p, "video_usd_per_sec"), "video"), 2),
-        "video20_per_sec": round(usd_to_credits(p, _cost(p, "video20_usd_per_sec"), "video20"), 2),
+        "image": _credits(p, feature_cost(p, "image", "image_usd"), "image"), "profile": _credits(p, feature_cost(p, "profile", "profile_usd"), "profile"),
+        "stt": _credits(p, feature_cost(p, "stt", "stt_usd"), "stt"), "tts": _credits(p, feature_cost(p, "tts", "tts_usd"), "tts"),
+        "realtime_per_min": _credits(p, feature_cost(p, "realtime_call", "provider_usd_per_min"), "realtime_call"),
+        "vision": _credits(p, feature_cost(p, "vision", "vision_usd"), "vision"),
+        "bandwidth_per_mb": round(usd_to_credits(p, feature_cost(p, "call_bandwidth", "bandwidth_usd_per_gb") / 1024, "call_bandwidth"), 4),
+        "video_per_sec": round(usd_to_credits(p, feature_cost(p, "video", "video_usd_per_sec"), "video"), 2),
+        "video20_per_sec": round(usd_to_credits(p, feature_cost(p, "video20", "video20_usd_per_sec"), "video20"), 2),
         "video_res_mult": {"480p": float(p.get("video_res_480_mult") or 0.6), "720p": 1.0, "1080p": float(p.get("video_res_1080_mult") or 1.6)},
         "video_real_person_mult": float(p.get("video_real_person_mult") or 1.45),
         "video_audio_mult": float(p.get("video_audio_mult") or 1.0),
@@ -189,9 +220,11 @@ def feature_table(p: dict) -> list:
     """Admin platform view: per feature → provider cost, margin applied, credits charged (exact + rounded)."""
     out = []
     for key, (label, field, unit) in FEATURES.items():
-        usd = _cost(p, field)
+        usd = feature_cost(p, key, field)
         exact = usd_to_credits(p, usd, key)
+        src = pc.FEATURE_COMPONENT.get(key)
         out.append({"feature": key, "label": label, "unit": unit, "provider_usd": usd, "margin_pct": margin_for(p, key),
+                    "source": f"{src[0]}/{src[1]}" if src and pc.find(src[0], src[1]) else "legacy",
                     "override": key in (p.get("margin_overrides") or {}), "credits_exact": round(exact, 4), "credits": max(1, math.ceil(exact))})
     return out
 
@@ -222,6 +255,7 @@ async def refresh(force: bool = False):
         cfg["video_usd_per_sec"] = DEFAULT_PRICING["video_usd_per_sec"]
         await db.config.update_one({"id": "platform_pricing"}, {"$set": {"video_usd_per_sec": cfg["video_usd_per_sec"]}})
     tr = await db.config.find_one({"id": "trial_config"}, {"_id": 0, "id": 0, "updated_at": 0})
+    await pc.refresh(force=force)
     _cache["pricing"] = {**DEFAULT_PRICING, **(cfg or {})}
     _cache["trial"] = {**DEFAULT_TRIAL, **(tr or {})}
     _cache["at"] = time.time()
