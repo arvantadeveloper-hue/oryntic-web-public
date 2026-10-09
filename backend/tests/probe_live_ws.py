@@ -13,7 +13,7 @@ async def main():
     async with websockets.connect(url, additional_headers={"Authorization": f"Bearer {KEY}"}, max_size=None) as ws:
         session = {"model": "gpt-live-1", "instructions": "You are Oryntix, a friendly support assistant. Speak Indonesian. Keep turns short.",
                    "audio": {"output": {"voice": "marin"}, "format": {"type": "audio/pcm", "rate": 24000}},
-                   "delegation": {"type": "responses", "responses": {"model": "gpt-6-luna", "instructions": "Answer briefly.", "tools": [{"type": "function", "name": "get_time", "description": "Current time in a city", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}], "tool_choice": "auto"}}}
+                   "delegation": {"type": "responses", "responses": {"model": "gpt-6-luna", "instructions": "Answer briefly.", "tools": [{"type": "function", "name": "get_time", "description": "Current time in a city", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}] + ([{"type": "file_search", "vector_store_ids": [os.environ["PROBE_VS"]], "max_num_results": 6}] if os.environ.get("PROBE_VS") else []), "tool_choice": "auto"}}}
         await ws.send(json.dumps({"type": "session.start", "session": session}))
         t0 = time.time(); started = False; sent = False; silence = base64.b64encode(b"\x00" * 4800).decode()
         out = ""
@@ -27,7 +27,7 @@ async def main():
                         sent = True
                         content = "Immediately say the following greeting now, in Indonesian, before the caller says anything: Halo, saya Oryntix. Ada yang bisa saya bantu? Then pause and listen." if MODE == "greet" else "The caller just asked: what time is it in Jakarta right now? Immediately delegate this to your backend (it has the get_time tool), then tell the caller the answer in Indonesian."
                         if MODE == "typed":
-                            await ws.send(json.dumps({"type": "response.item.create", "event_id": "u1", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Jam berapa sekarang di Jakarta? Pakai tool get_time."}]}}))
+                            await ws.send(json.dumps({"type": "response.item.create", "event_id": "u1", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": os.environ.get("PROBE_Q", "Jam berapa sekarang di Jakarta? Pakai tool get_time.")}]}}))
                             await ws.send(json.dumps({"type": "response.create", "event_id": "c0"}))
                         else:
                             await ws.send(json.dumps({"type": "session.instructions.append", "event_id": "t1", "delegation_id": None, "content": content}))

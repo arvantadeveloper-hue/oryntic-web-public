@@ -400,7 +400,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     </div>
   ) : video.state !== "off" && video.state !== "confirm" ? (
     <div className="flex flex-1 flex-col items-center gap-1.5 overflow-hidden px-1.5 pb-1 sm:px-3" data-testid="rt-video-stage">
-      <div className="w-full flex-1 min-h-0"><AvatarVideoView track={video.track} remaining={video.remaining} credits={video.credits} name={persona.name || "Oryntix"} onStop={() => video.stop("user")} state={video.state} /></div>
+      <div className="w-full flex-1 min-h-0"><AvatarVideoView track={video.track} remaining={video.remaining} credits={video.credits} name={persona.name || "Oryntix"} onStop={() => video.stop("user")} state={video.state} link={video.link} /></div>
       <p className={`flex items-center gap-2 text-sm ${phase === "reconnecting" ? "font-semibold text-amber-300" : "text-white/70"}`} data-testid="rt-phase">{["connecting", "reconnecting"].includes(phase) && <Loader2 size={14} className="animate-spin" />}{label}</p>
     </div>
   ) : (

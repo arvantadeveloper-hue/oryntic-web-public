@@ -7,10 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import current_user, workspace_id, lang_rule, _lang_name
-from chat import _persona_system, _save_ai_msg, _get_personas, _owner_settings, _can_access
+from chat import _persona_system, _save_ai_msg, _get_personas, _can_access
 from db import db, now_iso, new_id, clean
 from llm import llm_text, record_usage, text_credits
-from tools import OFFER_TEXT, route_model
+from tools import OFFER_TEXT
 
 log = logging.getLogger("aivora")
 router = APIRouter(prefix="/api", tags=["assignments"])
@@ -174,24 +174,40 @@ async def _target_persona(conv: dict, requested: Optional[str]) -> dict:
     return persona
 
 
-@router.post("/conversations/{cid}/tasks")
-async def assign_task(cid: str, x: AssignIn, u: dict = Depends(current_user)):
-    """Direct assignment (used by the Realtime `assign_task` voice tool and the meeting chat)."""
+async def _assignable_conv(cid: str, u: dict) -> dict:
     conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
     if not conv or not _can_access(conv, u):
         raise HTTPException(404, "Conversation not found")
-    persona = await _target_persona(conv, x.persona_id)
+    return conv
+
+
+async def _create_from_assign(u: dict, persona: dict, conv: dict, x: AssignIn) -> dict:
+    """Solo or team task from the assignment payload; the user-confirmed model is pinned on solo tasks."""
     assignments = [a for a in (x.assignments or []) if isinstance(a, dict) and a.get("assistant")]
     plan = {"title": x.title, "brief": x.brief, "scheduled_at": x.scheduled_at, "assignments": assignments}
     src = "meeting" if conv.get("type") == "meeting" else "call"
     create = create_team_task if (x.team or assignments) else create_assigned_task
     task = await create(u, persona, conv, plan, src)
     if x.model and x.model != "__own__" and not task.get("team"):
-        await db.tasks.update_one({"id": task["id"]}, {"$set": {"model": x.model}}); task["model"] = x.model
-    tz = (u.get("settings") or {}).get("timezone") or "Asia/Jakarta"
-    when = when_text(task.get("scheduled_at"), tz)
+        await db.tasks.update_one({"id": task["id"]}, {"$set": {"model": x.model}})
+        task["model"] = x.model
+    return task
+
+
+async def _announce_task(cid: str, persona: dict, task: dict, when: str) -> None:
     detail = f" {team_summary(task)}" if task.get("team") else ""
-    await _save_ai_msg(cid, persona, f"📌 Tugas **{task['goal']}** dicatat ke Ruang Kerja, dikerjakan {when}.{detail} [Lihat](/workspace/{task['id']})", 0, "text", {"tool": "task_assigned", "task_id": task["id"]})
+    await _save_ai_msg(cid, persona, f"📌 Tugas **{task['goal']}** dicatat ke Ruang Kerja, dikerjakan {when}.{detail} [Lihat](/workspace/{task['id']})", 0, "text",
+                       {"tool": "task_assigned", "task_id": task["id"]})
+
+
+@router.post("/conversations/{cid}/tasks")
+async def assign_task(cid: str, x: AssignIn, u: dict = Depends(current_user)):
+    """Direct assignment (used by the Realtime `assign_task` voice tool and the meeting chat)."""
+    conv = await _assignable_conv(cid, u)
+    persona = await _target_persona(conv, x.persona_id)
+    task = await _create_from_assign(u, persona, conv, x)
+    when = when_text(task.get("scheduled_at"), (u.get("settings") or {}).get("timezone") or "Asia/Jakarta")
+    await _announce_task(cid, persona, task, when)
     return {"task_id": task["id"], "status": task["status"], "when": when, "assistant": persona["name"],
             "subtasks": [f"{s['persona_name']}: {s['title']}" for s in task.get("subtasks") or []], "unmatched_assistants": task.get("unmatched") or []}
 

@@ -324,6 +324,7 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
         vm = LIVE_MODEL  # all voice calls run on GPT-Live; the persona's own brain model does the reasoning (delegation)
         cpm = realtime_credits_per_min(p, vm)
         call = {"id": new_id(), "group_id": group_id, "conversation_id": conv["id"], "user_id": u["id"], "persona_id": persona["id"], "model": vm, "brain_model": persona.get("model"), "live": True,
+                "vector_store_id": persona.get("vector_store_id") if "openai:file_search" in (persona.get("tools") or []) else None,
                 "persona_name": persona["name"], "call_session_id": x.call_session_id or group_id,
                 "voice": VOICE_MAP.get(persona.get("voice", "alloy"), "marin"), "role": role, "roster": roster,
                 "instructions": await _session_instructions(persona, u, roster, history, x.opening, role, conv.get("title", ""), panel),
@@ -437,7 +438,8 @@ LIVE_VOICE_STYLE = ("\n\nLIVE VOICE: you are the speaking front of this assistan
 LIVE_BACKEND_PROMPT = ("You are the reasoning backend of {name}, who is in a LIVE VOICE call with {uname}. The voice model does the talking; you do the thinking, "
                        "facts and tools. Transcripts can contain mistakes, unfinished phrases and later corrections — use the latest context. Call the tools whenever "
                        "they fit (never claim you cannot). Return concise results for speech in {lang}: the relevant facts, the task's current status and the next step. "
-                       "Report an action as complete only after a tool confirmed it. No markdown, no URLs (tools post links to the chat panel).\n\n"
+                       "Report an action as complete only after a tool confirmed it. No markdown, no URLs (tools post links to the chat panel). "
+                       "{docs}\n\n"
                        "ASSISTANT PERSONA & RULES:\n{persona}")
 
 
@@ -451,7 +453,10 @@ async def _negotiate_live(call: dict, call_id: str, u: dict, sdp_offer: str, rol
     session = {"model": LIVE_MODEL, "instructions": instructions[:60000], "audio": {"output": {"voice": call["voice"]}}}
     if role in ("moderator", "solo"):
         resp = {"model": backend, "tool_choice": "auto",
-                "instructions": LIVE_BACKEND_PROMPT.format(name=call.get("persona_name") or "the assistant", uname=u.get("name") or "the user", lang=_lang_name(u), persona=call["instructions"][:12000])}
+                "instructions": LIVE_BACKEND_PROMPT.format(name=call.get("persona_name") or "the assistant", uname=u.get("name") or "the user", lang=_lang_name(u), persona=call["instructions"][:12000],
+                                                           docs=("When the question may be covered by the assistant's own knowledge documents, use file_search first and mention the document title you relied on." if call.get("vector_store_id") else ""))}
+        if call.get("vector_store_id"):  # knowledge documents: native file_search on the delegated Responses backend
+            tools = list(tools) + [{"type": "file_search", "vector_store_ids": [call["vector_store_id"]], "max_num_results": 6}]
         if tools:
             resp["tools"] = tools
         if cap is not None:
@@ -561,7 +566,8 @@ class TickIn(BaseModel):
 
 class UsageIn(BaseModel):
     usage: dict  # OpenAI `response.done` → response.usage, or (kind=backend) GPT-Live nested `response.completed` → response.usage
-    kind: str = Field(default="voice", pattern="^(voice|backend)$")
+    kind: str = Field(default="voice", pattern="^(voice|backend|tool)$")
+    tool: Optional[str] = Field(default=None, max_length=60)  # kind=tool: provider tool id used by the delegated backend (e.g. openai:file_search)
 
     @field_validator("usage")
     @classmethod
@@ -590,7 +596,11 @@ async def report_usage(call_id: str, x: UsageIn, u: dict = Depends(current_user)
     """Bill one Realtime response from its real token usage (audio in/out, text, cached) × margin."""
     call = await _own_call(call_id, u)
     p = await get_pricing()
-    usd = backend_usage_usd(p, x.usage or {}, call.get("brain_model")) if x.kind == "backend" else realtime_usage_usd(p, x.usage or {}, call.get("model"))
+    if x.kind == "tool":
+        from pricing import tool_usd
+        usd = tool_usd(p, x.tool or "")
+    else:
+        usd = backend_usage_usd(p, x.usage or {}, call.get("brain_model")) if x.kind == "backend" else realtime_usage_usd(p, x.usage or {}, call.get("model"))
     exact = usd_to_credits(p, usd, "realtime_call")
     acc = round(float(call.get("usage_credits_exact") or 0) + exact, 6)
     if exact > 0:  # fully metered: the exact fraction is billed, the wallet carries the remainder

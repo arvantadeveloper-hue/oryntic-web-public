@@ -205,27 +205,42 @@ def view_title(conv: dict, uid: str) -> dict:
     return {**conv, "title": t} if t else conv
 
 
-@router.post("/conversations")
-async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
+def _validate_conv_request(x: ConvIn, personas: list, participants: list) -> None:
     from support_agent import SUPPORT_ID
     if SUPPORT_ID in (x.persona_ids or []) and (len(x.persona_ids) > 1 or x.type != "private" or (x.participant_ids or [])):
         raise HTTPException(400, "Oryntix (dukungan) hanya tersedia di percakapan privat")
-    personas = await _get_personas(x.persona_ids, workspace_id(u))
-    participants = await _resolve_participants(u, x.participant_ids or [])
     if not personas and len(participants) < 2:
         raise HTTPException(400, "Pilih minimal satu asisten atau teman untuk memulai percakapan")
+
+
+def _conv_type(x: ConvIn, personas: list, participants: list) -> str:
     multi = x.type in ("group", "meeting") and (len(personas) > 1 or x.type == "meeting" or len(participants) > 1)
-    ctype = x.type if multi else "private"
-    humans = [h async for h in db.users.find({"id": {"$in": participants}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "avatar": 1})] if len(participants) > 1 else []
-    doc = {
-        "id": new_id(), "user_id": u["id"], "workspace_id": workspace_id(u),
-        "participants": participants, "humans": humans,
-        "type": ctype,
-        "persona_ids": [p["id"] for p in personas],
-        "persona_id": personas[0]["id"] if personas else None,
-        "members": [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy"), **({"builtin": True} if p.get("builtin") else {})} for p in personas],
-        "title": x.title or (_conv_title(ctype, personas) if personas else "Grup " + ", ".join(h["name"] for h in humans)), "created_at": now_iso(), "updated_at": now_iso(), "last_message": "",
-    }
+    return x.type if multi else "private"
+
+
+def _member_cards(personas: list) -> list:
+    return [{"id": p["id"], "name": p["name"], "portrait": p.get("portrait"), "voice": p.get("voice", "alloy"), **({"builtin": True} if p.get("builtin") else {})} for p in personas]
+
+
+async def _human_cards(participants: list) -> list:
+    if len(participants) < 2:
+        return []
+    return [h async for h in db.users.find({"id": {"$in": participants}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "avatar": 1})]
+
+
+def _new_conv_doc(u: dict, ctype: str, personas: list, participants: list, humans: list, title: Optional[str]) -> dict:
+    return {"id": new_id(), "user_id": u["id"], "workspace_id": workspace_id(u), "participants": participants, "humans": humans, "type": ctype,
+            "persona_ids": [p["id"] for p in personas], "persona_id": personas[0]["id"] if personas else None, "members": _member_cards(personas),
+            "title": title or (_conv_title(ctype, personas) if personas else "Grup " + ", ".join(h["name"] for h in humans)),
+            "created_at": now_iso(), "updated_at": now_iso(), "last_message": ""}
+
+
+@router.post("/conversations")
+async def create_conv(x: ConvIn, u: dict = Depends(current_user)):
+    personas = await _get_personas(x.persona_ids, workspace_id(u))
+    participants = await _resolve_participants(u, x.participant_ids or [])
+    _validate_conv_request(x, personas, participants)
+    doc = _new_conv_doc(u, _conv_type(x, personas, participants), personas, participants, await _human_cards(participants), x.title)
     await db.conversations.insert_one(dict(doc))
     return clean(doc)
 
@@ -491,28 +506,36 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     return "\n".join(parts)
 
 
+async def _memory_lines(cid: str, query: str) -> list:
+    """Core memory summary + period summaries relevant to the question (long-term context)."""
+    lines = []
+    conv = await db.conversations.find_one({"id": cid}, {"_id": 0, "memory_summary": 1}) or {}
+    if conv.get("memory_summary"):
+        lines.append(f"[Memori inti percakapan]: {conv['memory_summary'][:CORE_SUMMARY_CAP + 500]}")
+    for a in await _relevant_periods(cid, query):
+        lines.append(f"[Rincian periode {a.get('period_start', '')[:10]}–{a.get('period_end', '')[:10]}, relevan dengan pertanyaan]: {(a.get('summary') or '')[:PERIOD_SUMMARY_CAP]}")
+    return lines
+
+
+def _message_lines(m: dict) -> list:
+    """One history message → transcript lines (speaker, trimmed body, attachment text, generated files)."""
+    who = (m.get("sender_name") or "User") if m["role"] == "user" else (m.get("persona_name") or "Assistant")
+    body = m["content"] or ""
+    if m["role"] != "user" and len(body) > HIST_MSG_CAP:
+        body = body[:HIST_MSG_CAP] + " …(dipangkas; versi lengkap tersimpan di Ruang Kerja/Galeri)"
+    lines = [f"{who}: {body}"]
+    if m.get("attachment_text"):
+        lines.append(f"[Isi lampiran {who}]: {m['attachment_text'][:1500]}")
+    if m.get("media"):
+        lines.append("[Berkas yang dibuat asisten]: " + ", ".join(x.get("name", "") for x in m["media"]))
+    return lines
+
+
 async def _history_text(cid: str, limit=14, with_summary=True, query: str = "") -> str:
     msgs = await db.messages.find({"conversation_id": cid, "archived": {"$ne": True}, "is_summary": {"$ne": True}}, {"_id": 0}).sort("created_at", 1).to_list(1000)
-    lines = []
-    if with_summary:
-        conv = await db.conversations.find_one({"id": cid}, {"_id": 0, "memory_summary": 1}) or {}
-        if conv.get("memory_summary"):
-            lines.append(f"[Memori inti percakapan]: {conv['memory_summary'][:CORE_SUMMARY_CAP + 500]}")
-        for a in await _relevant_periods(cid, query):
-            lines.append(f"[Rincian periode {a.get('period_start', '')[:10]}–{a.get('period_end', '')[:10]}, relevan dengan pertanyaan]: {(a.get('summary') or '')[:PERIOD_SUMMARY_CAP]}")
+    lines = await _memory_lines(cid, query) if with_summary else []
     for m in msgs[-limit:]:
-        if m["role"] == "user":
-            who = m.get("sender_name") or "User"
-        else:
-            who = m.get("persona_name") or "Assistant"
-        body = m["content"] or ""
-        if m["role"] != "user" and len(body) > HIST_MSG_CAP:
-            body = body[:HIST_MSG_CAP] + " …(dipangkas; versi lengkap tersimpan di Ruang Kerja/Galeri)"
-        lines.append(f"{who}: {body}")
-        if m.get("attachment_text"):
-            lines.append(f"[Isi lampiran {who}]: {m['attachment_text'][:1500]}")
-        if m.get("media"):
-            lines.append("[Berkas yang dibuat asisten]: " + ", ".join(x.get("name", "") for x in m["media"]))
+        lines.extend(_message_lines(m))
     return "\n".join(lines)
 
 

@@ -5,6 +5,7 @@ export const reportUsage = (callId, ev) => {
   if (!callId) return;
   if (ev?.type === "response.done" && ev.response?.usage) api.post(`/realtime/calls/${callId}/usage`, { usage: ev.response.usage }).catch(() => {});
   else if (ev?.type === "live.backend_usage" && ev.usage) api.post(`/realtime/calls/${callId}/usage`, { usage: ev.usage, kind: "backend" }).catch(() => {}); // GPT-Live: delegated brain-model tokens
+  else if (ev?.type === "live.tool_call" && ev.tool) api.post(`/realtime/calls/${callId}/usage`, { usage: {}, kind: "tool", tool: ev.tool }).catch(() => {}); // GPT-Live: provider tool (file_search) per call
 };
 
 // Same semantic-VAD mapping as backend `vad_config`; interruption is confirmed client-side (see MicPipeline.openFor).

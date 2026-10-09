@@ -7,8 +7,8 @@ const b64 = (i16) => { const u8 = new Uint8Array(i16.buffer, i16.byteOffset, i16
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
 export class AvatarBridge {
-  constructor({ onState, onError, onVideoTrack, onAudioTrack }) {
-    this.onState = onState; this.onError = onError; this.onVideoTrack = onVideoTrack; this.onAudioTrack = onAudioTrack;
+  constructor({ onState, onError, onVideoTrack, onAudioTrack, onConnection }) {
+    this.onState = onState; this.onError = onError; this.onVideoTrack = onVideoTrack; this.onAudioTrack = onAudioTrack; this.onConnection = onConnection;
     this.ws = null; this.room = null; this.ac = null; this.proc = null; this.src = null;
     this.ready = false; this.forwarding = false; this.utterance = null; this.pending = []; this.keep = null; this.closed = false;
   }
@@ -42,8 +42,12 @@ export class AvatarBridge {
       if (track.kind === Track.Kind.Video) this.onVideoTrack?.(track);
       if (track.kind === Track.Kind.Audio) this.onAudioTrack?.(track);
     });
-    room.on(RoomEvent.Disconnected, () => { if (!this.closed) this.onError?.("Ruang video avatar terputus"); });
+    // connection lifecycle → the hook pauses the countdown/billing while the room is not connected
+    room.on(RoomEvent.Reconnecting, () => this.onConnection?.("reconnecting"));
+    room.on(RoomEvent.Reconnected, () => this.onConnection?.("connected"));
+    room.on(RoomEvent.Disconnected, (reason) => { this.onConnection?.("disconnected", reason); if (!this.closed) this.onError?.("Ruang video avatar terputus"); });
     await room.connect(url, token, { autoSubscribe: true });
+    this.onConnection?.("connected");
     room.remoteParticipants.forEach((p) => p.trackPublications.forEach((pub) => { if (pub.track) { if (pub.track.kind === Track.Kind.Video) this.onVideoTrack?.(pub.track); if (pub.track.kind === Track.Kind.Audio) this.onAudioTrack?.(pub.track); } }));
   }
 

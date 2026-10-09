@@ -77,6 +77,7 @@ export class LiveBridge {
       case "response.event": {
         const e = ev.event || {};
         if (e.type === "response.output_item.done" && e.item?.type === "function_call") this.emit({ type: "response.function_call_arguments.done", name: e.item.name, call_id: e.item.call_id, arguments: e.item.arguments || "{}", delegation_id: ev.delegation_id });
+        else if (e.type === "response.output_item.done" && e.item?.type === "file_search_call") this.emit({ type: "live.tool_call", tool: "openai:file_search" }); // billed per search
         else if (e.type === "response.completed" && e.response?.usage) this.emit({ type: "live.backend_usage", usage: e.response.usage });
         return;
       }

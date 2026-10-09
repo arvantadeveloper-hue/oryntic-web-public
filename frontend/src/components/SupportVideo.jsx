@@ -48,14 +48,18 @@ export function useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject,
   const [remaining, setRemaining] = useState(null);
   const [credits, setCredits] = useState(0);
   const bridgeRef = useRef(null);
-  const startedRef = useRef(null);
+  const startedRef = useRef(null);      // wall-clock start of the current CONNECTED stretch (null while disconnected)
+  const connectedMsRef = useRef(0);     // connected time accumulated before the current stretch — the limit counts only connected seconds
+  const [link, setLink] = useState("connected"); // connected | reconnecting | disconnected
   const tickRef = useRef(null);
   const warnedRef = useRef(false);
   const sessRef = useRef(null);
   const audioSinkRef = useRef(null);
   useEffect(() => { if (enabled) api.get("/support/video-config").then((r) => setCfg(r.data)).catch(() => {}); }, [enabled]);
 
-  const elapsed = () => (startedRef.current ? Math.round((Date.now() - startedRef.current) / 1000) : 0);
+  const elapsed = () => Math.round((connectedMsRef.current + (startedRef.current ? Date.now() - startedRef.current : 0)) / 1000);
+  const pauseClock = () => { if (startedRef.current) { connectedMsRef.current += Date.now() - startedRef.current; startedRef.current = null; } };
+  const resumeClock = () => { if (!startedRef.current) startedRef.current = Date.now(); };
 
   const stop = async (reason = "user") => {
     if (!bridgeRef.current && !sessRef.current) return;
@@ -65,13 +69,14 @@ export function useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject,
     bridgeRef.current?.stop(); bridgeRef.current = null;
     try { audioSinkRef.current?.remove(); } catch (e) {} audioSinkRef.current = null;
     if (audioElRef.current) audioElRef.current.muted = false;
-    setTrack(null); setRemaining(null); startedRef.current = null;
+    setTrack(null); setRemaining(null); pauseClock(); startedRef.current = null; connectedMsRef.current = 0; setLink("connected");
     if (sessRef.current && callIdRef.current && reason !== "server") {
       try { const r = await api.post(`/realtime/calls/${callIdRef.current}/video/stop`, { elapsed_seconds: secs }); setCredits(r.data.credits || 0); } catch (e) {}
     }
     sessRef.current = null;
     setState("off");
     if (reason === "limit") { inject(END_TEXT); toast("Batas waktu video tercapai — panggilan suara tetap berlanjut"); }
+    if (reason === "disconnected") toast.error("Koneksi video terputus — hanya waktu tersambung yang dihitung. Nyalakan video lagi bila perlu.");
     else if (reason === "credits") toast.error("Kredit tidak cukup untuk melanjutkan video");
   };
 
@@ -82,18 +87,25 @@ export function useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject,
       const r = await api.post(`/realtime/calls/${callIdRef.current}/video/start`);
       sessRef.current = r.data; warnedRef.current = false;
       const bridge = new AvatarBridge({
-        onError: (m) => { toast.error(m); },
+        onError: (m) => { if (!bridge.closed) toast.error(m); },
         onState: () => {},
+        onConnection: (st) => { // the clock only runs while the LiveKit room is connected
+          if (st === "connected") { resumeClock(); setLink("connected"); }
+          else if (st === "reconnecting") { pauseClock(); setLink("reconnecting"); }
+          else if (st === "disconnected" && sessRef.current) { pauseClock(); setLink("disconnected"); stop(elapsed() >= (sessRef.current?.max_seconds || 0) - 5 ? "limit" : "disconnected"); }
+        },
         onVideoTrack: (t) => setTrack(t),
         onAudioTrack: (t) => { const el = t.attach(); el.autoplay = true; document.body.appendChild(el); audioSinkRef.current = el; if (audioElRef.current) audioElRef.current.muted = true; },
       });
       bridgeRef.current = bridge;
+      connectedMsRef.current = 0; startedRef.current = null;
       await bridge.start(r.data, remoteStreamRef.current);
-      startedRef.current = Date.now(); setRemaining(r.data.max_seconds); setState("on");
+      resumeClock(); setRemaining(r.data.max_seconds); setState("on");
       if (phaseRef.current === "speaking") bridge.speakStart();
       tickRef.current = setInterval(async () => {
         const s = elapsed(); const rem = (sessRef.current?.max_seconds || 0) - s; setRemaining(Math.max(0, rem));
         if (!warnedRef.current && s >= (sessRef.current?.warn_seconds || Infinity)) { warnedRef.current = true; inject(WARN_TEXT(cfg?.max_minutes || Math.round((sessRef.current?.max_seconds || 1200) / 60))); }
+        if (!startedRef.current) return; // paused (reconnecting): no countdown, no billing tick
         if (s % 15 === 0 || rem <= 0) {
           try {
             const t = await api.post(`/realtime/calls/${callIdRef.current}/video/tick`, { elapsed_seconds: s });
@@ -115,10 +127,10 @@ export function useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject,
   const onUserSpeaking = (on) => bridgeRef.current?.listening(on);
   const attachStream = (stream) => bridgeRef.current?.attachAudio(stream);
 
-  return { cfg, state, track, remaining, credits, start, stop, setState, onAssistantAudioStart, onAssistantAudioStop, onInterrupt, onUserSpeaking, attachStream };
+  return { cfg, state, link, track, remaining, credits, start, stop, setState, onAssistantAudioStart, onAssistantAudioStop, onInterrupt, onUserSpeaking, attachStream };
 }
 
-export function AvatarVideoView({ track, remaining, credits, name, onStop, state }) {
+export function AvatarVideoView({ track, remaining, credits, name, onStop, state, link = "connected" }) {
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current;
@@ -131,12 +143,13 @@ export function AvatarVideoView({ track, remaining, credits, name, onStop, state
     }, 700);
     return () => { clearInterval(guard); try { track.detach(el); } catch (e) {} };
   }, [track]);
-  const mm = String(Math.floor((remaining || 0) / 60)).padStart(2, "0"), ss = String((remaining || 0) % 60).padStart(2, "0");
+  const mm = remaining == null ? "--" : String(Math.floor(remaining / 60)).padStart(2, "0"), ss = remaining == null ? "--" : String(remaining % 60).padStart(2, "0");
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black" data-testid="rt-avatar-video">
       <video ref={ref} autoPlay playsInline muted className="h-full w-full object-cover" />
       {!track && <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/70"><Loader2 size={22} className="animate-spin" /> <span className="text-xs">{state === "starting" ? "Menyiapkan avatar video…" : "Menunggu video…"}</span></div>}
       <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur"><Video size={12} className="text-[#8FB0FF]" /> {name} · video</span>
+      {link !== "connected" && <span className="absolute inset-x-0 top-12 mx-auto w-max rounded-full bg-amber-500/90 px-3 py-1 text-[11px] font-bold text-black" data-testid="rt-video-link">Koneksi video terputus — menyambung ulang… (hitung mundur dijeda)</span>}
       <span className={`absolute right-3 top-3 rounded-full px-2.5 py-1 font-mono text-[11px] font-bold backdrop-blur ${(remaining || 0) <= 120 ? "bg-amber-500/80 text-black" : "bg-black/60 text-white"}`} data-testid="rt-video-remaining" title="Sisa waktu video">{mm}:{ss}</span>
       <span className="absolute bottom-3 left-3 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] text-white/80 backdrop-blur" data-testid="rt-video-credits"><Coins size={11} /> {Math.round(credits || 0)} kredit</span>
       <button onClick={onStop} className="absolute bottom-3 right-3 rounded-full bg-white/15 px-3 py-1.5 text-[11px] font-bold text-white backdrop-blur hover:bg-[#EF4444]" data-testid="rt-video-stop">Matikan video</button>
