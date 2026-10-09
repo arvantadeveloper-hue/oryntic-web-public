@@ -399,8 +399,8 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       </div>
     </div>
   ) : video.state !== "off" && video.state !== "confirm" ? (
-    <div className="flex flex-1 flex-col items-center gap-3 overflow-hidden px-4 pb-2 sm:px-6">
-      <div className="w-full max-w-3xl flex-1 min-h-0"><AvatarVideoView track={video.track} remaining={video.remaining} credits={video.credits} name={persona.name || "Oryntix"} onStop={() => video.stop("user")} state={video.state} /></div>
+    <div className="flex flex-1 flex-col items-center gap-1.5 overflow-hidden px-1.5 pb-1 sm:px-3" data-testid="rt-video-stage">
+      <div className="w-full flex-1 min-h-0"><AvatarVideoView track={video.track} remaining={video.remaining} credits={video.credits} name={persona.name || "Oryntix"} onStop={() => video.stop("user")} state={video.state} /></div>
       <p className={`flex items-center gap-2 text-sm ${phase === "reconnecting" ? "font-semibold text-amber-300" : "text-white/70"}`} data-testid="rt-phase">{["connecting", "reconnecting"].includes(phase) && <Loader2 size={14} className="animate-spin" />}{label}</p>
     </div>
   ) : (
@@ -412,7 +412,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
   );
   const captionEl = layout === "chat" ? <p className={`text-center text-xs ${phase === "reconnecting" ? "font-semibold text-amber-300" : "text-white/60"}`} data-testid="rt-phase-rail">{label}</p> : null;
   const controls = (
-    <div className="flex items-center justify-center gap-3 px-4 py-8 sm:gap-4">
+    <div className={`flex items-center justify-center gap-3 px-4 sm:gap-4 ${video.state === "on" || video.state === "starting" ? "py-3" : "py-8"}`}>
       <button onClick={toggleMute} data-testid="rt-mute" className={`flex h-14 w-14 items-center justify-center rounded-full transition ${muted ? "bg-[#EF4444]" : "bg-white/15 hover:bg-white/25"}`}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</button>
       <button onClick={screen ? stopShare : startShare} disabled={phase === "connecting"} data-testid="rt-share-screen" title={screen ? "Berhenti membagikan layar" : "Bagikan layar — lalu tekan “Tunjukkan ke asisten” agar asisten melihatnya"} className={`flex h-14 w-14 items-center justify-center rounded-full transition disabled:opacity-50 ${screen ? "bg-emerald-500" : "bg-white/15 hover:bg-white/25"}`}>{screen ? <MonitorOff size={22} /> : <MonitorUp size={22} />}</button>
       {isSupport && video.cfg?.enabled && <button onClick={() => (video.state === "on" ? video.stop("user") : video.setState("confirm"))} disabled={phase === "connecting" || ["starting", "ending"].includes(video.state)} data-testid="rt-video-toggle" title={video.state === "on" ? "Matikan video avatar" : `Video interaktif · ${video.cfg.credits_per_sec} kredit/detik`} className={`flex h-14 w-14 items-center justify-center rounded-full transition disabled:opacity-50 ${video.state === "on" ? "bg-[#2F6BFF]" : "bg-white/15 hover:bg-white/25"}`}>{["starting", "ending"].includes(video.state) ? <Loader2 size={22} className="animate-spin" /> : video.state === "on" ? <VideoOff size={22} /> : <Video size={22} />}</button>}

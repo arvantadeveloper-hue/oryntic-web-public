@@ -6,12 +6,12 @@ import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from starlette.middleware.cors import CORSMiddleware
 
-from db import db, ensure_indexes
-from auth import router as auth_router, seed_admin, user_from_token
+from db import db  # noqa: F401
+from auth import router as auth_router, user_from_token
 from personas import router as personas_router
-from chat import router as chat_router, _can_access, migrate_direct_chats
+from chat import router as chat_router, _can_access
 from agents import router as agents_router
-from reminders import router as reminders_router, scheduler_tick
+from reminders import router as reminders_router
 from wallet import router as wallet_router
 from admin import router as admin_router
 from integrations import router as integrations_router
@@ -21,19 +21,18 @@ from gitlab import router as gitlab_router
 from social import router as social_router
 from push import router as push_router
 from gallery import router as gallery_router
-from archives import router as archives_router, archive_tick
+from archives import router as archives_router
 from shares import router as shares_router
 from friends import router as friends_router
 from rtc import router as rtc_router
 from knowledge import router as knowledge_router
 from workspace import router as workspace_router
-from assignments import router as assignments_router, tasks_tick
+from assignments import router as assignments_router
 from models import router as models_router
 from pending_files import router as pending_files_router
 from voice import router as voice_router
 from support_agent import router as support_router
 from files import router as files_router
-from storage import init_storage
 from realtime import manager, user_manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -49,7 +48,7 @@ async def root():
 
 app.include_router(auth_router)
 app.include_router(personas_router)
-from portraits import router as portraits_router, migrate_portraits
+from portraits import router as portraits_router
 app.include_router(portraits_router, prefix="/api")
 app.include_router(chat_router)
 app.include_router(support_router)
@@ -152,42 +151,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_scheduler_task = None
+from startup import register_lifecycle  # noqa: E402
 
-
-async def _scheduler_loop():
-    while True:
-        try:
-            await scheduler_tick()
-            await tasks_tick()
-            await archive_tick()
-            from social import social_tick
-            await social_tick()
-        except Exception as e:
-            logger.error(f"scheduler error: {e}")
-        await asyncio.sleep(20)
-
-
-@app.on_event("startup")
-async def startup():
-    await ensure_indexes()
-    await seed_admin()
-    await migrate_direct_chats()
-    from pricing import refresh as refresh_pricing
-    await refresh_pricing(force=True)
-    try:
-        await asyncio.to_thread(init_storage)
-        logger.info("Object storage initialized")
-    except Exception as e:
-        logger.error(f"Object storage init failed: {e}")
-    global _scheduler_task
-    _scheduler_task = asyncio.create_task(_scheduler_loop())
-    asyncio.create_task(migrate_portraits())
-    logger.info("Oryntix API started")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    if _scheduler_task:
-        _scheduler_task.cancel()
-    db.client.close() if hasattr(db, "client") else None
+register_lifecycle(app)
