@@ -235,20 +235,22 @@ function ImageChoiceCard({ m, cid, onDone, dark = false }) {
 
 export function ToolRequestCard({ m, cid, onDone, dark = false }) {
   const [busy, setBusy] = useState(m.pending_tool?.running ? "run" : "");
+  const [draft, setDraft] = useState({});
   if (!m.pending_tool) return null;
   if (m.pending_tool.kind === "video" && m.pending_tool.options) return <VideoChoiceCard m={m} cid={cid} onDone={onDone} dark={dark} />;
   if (["image", "image_edit"].includes(m.pending_tool.kind) && m.pending_tool.options?.length) return <ImageChoiceCard m={m} cid={cid} onDone={onDone} dark={dark} />;
   if (busy === "run" && ["image", "image_edit", "video"].includes(m.pending_tool.kind)) return <RenderingBox kind={m.pending_tool.kind} dark={dark} />;
   const act = async (kind) => {
     setBusy(kind);
-    try { await api.post(`/conversations/${cid}/messages/${m.id}/${kind === "run" ? "run-tool" : "cancel-tool"}`, null, { params: kind === "run" ? { app_url: window.location.origin } : {} }); await onDone?.(); }
+    const edits = kind === "run" && m.pending_tool.kind === "social" ? { caption: draft.caption, title: draft.title } : {};
+    try { await api.post(`/conversations/${cid}/messages/${m.id}/${kind === "run" ? "run-tool" : "cancel-tool"}`, null, { params: kind === "run" ? { app_url: window.location.origin, ...edits } : {} }); await onDone?.(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal menjalankan alat"); setBusy(""); }
   };
   const social = m.pending_tool.kind === "social";
   return (
     <div data-testid="tool-request-card" className={`mt-2 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
       {m.pending_tool.kind === "video" ? <Clapperboard size={14} /> : social ? <Share2 size={14} /> : <ImageIcon size={14} />}<span className="flex-1 font-semibold">{TOOL_LABEL(m.pending_tool)}</span>
-      {social && <SocialPreview pt={m.pending_tool} dark={dark} />}
+      {social && <SocialPreview pt={m.pending_tool} dark={dark} draft={draft} onDraft={setDraft} />}
       <button onClick={() => act("run")} disabled={!!busy} data-testid="tool-run-btn" className="flex items-center gap-1 rounded-lg bg-[#2F6BFF] px-3 py-1.5 font-bold text-white disabled:opacity-60">{busy === "run" ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Lanjutkan</button>
       <button onClick={() => act("cancel")} disabled={!!busy} data-testid="tool-cancel-btn" className={`rounded-lg px-3 py-1.5 font-semibold disabled:opacity-60 ${dark ? "bg-white/10" : "bg-white"}`}>Batal</button>
     </div>

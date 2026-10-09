@@ -16,13 +16,20 @@ def persona_tools(persona: dict, model_key: Optional[str]) -> list:
     env = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY"}[provider]
     if not os.environ.get(env, "").strip():
         return []
-    return [t for t in (persona.get("tools") or []) if t in TOOL_BY_ID and TOOL_BY_ID[t]["provider"] == provider]
+    ids = [t for t in (persona.get("tools") or []) if t in TOOL_BY_ID and TOOL_BY_ID[t]["provider"] == provider]
+    if not persona.get("vector_store_id"):  # file_search needs at least one synced knowledge document
+        ids = [t for t in ids if t != "openai:file_search"]
+    return ids
+
+
+def uses_file_search(persona: dict, model_key: Optional[str]) -> bool:
+    return "openai:file_search" in persona_tools(persona, model_key)
 
 
 def tools_prompt(tool_ids: list) -> str:
     labels = ", ".join(TOOL_BY_ID[t]["label"] for t in tool_ids)
     return (f"\n\nENABLED TOOLS: {labels}. Use them whenever they make the answer more accurate or current (fresh facts → search; "
-            "calculations/data → run code; the user asks for a picture → image tool). When you run code on data that suits a visual, ALSO save a chart as a PNG file and present tables as markdown tables. "
+            "calculations/data → run code; the user asks for a picture → image tool; anything the assistant's own documents may answer → file search, and cite the document title). When you run code on data that suits a visual, ALSO save a chart as a PNG file and present tables as markdown tables. "
             "Cite sources briefly when you searched. Never claim you cannot access the web or run code.")
 
 
@@ -67,16 +74,21 @@ async def _container_files(client, r, uid: str) -> list:
     return held
 
 
-async def _run_openai(system: str, prompt: str, model: str, tool_ids: list, uid: str) -> dict:
+async def _run_openai(system: str, prompt: str, model: str, tool_ids: list, uid: str, vector_store_ids: Optional[list] = None) -> dict:
     from openai import AsyncOpenAI
     spec = {"openai:web_search": {"type": "web_search"}, "openai:code_interpreter": {"type": "code_interpreter", "container": {"type": "auto"}},
-            "openai:image_generation": {"type": "image_generation"}}
+            "openai:image_generation": {"type": "image_generation"},
+            "openai:file_search": {"type": "file_search", "vector_store_ids": vector_store_ids or [], "max_num_results": 8}}
+    if not vector_store_ids:
+        tool_ids = [t for t in tool_ids if t != "openai:file_search"]
     client = AsyncOpenAI(api_key=provider_key("openai"))
     r = await client.responses.create(model=model, instructions=system, input=prompt, tools=[spec[t] for t in tool_ids])
-    counts, citations, pending = {}, [], []
+    counts, citations, pending, files = {}, [], [], []
     for o in r.output:
         if o.type == "web_search_call":
             counts["openai:web_search"] = counts.get("openai:web_search", 0) + 1
+        elif o.type == "file_search_call":
+            counts["openai:file_search"] = counts.get("openai:file_search", 0) + 1
         elif o.type == "code_interpreter_call":
             counts["openai:code_interpreter"] = counts.get("openai:code_interpreter", 0) + 1
         elif o.type == "image_generation_call" and getattr(o, "result", None):
@@ -87,9 +99,13 @@ async def _run_openai(system: str, prompt: str, model: str, tool_ids: list, uid:
                 for a in getattr(part, "annotations", None) or []:
                     if getattr(a, "type", "") == "url_citation" and getattr(a, "url", None):
                         citations.append({"url": a.url, "title": getattr(a, "title", None) or a.url})
+                    elif getattr(a, "type", "") == "file_citation" and getattr(a, "filename", None) and a.filename not in files:
+                        files.append(a.filename)
     if "openai:code_interpreter" in counts:
         pending += await _container_files(client, r, uid)
     text = re.sub(r"\[([^\]]*)\]\(sandbox:[^)]*\)", r"\1", (r.output_text or "")).strip()  # sandbox:/mnt/data links are unusable outside the container
+    if files:
+        text += "\n\n📄 Sumber dokumen: " + ", ".join(re.sub(r"\.txt$", "", f).replace("_", " ") for f in files[:6])
     return {"text": text, "counts": counts, "citations": citations, "media": [], "pending_files": pending}
 
 
@@ -168,11 +184,11 @@ async def voice_run_code(persona: dict, lang_name: str, task: str, uid: str) -> 
     return await run_with_tools(system, task, persona.get("model"), [tid], uid)
 
 
-async def run_with_tools(system: str, prompt: str, model_key: Optional[str], tool_ids: list, uid: str) -> dict:
+async def run_with_tools(system: str, prompt: str, model_key: Optional[str], tool_ids: list, uid: str, vector_store_ids: Optional[list] = None) -> dict:
     """→ {text, tools_used:[{id,label,count,credits}], tool_credits, citations, media}. Raises on provider failure (caller falls back)."""
     provider, model = resolve_model(model_key)
     system = system + tools_prompt(tool_ids)
-    out = await (_run_openai(system, prompt, model, tool_ids, uid) if provider == "openai" else _run_litellm(system, prompt, provider, model, tool_ids))
+    out = await (_run_openai(system, prompt, model, tool_ids, uid, vector_store_ids) if provider == "openai" else _run_litellm(system, prompt, provider, model, tool_ids))
     p = await get_pricing()
     used = []
     for tid, n in out["counts"].items():

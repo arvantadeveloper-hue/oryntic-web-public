@@ -1,4 +1,5 @@
 import { Room, RoomEvent, Track } from "livekit-client";
+import { secureWsUrl } from "./api";
 
 // Bridges our OpenAI Realtime audio to a LiveAvatar LITE session: PCM16 24 kHz chunks go over the LiveAvatar WebSocket
 // (agent.speak / speak_end / interrupt) and the lip-synced avatar video+audio arrive through LiveKit.
@@ -20,7 +21,7 @@ export class AvatarBridge {
 
   _openWs(url) {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url); this.ws = ws;
+      const ws = new WebSocket(secureWsUrl(url)); this.ws = ws; // LiveAvatar session socket, forced to wss
       const timer = setTimeout(() => reject(new Error("LiveAvatar WebSocket timeout")), 15000);
       ws.onmessage = (e) => {
         let ev = {}; try { ev = JSON.parse(e.data); } catch (err) { return; }

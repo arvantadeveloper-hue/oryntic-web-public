@@ -477,7 +477,8 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     mems = _relevant_memories(await db.memory_items.find({"user_id": user["id"], "persona_id": persona["id"], "enabled": True}).to_list(50), query)
     if mems:
         parts.append("Saved memory about the user: " + "; ".join(m["content"] for m in mems))
-    if query:
+    from provider_tools import uses_file_search
+    if query and not uses_file_search(persona, persona.get("model")):  # with file_search the model retrieves from the vector store itself
         from knowledge import relevant_knowledge
         kn = await relevant_knowledge(persona["id"], query)
         if kn:
@@ -890,13 +891,13 @@ async def _latest_media(cid: str, kind: str) -> Optional[dict]:
     return None
 
 
-async def social_publish_from_chat(cid: str, u: dict, providers: list, caption: str, kind: str, app_url: str) -> dict:
+async def social_publish_from_chat(cid: str, u: dict, providers: list, caption: str, kind: str, app_url: str, title: Optional[str] = None) -> dict:
     """Resolve the latest image/video of the conversation and publish it (chat run-tool + voice tool)."""
     from social import publish, PublishIn
     media = await _latest_media(cid, kind) if kind in ("image", "video") else None
     if kind in ("image", "video") and not media:
         raise HTTPException(400, f"Belum ada {kind} di percakapan ini untuk diposting.")
-    res = await publish(u["id"], PublishIn(providers=providers, kind=kind, text=caption, title=(media or {}).get("name") or "", media_path=(media or {}).get("path"), drive_id=(media or {}).get("drive_id"), app_url=app_url, source={"conversation_id": cid}))
+    res = await publish(u["id"], PublishIn(providers=providers, kind=kind, text=caption, title=title or (media or {}).get("name") or "", media_path=(media or {}).get("path"), drive_id=(media or {}).get("drive_id"), app_url=app_url, source={"conversation_id": cid}))
     lines = [f"- **{SOCIAL_LABEL.get(r['provider'], r['provider'])}**: " + (f"terkirim — [lihat post]({r.get('post_url')})" + (f" · [Instagram]({r['instagram_url']})" if r.get("instagram_url") else "") if r["status"] == "sent" else f"gagal — {r.get('error')}") for r in res]
     return {"results": res, "text": "Hasil publikasi:\n" + "\n".join(lines) + "\n\nSemua riwayat ada di menu [Social Media](/social)."}
 
@@ -962,7 +963,7 @@ async def social_schedule_from_chat(cid: str, u: dict, pt: dict, app_url: str, p
     media = await _latest_media(cid, kind) if kind in ("image", "video") else None
     if kind in ("image", "video") and not media:
         raise HTTPException(400, f"Belum ada {kind} di percakapan ini untuk dijadwalkan.")
-    x = PublishIn(providers=pt["providers"], kind=kind, text=pt.get("caption") or "", title=(media or {}).get("name") or "", media_path=(media or {}).get("path"),
+    x = PublishIn(providers=pt["providers"], kind=kind, text=pt.get("caption") or "", title=pt.get("title") or (media or {}).get("name") or "", media_path=(media or {}).get("path"),
                   drive_id=(media or {}).get("drive_id"), app_url=app_url or "https://oryntix.app", source={"conversation_id": cid, "scheduled": True})
     job = await schedule_post(u["id"], x, pt["schedule_at"], pt.get("schedule_label") or pt["schedule_at"],
                               {"conversation_id": cid, "persona_id": persona_id, "persona_name": persona_name, "portrait": portrait})
@@ -1418,7 +1419,7 @@ async def _plain_reply(ctx: ReplyCtx):
     if tool_ids:
         yield ctx.sse(status="Menggunakan alat bawaan model…")
         try:
-            tool_out = await run_with_tools(ctx.system, ctx.prompt, ctx.model_key, tool_ids, ctx.user["id"])
+            tool_out = await run_with_tools(ctx.system, ctx.prompt, ctx.model_key, tool_ids, ctx.user["id"], [ctx.persona["vector_store_id"]] if ctx.persona.get("vector_store_id") else None)
         except Exception as exc:
             logging.getLogger(__name__).warning("provider tools failed, falling back: %s", str(exc)[:200])
     if tool_out and (tool_out["text"] or tool_out["media"] or tool_out.get("pending_files")):
@@ -1816,8 +1817,18 @@ async def _pending_msg(cid: str, mid: str, u: dict) -> dict:
 
 @router.post("/conversations/{cid}/messages/{mid}/run-tool")
 async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Optional[str] = None, resolution: Optional[str] = None, real_person: bool = False, with_audio: bool = False,
-                   aspect: Optional[str] = None, quality: Optional[str] = None, preset: Optional[str] = None, u: dict = Depends(current_user)):
+                   aspect: Optional[str] = None, quality: Optional[str] = None, preset: Optional[str] = None, caption: Optional[str] = None, title: Optional[str] = None,
+                   u: dict = Depends(current_user)):
     msg = await _pending_msg(cid, mid, u)
+    if msg.get("pending_tool", {}).get("kind") == "social":  # caption/title edited on the preview card win over the planner's draft
+        pt_edit = {}
+        if caption is not None and caption.strip():
+            pt_edit["pending_tool.caption"] = caption.strip()[:3000]
+        if title is not None and title.strip():
+            pt_edit["pending_tool.title"] = title.strip()[:100]
+        if pt_edit:
+            await db.messages.update_one({"id": mid}, {"$set": pt_edit})
+            msg = await _pending_msg(cid, mid, u)
     over = await quota_exceeded(u)
     if over:
         raise HTTPException(402, quota_message(over))
@@ -1830,7 +1841,7 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
                 out = await social_schedule_from_chat(cid, u, pt, app_url or "", msg.get("persona_id"), msg.get("persona_name"), msg.get("portrait"))
                 upd = {"content": out["text"], "tool": "social_schedule", "social_schedule_id": out["job"]["id"]}
             else:
-                out = await social_publish_from_chat(cid, u, pt["providers"], pt.get("caption") or "", pt.get("content_kind") or "image", app_url or "")
+                out = await social_publish_from_chat(cid, u, pt["providers"], pt.get("caption") or "", pt.get("content_kind") or "image", app_url or "", pt.get("title"))
                 upd = {"content": out["text"], "tool": "social_publish"}
         except HTTPException as e:
             upd = {"content": f"Gagal memposting: {e.detail}", "tool": "social_publish", "error": True}

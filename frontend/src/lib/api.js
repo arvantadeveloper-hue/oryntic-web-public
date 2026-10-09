@@ -23,7 +23,11 @@ export function getToken() {
   return localStorage.getItem("aivora_token");
 }
 
-export const WS_BASE = API_BASE.replace(/^http/, "ws");
+// WebSockets are ALWAYS encrypted (wss) so realtime traffic (chat events, user events, call audio) never travels in clear text —
+// even when REACT_APP_BACKEND_URL is given as http. REACT_APP_WS_SCHEME=ws is the only (local-dev) opt-out.
+const WS_SCHEME = process.env.REACT_APP_WS_SCHEME === "ws" ? "ws" : "wss";
+export const WS_BASE = API_BASE.replace(/^https?/, WS_SCHEME);
+export const secureWsUrl = (url) => (WS_SCHEME === "wss" && typeof url === "string" ? url.replace(/^ws:\/\//i, "wss://") : url);
 
 // Conversation WebSocket with keepalive pings (proxies drop idle sockets) and auto-reconnect with backoff.
 // Returns a handle: { send(obj), close(), get socket(), onReconnect } — `onReconnect` fires after a re-established connection so callers can resync.

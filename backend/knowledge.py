@@ -1,5 +1,7 @@
 import base64
 import io
+import logging
+import os
 import re
 from typing import Optional
 
@@ -155,6 +157,66 @@ async def _fetch_url(url: str) -> tuple:
     raise HTTPException(400, "Tautan bukan halaman web/teks/PDF")
 
 
+# ---------- OpenAI vector store mirror (powers the `openai:file_search` tool) ----------
+log = logging.getLogger("knowledge")
+
+
+def _vs_client():
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not key:
+        return None
+    from openai import AsyncOpenAI
+    return AsyncOpenAI(api_key=key)
+
+
+async def ensure_vector_store(pid: str) -> Optional[str]:
+    client = _vs_client()
+    if not client:
+        return None
+    p = await db.personas.find_one({"id": pid}, {"_id": 0, "vector_store_id": 1}) or {}
+    if p.get("vector_store_id"):
+        return p["vector_store_id"]
+    vs = await client.vector_stores.create(name=f"oryntix-{pid}"[:64])
+    await db.personas.update_one({"id": pid}, {"$set": {"vector_store_id": vs.id}})
+    return vs.id
+
+
+async def vs_remove_doc(doc: dict) -> None:
+    client = _vs_client()
+    fid = (doc or {}).get("openai_file_id")
+    if not client or not fid:
+        return
+    p = await db.personas.find_one({"id": doc["persona_id"]}, {"_id": 0, "vector_store_id": 1}) or {}
+    for coro in ((lambda: client.vector_stores.files.delete(fid, vector_store_id=p["vector_store_id"])) if p.get("vector_store_id") else None,
+                 lambda: client.files.delete(fid)):
+        if coro:
+            try:
+                await coro()
+            except Exception as e:
+                log.warning("vector store cleanup %s: %s", fid, str(e)[:120])
+    await db.knowledge_docs.update_one({"id": doc["id"]}, {"$unset": {"openai_file_id": "", "vs_synced_at": ""}})
+
+
+async def vs_sync_doc(doc: dict) -> None:
+    """Upload (or replace) the document text in the persona's vector store. Non-fatal: lexical retrieval still works without it."""
+    client = _vs_client()
+    if not client or not doc:
+        return
+    try:
+        if doc.get("openai_file_id"):
+            await vs_remove_doc(doc)
+        if not doc.get("enabled", True):
+            return
+        vs_id = await ensure_vector_store(doc["persona_id"])
+        text = "\n\n".join(c["text"] for c in doc.get("chunks") or [])
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", doc.get("title") or "dokumen")[:80] or "dokumen"
+        f = await client.files.create(file=(f"{name}.txt", text.encode("utf-8")), purpose="assistants")
+        await client.vector_stores.files.create(vector_store_id=vs_id, file_id=f.id, attributes={"title": (doc.get("title") or "")[:200], "doc_id": doc["id"]})
+        await db.knowledge_docs.update_one({"id": doc["id"]}, {"$set": {"openai_file_id": f.id, "vs_synced_at": now_iso()}})
+    except Exception as e:
+        log.warning("vector store sync failed for %s: %s", doc.get("id"), str(e)[:200])
+
+
 async def _persona_of(pid: str, u: dict) -> dict:
     p = await db.personas.find_one({"id": pid, "user_id": workspace_id(u), "deleted": {"$ne": True}}, {"_id": 0, "id": 1, "user_id": 1})
     if not p:
@@ -163,6 +225,7 @@ async def _persona_of(pid: str, u: dict) -> dict:
 
 
 def _pub(d: dict) -> dict:
+    d = {**d, "vector_synced": bool(d.get("openai_file_id"))}
     return {k: v for k, v in d.items() if k != "chunks"} | {"chunk_count": len(d.get("chunks") or [])}
 
 
@@ -199,7 +262,8 @@ async def add_knowledge(pid: str, x: KnowledgeIn, u: dict = Depends(current_user
            "drive_id": drive.get("id"), "drive_link": drive.get("webViewLink"), "drive_mime": drive.get("mimeType"), "drive_user_id": u["id"] if drive else None,
            "chars": len(text), "chunks": _chunks(text), "enabled": True, "created_at": now_iso(), "updated_at": now_iso()}
     await db.knowledge_docs.insert_one(dict(doc))
-    return _pub(doc)
+    await vs_sync_doc(doc)
+    return _pub(await db.knowledge_docs.find_one({"id": doc["id"]}, {"_id": 0}) or doc)
 
 
 @router.post("/personas/{pid}/knowledge/{kid}/refresh")
@@ -216,7 +280,8 @@ async def refresh_knowledge(pid: str, kid: str, u: dict = Depends(current_user))
     if len(text.strip()) < 20:
         raise HTTPException(400, "Isi halaman terlalu pendek atau tidak terbaca")
     r = await db.knowledge_docs.find_one_and_update({"id": kid}, {"$set": {"chars": len(text), "chunks": _chunks(text), "updated_at": now_iso()}}, projection={"_id": 0}, return_document=True)
-    return _pub(r)
+    await vs_sync_doc(r)
+    return _pub(await db.knowledge_docs.find_one({"id": kid}, {"_id": 0}) or r)
 
 
 class KnowledgeUpdate(BaseModel):
@@ -239,7 +304,9 @@ async def update_knowledge(pid: str, kid: str, x: KnowledgeUpdate, u: dict = Dep
     r = await db.knowledge_docs.find_one_and_update({"id": kid, "persona_id": pid}, {"$set": fields}, projection={"_id": 0}, return_document=True)
     if not r:
         raise HTTPException(404, "Dokumen tidak ditemukan")
-    return _pub(r)
+    if x.enabled is not None or x.html is not None or x.title:
+        await vs_sync_doc(r)
+    return _pub(await db.knowledge_docs.find_one({"id": kid}, {"_id": 0}) or r)
 
 
 @router.get("/personas/{pid}/knowledge/{kid}")
@@ -254,6 +321,9 @@ async def get_knowledge(pid: str, kid: str, u: dict = Depends(current_user)):
 @router.delete("/personas/{pid}/knowledge/{kid}")
 async def delete_knowledge(pid: str, kid: str, u: dict = Depends(current_user)):
     await _persona_of(pid, u)
+    d = await db.knowledge_docs.find_one({"id": kid, "persona_id": pid}, {"_id": 0})
+    if d:
+        await vs_remove_doc(d)
     await db.knowledge_docs.delete_one({"id": kid, "persona_id": pid})
     return {"ok": True}
 

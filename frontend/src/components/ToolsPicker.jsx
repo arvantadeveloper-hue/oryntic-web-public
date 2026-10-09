@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Globe, Code2, ImageIcon, Search, Zap, Check } from "lucide-react";
+import { Globe, Code2, ImageIcon, Search, Zap, Check, FileSearch } from "lucide-react";
 import { api } from "../lib/api";
 
-const ICON = { web_search: Globe, google_search: Search, code_interpreter: Code2, code_execution: Code2, image_generation: ImageIcon };
+const ICON = { web_search: Globe, google_search: Search, code_interpreter: Code2, code_execution: Code2, image_generation: ImageIcon, file_search: FileSearch };
 
 // Provider built-in tools (web search, code execution, image generation) a persona may use; filtered by the provider of its model.
 export function ToolsPicker({ modelKey, value = [], onChange, compact = false }) {

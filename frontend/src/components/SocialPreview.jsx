@@ -98,15 +98,26 @@ function YouTubePost({ pt, acc, when }) {
 
 const VIEW = { linkedin: LinkedInPost, meta: MetaPost, youtube: YouTubePost };
 
-export function SocialPreview({ pt, dark = false }) {
+// `draft` = { caption, title } edited by the user (controlled by ToolRequestCard) — the previews re-render live and the values are sent with "Lanjutkan".
+export function SocialPreview({ pt: base, dark = false, draft, onDraft }) {
   const accounts = useAccounts();
+  const pt = { ...base, caption: draft?.caption ?? base.caption, media_name: draft?.title ?? base.title ?? base.media_name };
   const when = pt.schedule_label ? pt.schedule_label.replace(/\s*\(.*\)$/, "") : "Baru saja";
   const kindLabel = { text: "teks", image: "gambar", video: "video" }[pt.content_kind] || pt.content_kind;
+  const showTitle = (pt.providers || []).includes("youtube") && pt.content_kind === "video";
+  const inp = `w-full rounded-lg border px-2 py-1.5 text-xs outline-none focus:border-[#2F6BFF] ${dark ? "border-white/15 bg-white/10 text-white placeholder:text-white/40" : "border-slate-200 bg-white text-slate-900"}`;
   return (
     <div className="mt-2 w-full space-y-3" data-testid="social-preview">
       <p className={`flex items-center gap-1 text-[11px] font-semibold ${dark ? "text-white/70" : "text-slate-600"}`}>
         {pt.schedule_at ? <CalendarClock size={12} /> : null} Pratinjau {kindLabel}{pt.schedule_label ? ` · tayang ${pt.schedule_label}` : ""}
       </p>
+      {onDraft && (
+        <div className="space-y-1.5" data-testid="social-preview-edit">
+          {showTitle && <input value={pt.media_name || ""} onChange={(e) => onDraft({ ...draft, title: e.target.value })} maxLength={100} placeholder="Judul video (YouTube)" className={inp} data-testid="social-preview-title" />}
+          <textarea value={pt.caption || ""} onChange={(e) => onDraft({ ...draft, caption: e.target.value })} rows={3} maxLength={3000} placeholder="Caption" className={`${inp} resize-y`} data-testid="social-preview-caption" />
+          <p className={`text-[10px] ${dark ? "text-white/50" : "text-slate-400"}`}>Ubah caption{showTitle ? " & judul" : ""} di sini — pratinjau ikut berubah, lalu tekan Lanjutkan.</p>
+        </div>
+      )}
       {(pt.providers || []).map((p) => {
         const meta = PROVIDER_META[p] || { label: p, color: "#64748B", kinds: [] };
         const View = VIEW[p];

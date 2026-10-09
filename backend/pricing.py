@@ -167,6 +167,7 @@ def model_text_credits(p: dict, model_key: str | None, in_chars: int, out_chars:
 TOOL_CATALOG = [
     {"id": "openai:web_search", "provider": "openai", "label": "Pencarian web", "desc": "Mencari informasi terbaru di internet dengan sitasi.", "unit": "pencarian"},
     {"id": "openai:code_interpreter", "provider": "openai", "label": "Code Interpreter", "desc": "Menjalankan Python untuk hitungan, analisis data & grafik.", "unit": "sesi"},
+    {"id": "openai:file_search", "provider": "openai", "label": "Pencarian dokumen", "desc": "Menjawab dari dokumen pengetahuan asisten lewat vector store OpenAI (unggah di tab Pengetahuan).", "unit": "pencarian"},
     {"id": "openai:image_generation", "provider": "openai", "label": "Pembuatan gambar (GPT Image)", "desc": "Membuat/mengedit gambar langsung di dalam jawaban.", "unit": "gambar"},
     {"id": "gemini:google_search", "provider": "gemini", "label": "Google Search", "desc": "Grounding jawaban dengan hasil Google Search terbaru.", "unit": "permintaan"},
     {"id": "gemini:code_execution", "provider": "gemini", "label": "Eksekusi kode", "desc": "Menjalankan Python di sandbox Google (hanya biaya token).", "unit": "permintaan"},
