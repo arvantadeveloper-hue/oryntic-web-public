@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 43 — pricing catalog as single source of provider prices, read-only realtime admin, user-settings-driven language rule, and GitHub/GitLab direct-commit endpoints. Backend: 16/16 pytest cases pass against the public URL (test_iter43.py). Verified: (1) GET /api/admin/pricing — response.pricing has none of {text_usd_per_1k_chars, image_usd, stt_usd, tts_usd, provider_usd_per_min, model_prices, tool_prices, realtime_models, rt_audio_in_usd_1m, video_usd_per_sec} and has margin_pct, tax_pct, usd_per_credit, usd_to_idr, chars_per_token, video_res_480_mult, packages; rates.image=57, rates.realtime_per_min=73, rates.text_per_1k=9.74; realtime_models=[{id:gpt-live-1, per_min_usd:0.05, credits_per_min:73}]; tools openai:image_generation {usd:0.032, credits:47}, openai:web_search {usd:0.01, credits:15}; features image→gemini-nano-banana/image_out provider_usd 0.039 credits 57, text→text-default/per_1k_chars provider_usd 0.00675. (2) PUT /api/admin/pricing with margin_pct 40 → rates.image=61; restored 30 → 57. (3) PUT with extra legacy keys (image_usd, text_usd_per_1k_chars, model_prices) returns 200 and the response.pricing contains none of them. (4) GET /api/admin/pricing-catalog version=3; no component anywhere has flat_qty; gpt-image/image_out unit image qty_basis 1 usd 0.032; gpt-image/image_in usd 0.0084; gemini-nano-banana/image_out usd 0.039; openai:image_generation/per_image usd 0.032; text-default/per_1k_chars unit k_chars qty_basis 1 usd 0.00675; openai/gpt-live/per_minute usd 0.05. (5) POST /pricing-catalog/quote gpt-image/image_out qty=1 → base_usd 0.032 credits 47; qty=null → qty 1.0 base 0.032; gemini-nano-banana image_out qty=3 → base_usd 0.117. (6) Catalog edit propagation: PUT catalog with gemini-nano-banana/image_out usd=0.05 → GET /admin/pricing rates.image=73; restored 0.039 → 57. (7) GET /api/admin/realtime-pricing = {model:gpt-live-1, provider_usd_per_min:0.05, margin_pct:30, tax_pct:11, credits_per_min:73, catalog_path:openai/gpt-live/per_minute}; PUT /api/admin/realtime-pricing → 405 (read-only). (8) GET /api/realtime/status (demo) → model gpt-live-1 credits_per_min 73. (9) Language rule end-to-end on oryntix-support SSE: conversation_language=en, Indonesian question → ENGLISH final content (no 'kredit'); conversation_language=id, English question → INDONESIAN; conversation_language unset + app_language=en → ENGLISH; settings restored to id/id after. (10) POST /api/integrations/github/commit as demo (not connected) → 400 with Indonesian detail 'GitHub belum terhubung …'; same for /gitlab/commit; missing branch → 422. (11) plan_tool('Perbaiki typo di README.md repo budi/app lalu commit langsung ke branch dev …') → {tool:'github_commit', branch:'dev', repo:'budi/app'}; plan_tool('… buat pull request') → {tool:'github_pr'}. Frontend (admin@aivora.ai → /admin): tab 'Katalog Harga' — no 'Qty flat' header anywhere; after expanding provider OpenAI (pc-toggle-openai) the gpt-image row shows input value unit='image' (pc-unit-gpt-image-image_out) and credits=47 (pc-credits-gpt-image-image_out); the pc-save button fires and the 'Katalog harga disimpan — tarif baru langsung dipakai untuk penagihan' toast appears. Tab 'Pricing' (not 'Tarif' — actual label is 'Pricing'): [data-testid=platform-pricing-card] title 'Margin & Pengali Global'; zero inputs for pp-image_usd / pp-text_usd_per_1k_chars; pp-margin_pct present; zero <input data-testid^='pp-tool-'> and zero <input data-testid^='pp-rt-'> (tool badges exist as <span> display chips — that is fine, the spec only forbids inputs). [data-testid=realtime-pricing-card] shows '73 kredit/menit' chip, [data-testid=rt-pricing-formula] text with the catalog path 'openai/gpt-live/per_minute', and zero <input>/<button> inside the card.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/admin tab names",
+       "issues": ["The spec referred to the margin tab as 'Tarif'/'Margin', but the actual visible tab label is 'Pricing' (English). Minor inconsistency with the rest of the Indonesian UI ('Katalog Harga', 'Asisten Oryntix', 'Ruang Kerja', 'Pengingat', 'Integrasi', 'Teman', 'Kredit', 'Settings'). Consider renaming the tab to 'Tarif' for consistency."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter43.py",
+    "/app/test_reports/pytest/iter43.xml"
+  ],
+  "action_items": [
+    "Optional UX: rename admin tab 'Pricing' → 'Tarif' (and 'Overview'/'Users'/'Tasks' → Indonesian) for consistency with the rest of the Indonesian admin UI."
+  ],
+  "critical_code_review_comments": [
+    "pricing.LEGACY_PRICE_KEYS is correctly stripped both on READ (refresh() $unsets them from the stored doc) and the PUT path implicitly drops them because PlatformPricingIn Pydantic model only accepts the whitelisted global multipliers — good defense-in-depth.",
+    "pricing_catalog._merge() drops the stored component's 'flat_qty' field when stored version<3 and never re-serialises it — the v2→v3 migration is idempotent and safe.",
+    "pricing_catalog.quote() returns qty=1.0 when input qty is None — matches spec and avoids divide-by-zero. The PIPELINE (margin → tax) is applied in the documented order, so sell = usd × (1+m) × (1+t).",
+    "realtime_voice.admin_pricing() is now GET-only and reads from the catalog (openai/gpt-live/per_minute); the PUT handler has been removed → FastAPI correctly returns 405. Good.",
+    "auth._lang_name uses conversation_language with app_language as a strict fallback (default 'id'). lang_rule now explicitly tells the model to override earlier 'follow the user's language' instructions — this is what makes the SSE English-output test pass even when the user writes in Indonesian.",
+    "support_prompt_parts() instructs the agent in English to ALWAYS answer in the user's preferred language and references the LANGUAGE RULE appended below — the two instructions compose correctly.",
+    "github.gh_commit / gitlab.gl_commit both raise HTTPException(400, '<provider> belum terhubung …') before any outbound call, so the demo workspace (no PAT) returns a clean 400 with Indonesian detail (not 500/502).",
+    "github.CommitIn / gitlab.CommitIn require branch (min_length=1) → missing branch yields 422 at the Pydantic layer, no crash.",
+    "tools.plan_tool now distinguishes github_commit (direct push to a named branch) vs github_pr (PR) via the prompt — tested with Indonesian prompts; the branch field is captured verbatim ('dev').",
+    "chat._github_turn kind=='commit' validates branch presence (400 'Sebutkan branch tujuan commit-nya …') before any GitHub call, so a user asking for a direct commit without a branch gets a graceful chat reply, not a 500."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter43.py"
+  ],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "100% (all catalog, margin-card and realtime-card data-testids verified)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (workspace owner); admin@aivora.ai / Aivora!Admin2026 (platform admin). MongoDB mongodb://localhost:27017 db test_database.",
+  "seed_data_creation": "Reused the demo user's existing oryntix-support direct conversation (created a new one for the language tests, left in place; it has 3 short assistant responses). The language test TEMPORARILY wrote settings.conversation_language='en', then 'id', then $unset + app_language='en', and finally restored both back to 'id'/'id'. The catalog-propagation test TEMPORARILY changed gemini-nano-banana/image_out usd to 0.05 and restored it to 0.039. The margin-change test TEMPORARILY wrote platform_pricing.margin_pct=40 and restored it to 30. All mutations verified reverted at test teardown. Note: platform_pricing.updated_at and pricing_catalog.updated_at have been touched by the test (new timestamps).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter43 is fully green. All invariants restored: pricing.margin_pct=30 (rates.image=57, rates.realtime_per_min=73, rates.text_per_1k=9.74), gemini-nano-banana/image_out.usd=0.039, demo user settings.conversation_language='id' and app_language='id'. The admin tab for global multipliers is labelled 'Pricing' in the UI (not 'Tarif' as the spec text suggested); if the main agent updates the label the frontend playwright selector 'button:has-text(\"Pricing\")' will need the new name. GitHub/GitLab direct-commit flow via chat was NOT exercised with a real token (demo has none) — the not-connected branch was proven via the public endpoints; a connected-token end-to-end commit is still untested.",
+  "rca of the issue": "N/A — no bugs found."
+}

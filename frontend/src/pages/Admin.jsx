@@ -36,7 +36,7 @@ export default function Admin() {
       <h1 className="text-3xl font-extrabold text-slate-900">Admin Console</h1>
 
       <div className="mt-5 flex gap-2 border-b border-slate-200">
-        {[["overview", "Overview"], ["users", "Users"], ["tasks", "Tasks"], ["pricing", "Pricing"], ["catalog", "Katalog Harga"], ["support", "Asisten Oryntix"]].map(([k, l]) => (
+        {[["overview", "Ringkasan"], ["users", "Pengguna"], ["tasks", "Tugas"], ["pricing", "Tarif & Margin"], ["catalog", "Katalog Harga"], ["support", "Asisten Oryntix"]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} data-testid={`admin-tab-${k}`}
             className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium ${tab === k ? "border-[#00D1FF] text-slate-900" : "border-transparent text-slate-500"}`}>{l}</button>
         ))}
