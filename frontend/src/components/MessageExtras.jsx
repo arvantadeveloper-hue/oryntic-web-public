@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { Share2, FileText, Download, Loader2, Sparkles, Route, ImageIcon, Clapperboard, HardDrive, ExternalLink, Coins, X, UserRound, ShieldCheck, Volume2, VolumeX, Save, AlarmClock, ChevronDown } from "lucide-react";
+import { SocialPreview } from "./SocialPreview";
 import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 
@@ -243,9 +244,11 @@ export function ToolRequestCard({ m, cid, onDone, dark = false }) {
     try { await api.post(`/conversations/${cid}/messages/${m.id}/${kind === "run" ? "run-tool" : "cancel-tool"}`, null, { params: kind === "run" ? { app_url: window.location.origin } : {} }); await onDone?.(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal menjalankan alat"); setBusy(""); }
   };
+  const social = m.pending_tool.kind === "social";
   return (
     <div data-testid="tool-request-card" className={`mt-2 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-xs ${dark ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
-      {m.pending_tool.kind === "video" ? <Clapperboard size={14} /> : <ImageIcon size={14} />}<span className="flex-1 font-semibold">{TOOL_LABEL(m.pending_tool)}</span>
+      {m.pending_tool.kind === "video" ? <Clapperboard size={14} /> : social ? <Share2 size={14} /> : <ImageIcon size={14} />}<span className="flex-1 font-semibold">{TOOL_LABEL(m.pending_tool)}</span>
+      {social && <SocialPreview pt={m.pending_tool} dark={dark} />}
       <button onClick={() => act("run")} disabled={!!busy} data-testid="tool-run-btn" className="flex items-center gap-1 rounded-lg bg-[#2F6BFF] px-3 py-1.5 font-bold text-white disabled:opacity-60">{busy === "run" ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Lanjutkan</button>
       <button onClick={() => act("cancel")} disabled={!!busy} data-testid="tool-cancel-btn" className={`rounded-lg px-3 py-1.5 font-semibold disabled:opacity-60 ${dark ? "bg-white/10" : "bg-white"}`}>Batal</button>
     </div>

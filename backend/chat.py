@@ -877,6 +877,7 @@ async def conv_git_review(cid: str, x: GitReviewIn, u: dict = Depends(current_us
             await record_usage(u["id"], "chat", credits, {"conversation_id": cid, "persona_id": persona["id"], "tool": f"{x.provider}_review"})
     return {"number": d["number"], "title": d["title"], "url": d["url"], "summary": text[:1200]}
 
+KIND_ID = {"text": "teks", "image": "gambar", "video": "video"}
 SOCIAL_LABEL = {"linkedin": "LinkedIn", "meta": "Facebook/Instagram", "youtube": "YouTube"}
 
 
@@ -923,12 +924,12 @@ async def _social_turn(ctx, plan: dict):
         async for ev in _emit_final(ctx, "Waktunya sudah lewat atau tidak kubaca dengan jelas — sebutkan tanggal & jamnya ya (mis. \"besok jam 09.00\").", 0, {"tool": "social_publish", "error": True}):
             yield ev
         return
-    pt = {"kind": "social", "providers": providers, "caption": caption, "content_kind": kind, "credits": 0, "media_path": (media or {}).get("path")}
+    pt = {"kind": "social", "providers": providers, "caption": caption, "content_kind": kind, "credits": 0, "media_path": (media or {}).get("path"), "media_name": (media or {}).get("name"), "media_type": (media or {}).get("type")}
     if when:
         pt["schedule_at"], pt["schedule_label"] = when
-        text = f"Siap **menjadwalkan** posting {'teks' if kind == 'text' else kind} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** pada **{when[1]}** dengan caption:\n\n> {caption}\n\nLanjutkan?"
+        text = f"Siap **menjadwalkan** posting {KIND_ID.get(kind, kind)} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** pada **{when[1]}** dengan caption:\n\n> {caption}\n\nLanjutkan?"
     else:
-        text = f"Siap posting {'teks' if kind == 'text' else kind} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** dengan caption:\n\n> {caption}\n\nLanjutkan?"
+        text = f"Siap posting {KIND_ID.get(kind, kind)} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** dengan caption:\n\n> {caption}\n\nLanjutkan?"
     yield ctx.sse(delta=text)
     async for ev in _emit_final(ctx, text, 0, {"pending_tool": pt}):
         yield ev
@@ -965,7 +966,7 @@ async def social_schedule_from_chat(cid: str, u: dict, pt: dict, app_url: str, p
                   drive_id=(media or {}).get("drive_id"), app_url=app_url or "https://oryntix.app", source={"conversation_id": cid, "scheduled": True})
     job = await schedule_post(u["id"], x, pt["schedule_at"], pt.get("schedule_label") or pt["schedule_at"],
                               {"conversation_id": cid, "persona_id": persona_id, "persona_name": persona_name, "portrait": portrait})
-    return {"job": job, "text": f"Dijadwalkan ✅ — {'teks' if kind == 'text' else kind} akan diposting ke **{', '.join(SOCIAL_LABEL.get(p, p) for p in pt['providers'])}** pada **{job['scheduled_label']}**.\n\n"
+    return {"job": job, "text": f"Dijadwalkan ✅ — {KIND_ID.get(kind, kind)} akan diposting ke **{', '.join(SOCIAL_LABEL.get(p, p) for p in pt['providers'])}** pada **{job['scheduled_label']}**.\n\n"
                                 f"> {pt.get('caption') or ''}\n\nAku akan mengabari di chat ini setelah terkirim. Lihat atau batalkan jadwal di menu [Social Media](/social)."}
 
 
@@ -1614,6 +1615,8 @@ async def send_message(cid: str, x: MsgIn, u: dict = Depends(current_user)):
     else:
         await _store_user_message(cid, x, u, attach_text, attach_meta)
     responders = await _choose_responders(x, conv, personas, cid)
+    if len(responders) > 1 and (GITHUB_RE.search(x.content or "") or SOCIAL_RE.search(x.content or "")):
+        responders = responders[:1]  # tool requests (PR/MR, social posting) run once — not one card per persona
     roster = [p["name"] for p in personas] if len(personas) > 1 else None
     extra = _reply_extra(x, attach_text)
     async def _bill_user(p: dict) -> dict:  # each assistant's replies are paid by the assistant's owner
