@@ -1,7 +1,6 @@
 """Oryntix — the built-in Customer Support assistant (visible to every workspace, configured only from the platform admin)
 + interactive video avatar (LiveAvatar LITE mode, lip-synced to our own OpenAI Realtime audio) with per-second credit billing."""
 import os
-import math
 import time
 import logging
 from typing import Optional
@@ -164,13 +163,13 @@ class VideoTickIn(BaseModel):
 
 
 async def _bill(vs: dict, elapsed: int) -> dict:
-    """Charge the seconds not yet billed (bounded by max_seconds); returns the updated session fields."""
+    """Charge the exact seconds not yet billed (bounded by max_seconds), fractional credits."""
     secs = min(int(elapsed), int(vs["max_seconds"]))
     delta = max(0, secs - int(vs.get("billed_seconds") or 0))
-    credits = int(math.ceil(delta * int(vs["credits_per_sec"])))
+    credits = round(delta * float(vs["credits_per_sec"]), 6)
     if credits > 0:
         await record_usage(vs["user_id"], "video_avatar", credits, {"conversation_id": vs.get("conversation_id"), "call_id": vs["call_id"], "video_session_id": vs["id"], "seconds": delta, "sandbox": vs.get("sandbox")})
-    upd = {"billed_seconds": secs, "credits": int(vs.get("credits") or 0) + credits, "updated_at": now_iso()}
+    upd = {"billed_seconds": secs, "credits": round(float(vs.get("credits") or 0) + credits, 3), "updated_at": now_iso()}
     await db.video_sessions.update_one({"id": vs["id"]}, {"$set": upd})
     return {**vs, **upd}
 

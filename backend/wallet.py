@@ -26,8 +26,11 @@ async def wallet(u: dict = Depends(current_user)):
     breakdown = {}
     events = await db.usage_events.find({"user_id": wid}, {"_id": 0}).to_list(2000)
     for e in events:
-        consumed += e.get("credits", 0)
-        breakdown[e["feature"]] = breakdown.get(e["feature"], 0) + e.get("credits", 0)
+        c = float(e.get("credits_exact", e.get("credits", 0)) or 0)  # exact metered usage, fractions included
+        consumed += c
+        breakdown[e["feature"]] = breakdown.get(e["feature"], 0) + c
+    consumed = round(consumed, 2)
+    breakdown = {k: round(v, 2) for k, v in breakdown.items()}
     from auth import credit_meta
     meta = await credit_meta(u)
     return {
@@ -71,13 +74,13 @@ async def _call_groups(wid: str, uid: str) -> dict:
         r = row(c.get("call_session_id") or c.get("group_id"), c.get("conversation_id"))
         st = c.get("started_at") or c.get("created_at")
         r["started_at"] = min(r["started_at"] or st, st); r["ended_at"] = max(r["ended_at"] or "", c.get("ended_at") or st)
-        r["seconds"] = max(r["seconds"], int(c.get("seconds") or 0)); r["assistant_credits"] += int(c.get("credits") or 0)
+        r["seconds"] = max(r["seconds"], int(c.get("seconds") or 0)); r["assistant_credits"] += round(float(c.get("credits") or 0), 3)
         r["snapshot_count"] += int(c.get("snapshots") or 0); r["snapshot_credits"] += int(c.get("snapshot_credits") or 0); r["with_ai"] = True
         if c.get("persona_name") and c["persona_name"] not in r["personas"]:
             r["personas"].append(c["persona_name"])
-    async for e in db.usage_events.find({"user_id": wid, "feature": "call_bandwidth"}, {"_id": 0, "meta": 1, "credits": 1, "created_at": 1}).sort("created_at", -1).limit(3000):
+    async for e in db.usage_events.find({"user_id": wid, "feature": "call_bandwidth"}, {"_id": 0, "meta": 1, "credits": 1, "credits_exact": 1, "created_at": 1}).sort("created_at", -1).limit(3000):
         r = row(_sess_key(e), (e.get("meta") or {}).get("conversation_id"))
-        r["data_credits"] += int(e.get("credits") or 0); r["data_mb"] += float((e.get("meta") or {}).get("mb") or 0)
+        r["data_credits"] += round(float(e.get("credits_exact", e.get("credits", 0)) or 0), 3); r["data_mb"] += float((e.get("meta") or {}).get("mb") or 0)
         at = e.get("created_at") or ""
         if not r["with_ai"]:
             r["started_at"] = min(r["started_at"] or at, at); r["ended_at"] = max(r["ended_at"] or "", at)

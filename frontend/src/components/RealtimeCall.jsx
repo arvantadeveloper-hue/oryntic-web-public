@@ -237,7 +237,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       tickRef.current = setInterval(async () => {
         try { await api.post(`/realtime/calls/${callIdRef.current}/tick`, { elapsed_seconds: secs() }); onRefresh && onRefresh(); }
         catch (e) { if (e?.response?.status === 402) { toast.error(e.response.data?.detail || "Kredit habis"); hangup(); } }
-      }, 60000);
+      }, 10000);
     };
     pc.onconnectionstatechange = () => {
       if (stale() || pcRef.current !== pc) return;

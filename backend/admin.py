@@ -86,8 +86,11 @@ async def overview(_: dict = Depends(require_platform_admin)):
     consumed = 0
     breakdown = {}
     async for e in db.usage_events.find({}):
-        consumed += e.get("credits", 0)
-        breakdown[e["feature"]] = breakdown.get(e["feature"], 0) + e.get("credits", 0)
+        c = float(e.get("credits_exact", e.get("credits", 0)) or 0)  # exact metered usage
+        consumed += c
+        breakdown[e["feature"]] = breakdown.get(e["feature"], 0) + c
+    consumed = round(consumed, 2)
+    breakdown = {k: round(v, 2) for k, v in breakdown.items()}
     return {
         "users": users, "personas": personas, "tasks": tasks, "conversations": conversations,
         "reminders": reminders, "tasks_completed": completed, "tasks_failed": failed,
@@ -293,11 +296,11 @@ def _aggregate_usage(events: list, wid: str):
     for e in events:
         actor = (e.get("meta") or {}).get("actor_id") or wid
         feat = e.get("feature") or "lainnya"
-        c = int(e.get("credits") or 0)
-        by_user[actor] = by_user.get(actor, 0) + c
-        by_feature[feat] = by_feature.get(feat, 0) + c
+        c = round(float(e.get("credits_exact", e.get("credits", 0)) or 0), 6)
+        by_user[actor] = round(by_user.get(actor, 0) + c, 2)
+        by_feature[feat] = round(by_feature.get(feat, 0) + c, 2)
         d = (e.get("created_at") or "")[:10]
-        daily[d] = daily.get(d, 0) + c
+        daily[d] = round(daily.get(d, 0) + c, 2)
     return by_user, by_feature, daily
 
 
@@ -308,7 +311,7 @@ async def usage_report(days: int = 30, admin: dict = Depends(require_admin)):
     wid = workspace_id(admin)
     now = datetime.now(timezone.utc)
     since = (now - timedelta(days=days)).isoformat()
-    events = await db.usage_events.find({"user_id": wid, "created_at": {"$gte": since}}, {"_id": 0, "feature": 1, "credits": 1, "meta": 1, "created_at": 1}).to_list(50000)
+    events = await db.usage_events.find({"user_id": wid, "created_at": {"$gte": since}}, {"_id": 0, "feature": 1, "credits": 1, "credits_exact": 1, "meta": 1, "created_at": 1}).to_list(50000)
     members = await db.users.find({"id": {"$in": await member_ids(wid)}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}).to_list(500)
     names = {m["id"]: m for m in members}
     by_user, by_feature, daily = _aggregate_usage(events, wid)

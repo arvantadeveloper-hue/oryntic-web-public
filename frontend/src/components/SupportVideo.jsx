@@ -138,7 +138,7 @@ export function AvatarVideoView({ track, remaining, credits, name, onStop, state
       {!track && <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/70"><Loader2 size={22} className="animate-spin" /> <span className="text-xs">{state === "starting" ? "Menyiapkan avatar video…" : "Menunggu video…"}</span></div>}
       <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur"><Video size={12} className="text-[#8FB0FF]" /> {name} · video</span>
       <span className={`absolute right-3 top-3 rounded-full px-2.5 py-1 font-mono text-[11px] font-bold backdrop-blur ${(remaining || 0) <= 120 ? "bg-amber-500/80 text-black" : "bg-black/60 text-white"}`} data-testid="rt-video-remaining" title="Sisa waktu video">{mm}:{ss}</span>
-      <span className="absolute bottom-3 left-3 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] text-white/80 backdrop-blur" data-testid="rt-video-credits"><Coins size={11} /> {credits} kredit</span>
+      <span className="absolute bottom-3 left-3 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[11px] text-white/80 backdrop-blur" data-testid="rt-video-credits"><Coins size={11} /> {Math.round(credits || 0)} kredit</span>
       <button onClick={onStop} className="absolute bottom-3 right-3 rounded-full bg-white/15 px-3 py-1.5 text-[11px] font-bold text-white backdrop-blur hover:bg-[#EF4444]" data-testid="rt-video-stop">Matikan video</button>
     </div>
   );

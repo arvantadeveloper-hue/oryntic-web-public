@@ -137,8 +137,9 @@ DEFAULT_CATALOG = {
                 comp("per_second", "Per detik video keluaran", "video_second", 1, 0.60, modality="video", direction="output")]},
         ]},
         {"id": "oryntix", "label": "Infrastruktur Oryntix", "docs_url": "", "margin_pct": None, "tax_pct": None, "services": [
-            {"id": "turn-relay", "label": "Data panggilan teman (TURN)", "kind": "infra", "doc_model": "", "margin_pct": None, "tax_pct": None, "components": [
-                comp("per_gb", "Per GB relay", "GB", 1, 0.50, margin_pct=50.0)]},
+            {"id": "turn-relay", "label": "Data panggilan teman (TURN metered.ca)", "kind": "infra", "doc_model": "", "margin_pct": None, "tax_pct": None, "components": [
+                comp("per_gb", "Per GB relay (ingress + egress)", "GB", 1, 0.50, margin_pct=50.0,
+                     note="Tarif overage metered.ca: $0,40/GB (Growth), $0,20/GB (Business), $0,10/GB (Enterprise).")]},
             {"id": "persona-profile", "label": "Pembuatan profil persona", "kind": "infra", "doc_model": "", "margin_pct": None, "tax_pct": None, "components": [
                 comp("per_profile", "Per profil", "profile", 1, 0.026)]},
         ]},

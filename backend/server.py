@@ -81,9 +81,18 @@ app.include_router(realtime_voice_router)
 app.include_router(tools_router)
 
 
+WS_IDLE_SEC = 90  # clients ping every 25 s; a socket silent this long is half-open → drop it to free memory
+WS_MAX_MSG = 4096  # the socket only carries pings and small signaling frames; processing happens over HTTP endpoints
+
+
+async def _ws_recv(ws: WebSocket) -> str:
+    raw = await asyncio.wait_for(ws.receive_text(), timeout=WS_IDLE_SEC)
+    return raw[:WS_MAX_MSG]
+
+
 @app.websocket("/api/ws/user")
 async def ws_user(ws: WebSocket, token: str = ""):
-    """Per-user event channel: reminder_due, incoming_call, task_update, message_new (replaces GET polling in the app)."""
+    """Per-user event channel: TRANSPORT ONLY (server → client triggers + client pings). No business logic here."""
     u = await user_from_token(token)
     if not u:
         await ws.close(code=4401)
@@ -91,16 +100,19 @@ async def ws_user(ws: WebSocket, token: str = ""):
     await user_manager.connect(u["id"], ws)
     try:
         while True:
-            await ws.receive_text()  # pings only; server → client
-    except WebSocketDisconnect:
+            await _ws_recv(ws)  # pings only; server → client
+    except (WebSocketDisconnect, asyncio.TimeoutError, Exception):
         user_manager.disconnect(u["id"], ws)
-    except Exception:
-        user_manager.disconnect(u["id"], ws)
+        try:
+            await ws.close(code=1000)
+        except Exception:
+            pass
 
 
 
 @app.websocket("/api/ws/{cid}")
 async def ws_meeting(ws: WebSocket, cid: str, token: str = ""):
+    """Conversation channel: TRANSPORT ONLY — WebRTC signaling relay + pings; everything else goes to /api endpoints."""
     u = await user_from_token(token)
     if not u:
         await ws.close(code=4401)
@@ -109,23 +121,25 @@ async def ws_meeting(ws: WebSocket, cid: str, token: str = ""):
     if not _can_access(conv, u):
         await ws.close(code=4403)
         return
+    del conv  # nothing else is kept per connection
     await manager.connect(cid, ws)
     me = {"from": u["id"], "from_name": u.get("name") or "Peserta"}
     try:
         while True:
-            raw = await ws.receive_text()
+            raw = await _ws_recv(ws)
             try:
                 msg = json.loads(raw)
             except Exception:
                 continue
             if isinstance(msg, dict) and msg.get("type") == "rtc":  # WebRTC signaling relay (offer/answer/ice/join/leave)
                 await manager.broadcast(cid, {**msg, **me}, exclude=ws)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, asyncio.TimeoutError, Exception):
         await manager.broadcast(cid, {"type": "rtc", "kind": "leave", **me})
         await manager.disconnect(cid, ws)
-    except Exception:
-        await manager.broadcast(cid, {"type": "rtc", "kind": "leave", **me})
-        await manager.disconnect(cid, ws)
+        try:
+            await ws.close(code=1000)
+        except Exception:
+            pass
 
 app.add_middleware(
     CORSMiddleware,

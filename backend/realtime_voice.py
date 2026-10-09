@@ -1,5 +1,4 @@
 import logging
-import math
 import os
 import json
 import re
@@ -16,7 +15,7 @@ from llm import record_usage, quota_exceeded, quota_message
 from chat import _can_access, _persona_system, _history_text
 from realtime import notify
 from ratelimit import rate_limit, get_limits, set_limits
-from pricing import usd_to_credits, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates, REALTIME_MODELS, DEFAULT_REALTIME_MODEL, realtime_credits_per_min, realtime_model_prices
+from pricing import usd_to_credits, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates, REALTIME_MODELS, DEFAULT_REALTIME_MODEL, realtime_credits_per_min
 from tools import get_routing, TASK_CONTEXT
 from behaviour import get_behaviour, turn_detection
 from llm import MODEL_CATALOG, model_label
@@ -543,13 +542,12 @@ async def report_usage(call_id: str, x: UsageIn, u: dict = Depends(current_user)
     p = await get_pricing()
     usd = realtime_usage_usd(p, x.usage or {}, call.get("model"))
     exact = usd_to_credits(p, usd, "realtime_call")
-    acc = float(call.get("usage_credits_exact") or 0) + exact
-    charged = int(acc) - int(call.get("usage_credits_billed") or 0)
-    if charged > 0:
-        await record_usage(u["id"], "realtime_call", charged, {"call_id": call["id"], "conversation_id": call["conversation_id"], "usd": round(usd, 6)})
-    await db.realtime_calls.update_one({"id": call["id"]}, {"$set": {"usage_credits_exact": acc, "usage_credits_billed": int(acc)},
-                                                            "$inc": {"credits": charged, "usage_usd": usd}})
-    return {"charged_now": charged, "credits_total": int(call.get("credits") or 0) + charged, "usd": round(usd, 6)}
+    acc = round(float(call.get("usage_credits_exact") or 0) + exact, 6)
+    if exact > 0:  # fully metered: the exact fraction is billed, the wallet carries the remainder
+        await record_usage(u["id"], "realtime_call", exact, {"call_id": call["id"], "conversation_id": call["conversation_id"], "usd": round(usd, 6)})
+    await db.realtime_calls.update_one({"id": call["id"]}, {"$set": {"usage_credits_exact": acc},
+                                                            "$inc": {"credits": exact, "usage_usd": usd}})
+    return {"charged_now": round(exact, 3), "credits_total": round(float(call.get("credits") or 0) + exact, 3), "usd": round(usd, 6)}
 
 
 @router.get("/realtime/vision-rate")
@@ -573,15 +571,17 @@ async def snapshot(call_id: str, u: dict = Depends(current_user)):
 
 
 async def _bill(call: dict, elapsed: int, u: dict) -> dict:
-    minutes = max(1, math.ceil(elapsed / 60)) if elapsed > 0 else 0
-    delta = minutes - int(call.get("billed_minutes") or 0)
-    charged = 0
+    """Fully metered: bill the exact seconds not yet billed (prorated from credits_per_min)."""
+    secs = max(0, int(elapsed))
+    delta = secs - int(call.get("billed_seconds") or 0)
+    charged = 0.0
     if delta > 0:
-        charged = delta * int(call["credits_per_min"])
-        await record_usage(u["id"], "realtime_call", charged, {"call_id": call["id"], "conversation_id": call["conversation_id"], "minutes": delta})
-    await db.realtime_calls.update_one({"id": call["id"]}, {"$set": {"billed_minutes": minutes, "seconds": elapsed},
+        charged = delta * float(call["credits_per_min"]) / 60.0
+        await record_usage(u["id"], "realtime_call", charged, {"call_id": call["id"], "conversation_id": call["conversation_id"], "seconds": delta})
+    await db.realtime_calls.update_one({"id": call["id"]}, {"$set": {"billed_seconds": secs, "billed_minutes": round(secs / 60, 3), "seconds": elapsed},
                                                             "$inc": {"credits": charged}})
-    return {"billed_minutes": minutes, "credits_total": int(call.get("credits") or 0) + charged, "charged_now": charged}
+    total = round(float(call.get("credits") or 0) + charged, 3)
+    return {"billed_seconds": secs, "billed_minutes": round(secs / 60, 3), "credits_total": total, "charged_now": round(charged, 3)}
 
 
 @router.post("/realtime/calls/{call_id}/tick")

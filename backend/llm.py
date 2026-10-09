@@ -1,6 +1,5 @@
 import os
 import json
-import math
 from typing import Optional
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
@@ -82,7 +81,6 @@ PROFILE_CREDITS = 8
 STT_CREDITS = 5
 TTS_CREDITS = 4
 VISION_CREDITS = 6
-MIN_CREDITS = 1
 
 
 def _extract_text(resp) -> str:
@@ -93,54 +91,64 @@ def _extract_text(resp) -> str:
     return getattr(resp, "text", None) or getattr(resp, "content", None) or str(resp)
 
 
-def text_credits(input_text: str, output_text: str, model_key: str | None = None) -> int:
-    """Credits for one text exchange. Per-model list price when model_key is known; otherwise the flat text rate."""
+def text_credits(input_text: str, output_text: str, model_key: str | None = None) -> float:
+    """Exact (fractional) credits for one text exchange — no rounding, no minimum; the wallet carries the remainder."""
     from pricing import model_text_credits, _cache as _pricing_cache
     exact = model_text_credits(_pricing_cache["pricing"], model_key, len(input_text or ""), len(output_text or "")) if model_key else None
     if exact is None:
         chars = len(input_text or "") + len(output_text or "")
         exact = chars / 1000 * RATES["text_per_1k"]
-    return max(MIN_CREDITS, math.ceil(exact))
+    return round(max(0.0, float(exact)), 6)
 
 
-async def record_usage(user_id: str, feature: str, credits: int, meta: dict | None = None):
-    """Record a usage event and deduct credits from the WORKSPACE OWNER's wallet. Returns balance_after."""
+async def record_usage(user_id: str, feature: str, credits: float, meta: dict | None = None):
+    """Record a metered usage event and deduct credits from the WORKSPACE OWNER's wallet.
+
+    Credits are billed as exact fractions: only whole credits leave the wallet, the remainder is carried
+    in `users.credits_frac` until it reaches 1. Returns balance_after (whole credits).
+    """
+    exact = round(max(0.0, float(credits or 0)), 6)
     actor = await db.users.find_one({"id": user_id})
     owner_id = (actor.get("owner_id") if actor else None) or user_id
     owner = await db.users.find_one({"id": owner_id}) or actor
     balance = int(owner.get("credits", 0)) if owner else 0
-    new_balance = max(0, balance - credits)
-    await db.users.update_one({"id": owner_id}, {"$set": {"credits": new_balance}})
+    carried = float(owner.get("credits_frac") or 0.0) if owner else 0.0
+    total = carried + exact
+    whole = int(total // 1)
+    frac = round(total - whole, 6)
+    new_balance = max(0, balance - whole)
+    await db.users.update_one({"id": owner_id}, {"$set": {"credits": new_balance, "credits_frac": frac}})
     meta = dict(meta or {})
     if owner_id != user_id:
         meta["actor_id"] = user_id
     await db.usage_events.insert_one({
-        "id": new_id(), "user_id": owner_id, "feature": feature, "credits": credits,
+        "id": new_id(), "user_id": owner_id, "feature": feature, "credits": whole, "credits_exact": exact,
         "meta": meta, "created_at": now_iso(),
     })
-    await db.credit_transactions.insert_one({
-        "id": new_id(), "user_id": owner_id, "type": "usage", "amount": -credits,
-        "balance_after": new_balance, "description": f"Usage: {feature}",
-        "meta": meta, "created_at": now_iso(),
-    })
+    if whole:
+        await db.credit_transactions.insert_one({
+            "id": new_id(), "user_id": owner_id, "type": "usage", "amount": -whole,
+            "balance_after": new_balance, "description": f"Usage: {feature}",
+            "meta": meta, "created_at": now_iso(),
+        })
     return new_balance
 
 
-async def user_today_usage(user_id: str) -> int:
-    """Credits consumed by this user (as actor) so far today (UTC)."""
+async def user_today_usage(user_id: str) -> float:
+    """Exact credits consumed by this user (as actor) so far today (UTC), fractions included."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     q = {"created_at": {"$gte": today}, "$or": [
         {"meta.actor_id": user_id},
         {"$and": [{"user_id": user_id}, {"meta.actor_id": {"$exists": False}}]},
     ]}
     events = await db.usage_events.find(q).to_list(10000)
-    return sum(e.get("credits", 0) for e in events)
+    return round(sum(float(e.get("credits_exact", e.get("credits", 0)) or 0) for e in events), 4)
 
 
 def quota_message(over: dict) -> str:
     if over.get("trial_expired"):
         return "Masa percobaan workspace Anda telah berakhir. Beli paket kredit di menu Kredit untuk melanjutkan."
-    return f"Kuota kredit harian Anda habis ({over['used']}/{over['limit']}). Hubungi admin atau coba lagi besok."
+    return f"Kuota kredit harian Anda habis ({round(float(over['used']))}/{over['limit']}). Hubungi admin atau coba lagi besok."
 
 
 async def _workspace_owner(user: dict) -> dict:
