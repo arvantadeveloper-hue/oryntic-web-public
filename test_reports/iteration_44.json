@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 44 — Regression after chat/server/tools split (chat_media.py, chat_core.py, startup.py, docbuild.py) and the LiveAvatar full-width UI tweak. Backend: 15/15 pytest cases pass covering smoke, startup log, scheduler loop, image/image_edit offers (with cancel-tool), video_offer (3 valid branches), drive_save turn, docbuild (DOCX>2000, PDF %PDF header), tools re-export, module imports, chat.video_offer is chat_media.video_offer, /api/auth/login, /api/realtime/status (gpt-live-1), /api/admin/pricing (image=57), support-persona chat (403c8205...) returns final text + credits, and /api/ws/user WS accept. Frontend: admin login OK, /admin tabs (Ringkasan/Pengguna/Tugas/Tarif/Katalog Harga/Asisten) render without console errors; /social shows 'Posting terjadwal'; demo login + chat 403c8205... shows call-mode-btn and no console errors. Full call-with-video flow could not be exercised (no fake mic/camera), but code inspection of RealtimeCall.jsx (rt-video-stage: 'w-full flex-1 min-h-0') and SupportVideo.jsx AvatarVideoView (rt-avatar-video: 'relative flex h-full w-full ... rounded-2xl', no max-w-*) confirms the stage spans the full width of the call overlay with no 768px max-width.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_refactor_regression.py",
+    "/app/test_reports/pytest/iter44.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "chat_media.py keeps a clean split (helpers _image_request/_image_confirm_card/_render_single_image/_image_turn, _video_params/_video_blocker/_video_offer_text/video_offer/_run_video_bg, _drive_* actions/_drive_turn). Re-exports via chat.py preserve the public surface (chat.video_offer is chat_media.video_offer verified).",
+    "startup.py register_lifecycle wires both startup (object-storage init + 'Oryntix API started' log + scheduler task) and shutdown correctly; the dynamic social_schedules row inserted at scheduled_at=2020-01-01 is picked up within ~3s and marked failed with results[0].error='LinkedIn belum terhubung.' — scheduler loop is healthy.",
+    "docbuild.py build_docx/build_pdf produce valid output (DOCX>2KB, PDF starts with %PDF). tools.py still re-exports both symbols — downstream callers unaffected.",
+    "RealtimeCall.jsx line 402: rt-video-stage uses flex-1 min-h-0 w-full and renders <AvatarVideoView> inside w-full flex-1 min-h-0 wrapper; AvatarVideoView root has h-full w-full with no max-w — refactor goal (no 768px cap) satisfied by code.",
+    "Login response field is `access_token` (not `token`); creds.py pattern (env-only) is good — tests updated to match. Not a bug, just noting for future test agents.",
+    "No tracebacks in /var/log/supervisor/backend.err.log since the last 'Oryntix API started' line."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_refactor_regression.py (new)"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% smoke (admin tabs, /social, chat page, no console errors)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (TEST_DEMO_PASSWORD); admin@aivora.ai / Aivora!Admin2026 (ADMIN_PASSWORD) — both read from backend/.env via tests/creds.py",
+  "seed_data_creation": "Scheduler test inserts a transient social_schedules doc with id=uuid4 and deletes it in the finally block — no residue.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Use /app/backend/tests/test_refactor_regression.py as the regression suite for this refactor. Run with: `cd /app/backend && python -m pytest tests/test_refactor_regression.py -v -o addopts='' --junitxml=/app/test_reports/pytest/iterN.xml`. Login endpoint returns `access_token` (not `token`). /api/auth/me requires the /auth prefix. Admin page uses data-testid auth-submit-btn; the first 'Masuk dengan Google' button triggers Google OAuth — always target data-testid=auth-submit-btn. The LiveAvatar full-width UI change is verified by code inspection (SupportVideo.jsx AvatarVideoView root: 'flex h-full w-full ... rounded-2xl', no max-w-*) because a sandbox browser has no camera/mic to trigger the actual video state. If needed, use Playwright --use-fake-ui-for-media-stream to exercise the call flow.",
+  "rca of the issue": "No regressions found. Refactor is behaviour-preserving across backend chat media turns, startup lifecycle, document builders, and frontend admin/social/chat smoke."
+}
