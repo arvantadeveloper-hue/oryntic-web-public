@@ -89,7 +89,7 @@ export function RenderingBox({ kind = "image", dark = false, aspect = "" }) {
   );
 }
 
-const TOOL_LABEL = (pt) => pt.kind === "social" ? `Posting ke ${(pt.providers || []).join(", ")}`
+const TOOL_LABEL = (pt) => pt.kind === "social" ? `${pt.schedule_at ? "Jadwalkan posting" : "Posting"} ke ${(pt.providers || []).join(", ")}`
   : pt.kind === "video" ? `Render video ±5 detik · ±${pt.credits} kredit`
   : pt.kind === "image_edit" ? `Edit gambar terakhir · ±${pt.credits} kredit`
   : pt.count > 1 ? `Buat ${pt.count} gambar (tugas Ruang Kerja) · ±${pt.credits} kredit` : `Buat gambar · ±${pt.credits} kredit`;

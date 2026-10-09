@@ -161,6 +161,8 @@ async def _scheduler_loop():
             await scheduler_tick()
             await tasks_tick()
             await archive_tick()
+            from social import social_tick
+            await social_tick()
         except Exception as e:
             logger.error(f"scheduler error: {e}")
         await asyncio.sleep(20)

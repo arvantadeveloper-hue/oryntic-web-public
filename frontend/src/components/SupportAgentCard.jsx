@@ -3,6 +3,7 @@ import { Loader2, Save, Headset, Video, RefreshCw, CheckCircle2, Image as ImageI
 import { toast } from "sonner";
 import { api } from "../lib/api";
 
+const SANDBOX_AVATAR_ID = "dd73ea75-1218-4ef3-92ce-606d5f7fbc0a";
 const SEL = "input-dark w-full py-2 text-sm";
 const Row = ({ label, hint, children, className = "" }) => (
   <label className={`block ${className}`}><span className="mb-1 block text-xs font-semibold text-slate-700">{label}</span>{children}{hint && <span className="mt-1 block text-[11px] text-slate-400">{hint}</span>}</label>
@@ -38,7 +39,12 @@ export const SupportAgentCard = () => {
       toast.success("Pengaturan Oryntix disimpan — berlaku untuk percakapan & panggilan berikutnya");
     } catch (e) { toast.error(e?.response?.data?.detail || "Gagal menyimpan"); } finally { setBusy(false); }
   };
-  const pickAvatar = (a) => setF({ ...f, avatar_id: a.id, avatar_name: a.name, avatar_preview: a.preview || "" });
+  const pickAvatar = (a) => {
+    const isSandboxAvatar = a.id === SANDBOX_AVATAR_ID;
+    // the chosen avatar becomes the ACTIVE one: its preview is the profile photo and sandbox follows the choice (sandbox only allows Wayne)
+    setF({ ...f, avatar_id: a.id, avatar_name: a.name, avatar_preview: a.preview || "", portrait: a.preview || f.portrait, sandbox: isSandboxAvatar });
+    toast.message(isSandboxAvatar ? "Avatar sandbox dipilih — mode sandbox aktif" : `Avatar ${a.name} aktif — mode sandbox dimatikan, foto profil ikut avatar. Simpan untuk menerapkan.`);
+  };
 
   return (
     <div data-testid="support-agent-settings">

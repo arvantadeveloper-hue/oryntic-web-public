@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone, timedelta
 import re
 import logging
 import asyncio
@@ -917,10 +918,55 @@ async def _social_turn(ctx, plan: dict):
             yield ev
         return
     caption = (plan.get("caption") or "").strip() or (media or {}).get("name") or ""
-    text = f"Siap posting {'teks' if kind == 'text' else kind} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** dengan caption:\n\n> {caption}\n\nLanjutkan?"
+    when = _schedule_utc(plan.get("schedule_at"), ctx.user)
+    if plan.get("schedule_at") and not when:
+        async for ev in _emit_final(ctx, "Waktunya sudah lewat atau tidak kubaca dengan jelas — sebutkan tanggal & jamnya ya (mis. \"besok jam 09.00\").", 0, {"tool": "social_publish", "error": True}):
+            yield ev
+        return
+    pt = {"kind": "social", "providers": providers, "caption": caption, "content_kind": kind, "credits": 0, "media_path": (media or {}).get("path")}
+    if when:
+        pt["schedule_at"], pt["schedule_label"] = when
+        text = f"Siap **menjadwalkan** posting {'teks' if kind == 'text' else kind} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** pada **{when[1]}** dengan caption:\n\n> {caption}\n\nLanjutkan?"
+    else:
+        text = f"Siap posting {'teks' if kind == 'text' else kind} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** dengan caption:\n\n> {caption}\n\nLanjutkan?"
     yield ctx.sse(delta=text)
-    async for ev in _emit_final(ctx, text, 0, {"pending_tool": {"kind": "social", "providers": providers, "caption": caption, "content_kind": kind, "credits": 0, "media_path": (media or {}).get("path")}}):
+    async for ev in _emit_final(ctx, text, 0, {"pending_tool": pt}):
         yield ev
+
+
+def _schedule_utc(local: str | None, user: dict):
+    """'YYYY-MM-DDTHH:MM' in the user's timezone → (UTC ISO, human label) or None when empty/invalid/past."""
+    if not local:
+        return None
+    from zoneinfo import ZoneInfo
+    tz = (user.get("settings") or {}).get("timezone") or "Asia/Jakarta"
+    try:
+        z = ZoneInfo(tz)
+    except Exception:
+        z = ZoneInfo("Asia/Jakarta")
+    try:
+        dt = datetime.fromisoformat(local[:16]).replace(tzinfo=z)
+    except Exception:
+        return None
+    if dt <= datetime.now(timezone.utc) + timedelta(minutes=1):
+        return None
+    hari = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"][dt.weekday()]
+    bulan = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"][dt.month - 1]
+    return dt.astimezone(timezone.utc).isoformat(), f"{hari}, {dt.day} {bulan} {dt.year} {dt:%H:%M} ({tz})"
+
+
+async def social_schedule_from_chat(cid: str, u: dict, pt: dict, app_url: str, persona_id, persona_name, portrait) -> dict:
+    from social import publish as _p, PublishIn, schedule_post  # noqa: F401
+    kind = pt.get("content_kind") or "image"
+    media = await _latest_media(cid, kind) if kind in ("image", "video") else None
+    if kind in ("image", "video") and not media:
+        raise HTTPException(400, f"Belum ada {kind} di percakapan ini untuk dijadwalkan.")
+    x = PublishIn(providers=pt["providers"], kind=kind, text=pt.get("caption") or "", title=(media or {}).get("name") or "", media_path=(media or {}).get("path"),
+                  drive_id=(media or {}).get("drive_id"), app_url=app_url or "https://oryntix.app", source={"conversation_id": cid, "scheduled": True})
+    job = await schedule_post(u["id"], x, pt["schedule_at"], pt.get("schedule_label") or pt["schedule_at"],
+                              {"conversation_id": cid, "persona_id": persona_id, "persona_name": persona_name, "portrait": portrait})
+    return {"job": job, "text": f"Dijadwalkan ✅ — {'teks' if kind == 'text' else kind} akan diposting ke **{', '.join(SOCIAL_LABEL.get(p, p) for p in pt['providers'])}** pada **{job['scheduled_label']}**.\n\n"
+                                f"> {pt.get('caption') or ''}\n\nAku akan mengabari di chat ini setelah terkirim. Lihat atau batalkan jadwal di menu [Social Media](/social)."}
 
 
 class SocialChatIn(BaseModel):
@@ -1339,7 +1385,7 @@ async def _typed_intercepts(ctx: ReplyCtx):
     plan = None
     if GITHUB_RE.search(ctx.user_text) or SOCIAL_RE.search(ctx.user_text):
         # repo/PR/MR and social-media requests are tool calls, never a "big task" offer
-        plan = await plan_tool(ctx.user_text, ctx.prompt)
+        plan = await plan_tool(ctx.user_text, ctx.prompt, (ctx.user.get('settings') or {}).get('timezone'))
         if plan.get("tool", "none").startswith(("github_", "gitlab_", "social_")):
             async for ev in _tool_turn(ctx, plan):
                 yield ev
@@ -1356,7 +1402,7 @@ async def _typed_intercepts(ctx: ReplyCtx):
             yield ev
         return
     if not ctx.persona.get("builtin") and (wants_tool(ctx.user_text) or ((EDIT_RE.search(ctx.user_text) or ANIMATE_RE.search(ctx.user_text)) and await _latest_media(ctx.cid, "image"))):
-        plan = plan or await plan_tool(ctx.user_text, ctx.prompt)
+        plan = plan or await plan_tool(ctx.user_text, ctx.prompt, (ctx.user.get('settings') or {}).get('timezone'))
         if plan.get("tool") != "none":
             async for ev in _tool_turn(ctx, plan):
                 yield ev
@@ -1390,7 +1436,7 @@ async def _plain_reply(ctx: ReplyCtx):
             full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
     if not ctx.voice_mode and not tool_out and not ctx.persona.get("builtin") and is_media_refusal(ctx.user_text, full):
         # the model wrongly claimed it cannot render — render it anyway
-        plan = await plan_tool(ctx.user_text, ctx.prompt)
+        plan = await plan_tool(ctx.user_text, ctx.prompt, (ctx.user.get('settings') or {}).get('timezone'))
         if plan.get("tool") not in ("image", "image_edit", "video"):
             plan = {"tool": "video" if re.search(r"\b(video\w*|klip|clip|animasi|reels?)\b", ctx.user_text, re.I) else "image", "image_prompts": [ctx.user_text], "image_prompt": ctx.user_text, "video_prompt": ctx.user_text}
         async for ev in _tool_turn(ctx, plan):
@@ -1777,8 +1823,12 @@ async def run_tool(cid: str, mid: str, app_url: Optional[str] = None, choice: Op
     await db.messages.update_one({"id": mid}, {"$set": {"pending_tool.running": True}})
     if pt.get("kind") == "social":
         try:
-            out = await social_publish_from_chat(cid, u, pt["providers"], pt.get("caption") or "", pt.get("content_kind") or "image", app_url or "")
-            upd = {"content": out["text"], "tool": "social_publish"}
+            if pt.get("schedule_at"):
+                out = await social_schedule_from_chat(cid, u, pt, app_url or "", msg.get("persona_id"), msg.get("persona_name"), msg.get("portrait"))
+                upd = {"content": out["text"], "tool": "social_schedule", "social_schedule_id": out["job"]["id"]}
+            else:
+                out = await social_publish_from_chat(cid, u, pt["providers"], pt.get("caption") or "", pt.get("content_kind") or "image", app_url or "")
+                upd = {"content": out["text"], "tool": "social_publish"}
         except HTTPException as e:
             upd = {"content": f"Gagal memposting: {e.detail}", "tool": "social_publish", "error": True}
         await db.messages.update_one({"id": mid}, {"$set": upd, "$unset": {"pending_tool": ""}})

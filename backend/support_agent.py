@@ -70,7 +70,7 @@ async def support_persona() -> Optional[dict]:
     c = await get_config()
     if not c.get("enabled"):
         return None
-    return {"id": SUPPORT_ID, "user_id": PLATFORM_WID, "builtin": True, "name": c["name"], "summary": c["summary"], "portrait": c["portrait"],
+    return {"id": SUPPORT_ID, "user_id": PLATFORM_WID, "builtin": True, "name": c["name"], "summary": c["summary"], "portrait": c.get("portrait") or c.get("avatar_preview") or DEFAULT_CONFIG["portrait"],
             "model": c["model"], "voice_model": c["voice_model"], "voice": c["voice"], "tools": [],
             "profile": {"identity": {"name": c["name"], "summary": c["summary"]}, "system_instructions": c["system_prompt"]},
             "video_avatar": bool(c.get("video_enabled") and c.get("avatar_id") and os.environ.get("LIVEAVATAR_API_KEY")),
@@ -262,7 +262,10 @@ async def admin_get(_: dict = Depends(require_platform_admin)):
 
 @router.put("/admin/support-agent")
 async def admin_set(x: SupportConfigIn, _: dict = Depends(require_platform_admin)):
-    return await set_config(x.model_dump())
+    doc = x.model_dump()
+    if not doc.get("portrait") and doc.get("avatar_preview"):  # profile photo follows the chosen LiveAvatar avatar
+        doc["portrait"] = doc["avatar_preview"]
+    return await set_config(doc)
 
 
 @router.get("/admin/support-agent/avatars")
