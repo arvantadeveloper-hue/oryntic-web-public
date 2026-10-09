@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { vadUpdate, reportUsage, ContextPruner, runVoiceTool, isBackchannel, RESUME_AFTER_BACKCHANNEL, removeAllCallAudio, bargeMs, loadBehaviour, BEHAVIOUR } from "../lib/realtimeSession";
 import { captureFrame } from "../lib/peerAudio";
+import { LiveBridge, isLiveModel } from "../lib/liveBridge";
 import { MicPipeline, loadMicPrefs, saveMicPrefs } from "../lib/micPipeline";
 import { CallMoreMenu } from "./CallMoreMenu";
 import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingChatPanel";
@@ -53,12 +54,15 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
   const tickRef = useRef(null);
   const runIdRef = useRef(0);
   const prunerRef = useRef(null);
+  const liveRef2 = useRef(false); // call runs on GPT-Live (set from POST /realtime/calls)
   const remoteStreamRef = useRef(null);
   const isSupport = !!persona.builtin;
 
   const secs = () => (startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0);
 
-  const send = (ev) => { try { if (dcRef.current?.readyState === "open") dcRef.current.send(JSON.stringify(ev)); } catch (e) {} };
+  const bridgeRef = useRef(null); // GPT-Live protocol adapter (null for legacy Realtime sessions)
+  const rawSend = (ev) => { try { if (dcRef.current?.readyState === "open") dcRef.current.send(JSON.stringify(ev)); } catch (e) {} };
+  const send = (ev) => { if (bridgeRef.current) bridgeRef.current.send(ev); else rawSend(ev); };
   const inject = (text) => send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
   const video = useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject, phaseRef, enabled: isSupport });
   // one active response per session: queue response.create while one runs, flush on response.done
@@ -151,7 +155,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
         video.onInterrupt(); break;
       case "conversation.item.input_audio_transcription.completed": {
         const t = (ev.transcript || "").trim();
-        if (t && isBackchannel(t) && BEHAVIOUR.backchannel_resume && Date.now() - interruptedAtRef.current < (BEHAVIOUR.backchannel_window_ms || 8000)) {
+        if (t && !bridgeRef.current && isBackchannel(t) && BEHAVIOUR.backchannel_resume && Date.now() - interruptedAtRef.current < (BEHAVIOUR.backchannel_window_ms || 8000)) { // GPT-Live handles backchannels itself
           interruptedAtRef.current = 0;
           if (respActiveRef.current) { send({ type: "response.cancel" }); send({ type: "output_audio_buffer.clear" }); } // server VAD already started answering the "hmm"
           createResponse({ type: "response.create", response: { instructions: RESUME_AFTER_BACKCHANNEL(t) } });
@@ -194,6 +198,9 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
         flushLive();
         prunerRef.current?.prune();
         setPhase((p) => (p === "user_speaking" ? p : "listening")); break;
+      case "live.closed":
+        if (!endedRef.current && ev.reason && !["close_requested", "remote_hangup"].includes(ev.reason)) toast.error(ev.reason === "expired" ? "Sesi suara mencapai batas durasi" : "Sesi suara ditutup oleh penyedia");
+        break;
       case "error":
         if (ev.error?.code === "conversation_already_has_active_response") { respActiveRef.current = true; if (lastRespRef.current) respQueueRef.current.unshift(lastRespRef.current); break; }
         if (ev.error?.code === "response_cancel_not_active") break;
@@ -209,9 +216,17 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     try { acRef.current?.close(); } catch (e) {}
-    try { if (dcRef.current) { dcRef.current.onmessage = null; dcRef.current.onopen = null; dcRef.current.close(); } } catch (e) {}
-    try { if (pcRef.current) { pcRef.current.onconnectionstatechange = null; pcRef.current.ontrack = null; pcRef.current.close(); } } catch (e) {}
-    try { if (audioElRef.current) { audioElRef.current.srcObject = null; audioElRef.current.remove(); audioElRef.current = null; } } catch (e) {}
+    const dc = dcRef.current, pc = pcRef.current, el = audioElRef.current;
+    const graceful = !!bridgeRef.current && dc?.readyState === "open";
+    if (graceful) bridgeRef.current.close(); // GPT-Live: session.close first, release transports shortly after
+    bridgeRef.current = null;
+    const release = () => {
+      try { if (dc) { dc.onmessage = null; dc.onopen = null; dc.close(); } } catch (e) {}
+      try { if (pc) { pc.onconnectionstatechange = null; pc.ontrack = null; pc.close(); } } catch (e) {}
+      try { if (el) { el.srcObject = null; el.remove(); } } catch (e) {}
+    };
+    if (audioElRef.current === el) audioElRef.current = null;
+    if (graceful) setTimeout(release, 1500); else release();
   };
 
   // Build the WebRTC leg (peer, audio sink, data channel, SDP negotiate). Used for the first connect and for every reconnect.
@@ -222,8 +237,9 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; remoteStreamRef.current = e.streams[0]; monitor(e.streams[0]); if (video.state === "on") { video.attachStream(e.streams[0]); audioEl.muted = true; } };
     streamRef.current.getTracks().forEach((t) => pc.addTrack(t, streamRef.current));
     const dc = pc.createDataChannel("oai-events"); dcRef.current = dc;
-    prunerRef.current = new ContextPruner({ send });
-    dc.onmessage = (e) => { try { handleEvent(JSON.parse(e.data)); } catch (err) {} };
+    prunerRef.current = liveRef2.current ? null : new ContextPruner({ send }); // GPT-Live manages its own context
+    bridgeRef.current = liveRef2.current ? new LiveBridge({ send: rawSend, emit: handleEvent }) : null;
+    dc.onmessage = (e) => { try { const ev = JSON.parse(e.data); if (bridgeRef.current) bridgeRef.current.onMessage(ev); else handleEvent(ev); } catch (err) {} };
     dc.onopen = () => {
       if (stale()) return;
       reconnectRef.current.attempts = 0;
@@ -275,7 +291,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
     try {
       const c = await api.post("/realtime/calls", { conversation_id: cid, opening });
       if (stale()) { api.post(`/realtime/calls/${c.data.call_id}/end`, { elapsed_seconds: 0 }).catch(() => {}); return; }
-      callIdRef.current = c.data.call_id; setCpm(c.data.credits_per_min);
+      callIdRef.current = c.data.call_id; setCpm(c.data.credits_per_min); liveRef2.current = !!c.data.live || isLiveModel(c.data.model);
       const mic = new MicPipeline(micPrefs);
       const stream = await mic.start();
       if (stale()) { mic.stop(); return; }

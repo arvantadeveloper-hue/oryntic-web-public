@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 41 — Fractional metering + voice per-second billing + WebSocket transport (90s idle, 4KB cap). 11/11 backend tests pass against the public preview URL. Verified: 3 short chats drop wallet by <=1 whole credit (fractional carried in users.credits_frac), chat messages persist via /api/conversations/{cid}/messages, voice tick 7s charges ~73/60*7=8.517 credits (not a whole minute) and the 10s delta is ~12.167, usage report bills exact fractions, /api/support/video-config exposes credits_per_sec, /api/wallet consumed is 2-decimals and available stays int, /api/admin/usage-report returns by_user/by_feature/daily, WebSocket user channel stays open for 30s with pings every 10s, idle socket is closed by the server at ~90s, /api/ws/{cid} relays rtc frames between two clients, and an invalid token is rejected (server closes pre-accept so the handshake returns HTTP 403 instead of the explicit 4401 close code — this is Starlette behaviour, not a bug).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/ws/user?token=invalid",
+        "issue": "The server calls ws.close(code=4401) BEFORE ws.accept(), so Starlette aborts the handshake with HTTP 403 and the custom 4401 close code never reaches the client. Clients that rely on parsing 4401 to show a specific error (vs transient disconnect) will see a generic connect failure. If 4401 must be observable, accept() first then close with 4401."
+      },
+      {
+        "endpoint": "/api/wallet",
+        "issue": "daily_used is forced to 0 when daily_credit_limit=0 (demo admin). Spec says 'daily_used reflects fractional usage' — this is only observable for members with a quota. Not a regression, just a note."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter41_fractional_credits.py",
+    "/app/test_reports/pytest/iter41.xml"
+  ],
+  "action_items": [
+    "Optional: in server.ws_user/ws_meeting, call await ws.accept() before close(code=4401/4403) so the custom close code reaches the client (currently clients see an HTTP 403 handshake rejection)."
+  ],
+  "critical_code_review_comments": [
+    "llm.record_usage correctly carries fractional remainders in users.credits_frac and inserts usage_events with credits_exact (verified: 3 short chats dropped available by 0, carry grew to 0.35).",
+    "realtime_voice._bill prorates per-second from credits_per_min/60 — verified 7s=8.517, +10s=12.167 for cpm=73.",
+    "realtime_voice.report_usage records fractional credits via record_usage (no int rounding on the way in).",
+    "server.ws_user / ws_meeting are transport-only and respect WS_IDLE_SEC=90 and WS_MAX_MSG=4096 (truncation on receive).",
+    "chat.py is 1863 lines — above the 700-line split guideline; consider splitting the SSE pipeline, tool-call dispatcher and voice helpers into separate modules.",
+    "realtime_voice.py is 614 lines — borderline; splitting the tool definitions (big static dicts) into a tools module would help readability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter41_fractional_credits.py"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "demo@aivora.ai / demo123456 (workspace owner, 1000 credits restored after testing); admin@aivora.ai / Aivora!Admin2026 (platform admin, used for /api/admin/usage-report).",
+  "seed_data_creation": "None — reused the demo user's existing private conversation created via /api/conversations/direct.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Fractional credit metering, per-second voice billing, WS transport (90s idle + 4KB cap) all verified end-to-end on the public URL. Demo credits were restored to 1000 / credits_frac=0.0 via a direct Mongo write after the tests consumed ~7 credits (mostly voice ticks). The idle-close WS test takes ~90s so the full suite runs in ~2m16s. Previous iteration tests (iter40 pricing-catalog) were not re-run — they test an independent surface.",
+  "rca of the issue": "N/A — no bugs blocking the fractional-metering spec. The only quasi-issue is the pre-accept close on invalid WS tokens: Starlette turns ws.close(code=4401) before accept() into an HTTP 403 handshake rejection, so clients can't read the 4401 code. Mitigation: await ws.accept() first, then await ws.close(code=4401)."
+}

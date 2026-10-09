@@ -1,6 +1,11 @@
 import { API_BASE, getToken, api } from "./api";
+import { LiveBridge, isLiveModel } from "./liveBridge";
 
-export const reportUsage = (callId, ev) => { if (ev?.type === "response.done" && ev.response?.usage) api.post(`/realtime/calls/${callId}/usage`, { usage: ev.response.usage }).catch(() => {}); };
+export const reportUsage = (callId, ev) => {
+  if (!callId) return;
+  if (ev?.type === "response.done" && ev.response?.usage) api.post(`/realtime/calls/${callId}/usage`, { usage: ev.response.usage }).catch(() => {});
+  else if (ev?.type === "live.backend_usage" && ev.usage) api.post(`/realtime/calls/${callId}/usage`, { usage: ev.usage, kind: "backend" }).catch(() => {}); // GPT-Live: delegated brain-model tokens
+};
 
 // Same semantic-VAD mapping as backend `vad_config`; interruption is confirmed client-side (see MicPipeline.openFor).
 // Platform-wide Conversation Behaviour (set in the back-office): turn detection, eagerness, barge-in threshold, backchannel tolerance.
@@ -71,8 +76,9 @@ export class ContextPruner {
 
 // One OpenAI Realtime WebRTC session (negotiated via our backend). sendAudio=false → receive-only (panelists get the user's words as text).
 export class RealtimeSession {
-  constructor({ callId, persona, primary, role, stream, onEvent, onError, onStatus, onTrack, sensitivity = "medium", createResponse = false, sendAudio = true }) {
+  constructor({ callId, persona, primary, role, stream, onEvent, onError, onStatus, onTrack, sensitivity = "medium", createResponse = false, sendAudio = true, model = "" }) {
     this.callId = callId; this.persona = persona; this.primary = primary; this.role = role; this.stream = stream; this.onTrack = onTrack;
+    this.live = isLiveModel(model); this.bridge = null;
     this.onEvent = onEvent; this.onError = onError; this.onStatus = onStatus; this.sensitivity = sensitivity; this.createResponse = createResponse; this.sendAudio = sendAudio;
     this.reconnecting = false; this.reconnectAttempts = 0; this.reconnectTimer = null;
     this.pc = null; this.dc = null; this.audioEl = null; this.ac = null; this.analyser = null; this.buf = null;
@@ -99,7 +105,9 @@ export class RealtimeSession {
     if (this.sendAudio && this.stream) this.stream.getTracks().forEach((t) => pc.addTrack(t, this.stream));
     else pc.addTransceiver("audio", { direction: "recvonly" });
     const dc = pc.createDataChannel("oai-events"); this.dc = dc;
-    dc.onmessage = (e) => { try { const ev = JSON.parse(e.data); reportUsage(this.callId, ev); this.pruner.onEvent(ev); this._track(ev); this.onEvent(this, ev); } catch (err) {} };
+    const handle = (ev) => { reportUsage(this.callId, ev); this.pruner.onEvent(ev); this._track(ev); this.onEvent(this, ev); };
+    if (this.live) this.bridge = new LiveBridge({ send: (ev) => this._rawSend(ev), emit: handle });
+    dc.onmessage = (e) => { try { const ev = JSON.parse(e.data); if (this.bridge) this.bridge.onMessage(ev); else handle(ev); } catch (err) {} };
     pc.onconnectionstatechange = () => { if (this.pc === pc && ["failed", "disconnected", "closed"].includes(pc.connectionState) && !this.closed) this._scheduleReconnect(); };
     const opened = new Promise((resolve) => { dc.onopen = resolve; });
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
@@ -149,7 +157,8 @@ export class RealtimeSession {
     return this.level;
   }
 
-  send(ev) { try { if (this.dc?.readyState === "open") this.dc.send(JSON.stringify(ev)); } catch (e) {} }
+  _rawSend(ev) { try { if (this.dc?.readyState === "open") this.dc.send(JSON.stringify(ev)); } catch (e) {} }
+  send(ev) { if (this.bridge) this.bridge.send(ev); else this._rawSend(ev); }
 
   // OpenAI allows one active response per session: queue response.create while one is running, flush on response.done.
   _track(ev) {
@@ -181,6 +190,12 @@ export class RealtimeSession {
   close() {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.closed = true;
+    if (this.bridge && this.dc?.readyState === "open") { // GPT-Live: ask for a graceful close, tear down shortly after
+      this.bridge.close(); const dc = this.dc, pc = this.pc, el = this.audioEl;
+      try { this.ac?.close(); } catch (e) {}
+      setTimeout(() => { try { dc.close(); } catch (e) {} try { pc?.close(); } catch (e) {} try { if (el) { el.srcObject = null; el.remove(); } } catch (e) {} }, 1500);
+      return;
+    }
     try { this.ac?.close(); } catch (e) {}
     try { this.dc?.close(); } catch (e) {}
     try { this.pc?.close(); } catch (e) {}

@@ -34,7 +34,6 @@ export default function PersonaDetail() {
   useEffect(() => () => { try { previewAudioRef.current?.pause(); } catch (e) {} }, []);
   const modelLabel = (key) => (models.find((m) => m.id === key) || {}).label || key;
   const changeModel = async (key) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, model: key }); setP(r.data); toast.success("Model diperbarui"); };
-  const changeVoiceModel = async (vm) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, voice_model: vm }); setP(r.data); toast.success("Model suara diperbarui"); };
   const changeTools = async (tools) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, tools }); setP(r.data); toast.success("Kemampuan tambahan diperbarui"); };
   const changeVoice = async (v) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, voice: v }); setP(r.data); toast.success("Suara diperbarui"); };
   const previewVoice = async (v) => {
@@ -149,7 +148,7 @@ export default function PersonaDetail() {
               </select>
             </div>
             <ToolsPicker modelKey={p.model} value={p.tools || []} onChange={changeTools} compact />
-            <VoiceModelPicker value={p.voice_model} onChange={changeVoiceModel} compact />
+            <VoiceModelPicker compact />
           </div>
           <div className="space-y-4">
             <div>

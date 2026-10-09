@@ -95,6 +95,7 @@ async def ws_user(ws: WebSocket, token: str = ""):
     """Per-user event channel: TRANSPORT ONLY (server → client triggers + client pings). No business logic here."""
     u = await user_from_token(token)
     if not u:
+        await ws.accept()  # accept first so the 4401 close code reaches the client (it stops reconnecting)
         await ws.close(code=4401)
         return
     await user_manager.connect(u["id"], ws)
@@ -115,10 +116,12 @@ async def ws_meeting(ws: WebSocket, cid: str, token: str = ""):
     """Conversation channel: TRANSPORT ONLY — WebRTC signaling relay + pings; everything else goes to /api endpoints."""
     u = await user_from_token(token)
     if not u:
+        await ws.accept()
         await ws.close(code=4401)
         return
     conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
     if not _can_access(conv, u):
+        await ws.accept()
         await ws.close(code=4403)
         return
     del conv  # nothing else is kept per connection

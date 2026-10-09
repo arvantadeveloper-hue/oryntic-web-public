@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="11" time="136.324" timestamp="2026-10-09T20:13:03.636023+00:00" hostname="agent-env-4d89c1ec-abaf-4741-a561-d7634c6cb742"><testcase classname="tests.test_iter41_fractional_credits.TestFractionalChatMetering" name="test_short_chat_fractional_and_carry" time="12.495" /><testcase classname="tests.test_iter41_fractional_credits.TestFractionalChatMetering" name="test_messages_persisted" time="0.141"><failure message="AttributeError: 'str' object has no attribute 'get'">backend/tests/test_iter41_fractional_credits.py:128: in test_messages_persisted
+    assert any(m.get("role") == "assistant" for m in msgs), "no assistant messages persisted"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/tests/test_iter41_fractional_credits.py:128: in &lt;genexpr&gt;
+    assert any(m.get("role") == "assistant" for m in msgs), "no assistant messages persisted"
+               ^^^^^
+E   AttributeError: 'str' object has no attribute 'get'</failure></testcase><testcase classname="tests.test_iter41_fractional_credits.TestVoiceCallBilling" name="test_voice_tick_fractional" time="0.617" /><testcase classname="tests.test_iter41_fractional_credits.TestVoiceCallBilling" name="test_voice_usage_report_fraction" time="0.528" /><testcase classname="tests.test_iter41_fractional_credits.TestVideoConfig" name="test_video_config_exposes_per_sec" time="0.141" /><testcase classname="tests.test_iter41_fractional_credits.TestWalletAggregation" name="test_wallet_two_decimals_and_int_available" time="0.124" /><testcase classname="tests.test_iter41_fractional_credits.TestAdminUsageReport" name="test_usage_report_shape" time="0.498" /><testcase classname="tests.test_iter41_fractional_credits" name="test_ws_user_invalid_token_closes_4401" time="0.207"><failure message="websockets.exceptions.InvalidStatus: server rejected WebSocket connection: HTTP 403">backend/tests/test_iter41_fractional_credits.py:257: in test_ws_user_invalid_token_closes_4401
+    async with websockets.connect(url, open_timeout=10, close_timeout=5) as ws:
+/root/.venv/lib/python3.11/site-packages/websockets/asyncio/client.py:601: in __aenter__
+    return await self
+           ^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/websockets/asyncio/client.py:557: in __await_impl__
+    await self.connection.handshake(
+/root/.venv/lib/python3.11/site-packages/websockets/asyncio/client.py:115: in handshake
+    raise self.protocol.handshake_exc
+/root/.venv/lib/python3.11/site-packages/websockets/client.py:327: in parse
+    self.process_response(response)
+/root/.venv/lib/python3.11/site-packages/websockets/client.py:144: in process_response
+    raise InvalidStatus(response)
+E   websockets.exceptions.InvalidStatus: server rejected WebSocket connection: HTTP 403</failure></testcase><testcase classname="tests.test_iter41_fractional_credits" name="test_ws_user_keepalive_30s" time="30.216" /><testcase classname="tests.test_iter41_fractional_credits" name="test_ws_user_idle_closes_after_90s" time="90.311" /><testcase classname="tests.test_iter41_fractional_credits" name="test_ws_meeting_rtc_relay" time="0.941" /></testsuite></testsuites>

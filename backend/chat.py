@@ -1367,7 +1367,14 @@ async def _plain_reply(ctx: ReplyCtx):
         full = tool_out["text"] or "Ini hasilnya 🎨"
     else:
         try:
-            full = await llm_text(ctx.system, ctx.prompt, ctx.model_key)
+            from pricing import get_pricing as _gp, model_price, affordable_tokens
+            from llm import owner_balance_exact
+            pp = await _gp()
+            mp = model_price(pp, ctx.model_key)
+            cap = affordable_tokens(pp, await owner_balance_exact(ctx.user), mp["out"], "text") if mp else None
+            full = await llm_text(ctx.system, ctx.prompt, ctx.model_key, max_tokens=cap)
+            if cap is not None and not full.strip():
+                full = "Maaf, sisa kredit workspace terlalu sedikit untuk menghasilkan jawaban lengkap. Silakan isi ulang kredit terlebih dahulu."
         except Exception:
             full = "Maaf, terjadi gangguan saat menghasilkan jawaban. Silakan coba lagi."
     if not ctx.voice_mode and not tool_out and not ctx.persona.get("builtin") and is_media_refusal(ctx.user_text, full):
@@ -1511,7 +1518,7 @@ def _reply_extra(x: MsgIn, attach_text: str) -> str:
 async def _collect(gen, totals: list):
     """Re-yield SSE strings from a reply generator; its trailing int (credits) is added to totals[0]."""
     async for ev in gen:
-        if isinstance(ev, int):
+        if isinstance(ev, (int, float)) and not isinstance(ev, bool):
             totals[0] += ev
         else:
             yield ev

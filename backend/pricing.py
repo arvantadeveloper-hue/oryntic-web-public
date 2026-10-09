@@ -77,6 +77,18 @@ def usd_to_credits(p: dict, usd: float, feature: str | None = None) -> float:
     return usd * (1 + margin_for(p, feature) / 100) * (1 + p["tax_pct"] / 100) / max(float(p.get("usd_per_credit") or 0.001), 1e-6)
 
 
+TOKEN_CAP_FREE = 4096  # OpenAI Realtime max per response; balances that cover this many output tokens get no cap at all
+
+
+def affordable_tokens(p: dict, remaining_credits: float, usd_per_1m_out: float, feature: str, cap: int = TOKEN_CAP_FREE) -> int | None:
+    """Output tokens the remaining balance can still pay for. None = don't cap (balance covers ≥ cap tokens)."""
+    per_token = usd_to_credits(p, float(usd_per_1m_out or 0) / 1_000_000, feature)
+    if per_token <= 0:
+        return None
+    n = int(max(0.0, float(remaining_credits or 0)) / per_token)
+    return None if n >= cap else max(1, n)
+
+
 def _credits(p: dict, usd: float, feature: str) -> int:
     return max(1, math.ceil(usd_to_credits(p, usd, feature)))
 
@@ -93,11 +105,17 @@ def feature_cost(p: dict, feature: str, legacy_key: str) -> float:
 
 # Realtime voice models a persona can use; USD per 1M tokens (OpenAI list prices) — overridable per model in platform_pricing.realtime_models
 REALTIME_MODELS = {
+    "gpt-live-1": {"label": "GPT-Live", "tagline": "Model suara terbaru (default)", "per_min_usd": 0.05, "catalog_id": "gpt-live", "audio_in": 0.0, "audio_out": 0.0, "text_in": 0.0, "text_out": 0.0, "cached_in": 0.0},
     "gpt-realtime-2.1": {"label": "GPT Realtime 2.1", "tagline": "Kualitas terbaik", "audio_in": 32.0, "audio_out": 64.0, "text_in": 4.0, "text_out": 24.0, "cached_in": 0.4},
     "gpt-realtime-2.1-mini": {"label": "GPT Realtime 2.1 Mini", "tagline": "Cepat & hemat (default)", "audio_in": 10.0, "audio_out": 20.0, "text_in": 0.6, "text_out": 2.4, "cached_in": 0.3},
     "gpt-realtime-2.0": {"label": "GPT Realtime 2.0", "tagline": "Generasi sebelumnya", "audio_in": 32.0, "audio_out": 64.0, "text_in": 4.0, "text_out": 24.0, "cached_in": 0.4},
 }
-DEFAULT_REALTIME_MODEL = "gpt-realtime-2.1-mini"
+DEFAULT_REALTIME_MODEL = "gpt-live-1"
+LIVE_MODEL = "gpt-live-1"
+
+
+def is_live_model(model: str | None) -> bool:
+    return (model or "").startswith("gpt-live")
 
 
 def realtime_model_prices(p: dict, model: str | None) -> dict:
@@ -116,6 +134,10 @@ def realtime_model_prices(p: dict, model: str | None) -> dict:
 def realtime_credits_per_min(p: dict, model: str | None) -> int:
     """Credits/minute shown in the UI: the admin's per-minute rate (calibrated on gpt-realtime-2.1 prices) scaled by the model's audio price."""
     m = realtime_model_prices(p, model)
+    if m.get("per_min_usd") is not None:  # GPT-Live: flat per-minute session price (billed per second), catalog-editable
+        hit = pc.find(m.get("catalog_id") or "", "per_minute")
+        usd = float(hit[2]["usd"]) if hit else float(m["per_min_usd"])
+        return max(1, math.ceil(usd_to_credits(p, usd, "realtime_call")))
     base = compute_rates(p)["realtime_per_min"]
     return max(1, int(round(base * (m["audio_in"] + m["audio_out"]) / (32.0 + 64.0))))
 
@@ -123,11 +145,22 @@ def realtime_credits_per_min(p: dict, model: str | None) -> int:
 def realtime_usage_usd(p: dict, usage: dict, model: str | None = None) -> float:
     """Raw provider cost of one Realtime response from OpenAI's usage report (prices of the session's model)."""
     i, o = usage.get("input_token_details") or {}, usage.get("output_token_details") or {}
+    if is_live_model(model):
+        return 0.0  # voice is billed per second by the tick; backend tokens via backend_usage_usd
     cached = int((i.get("cached_tokens_details") or {}).get("audio_tokens") or 0) + int((i.get("cached_tokens_details") or {}).get("text_tokens") or 0) or int(i.get("cached_tokens") or 0)
     m = realtime_model_prices(p, model)
     return (int(i.get("audio_tokens") or 0) * m["audio_in"] + int(i.get("text_tokens") or 0) * m["text_in"]
             + int(o.get("audio_tokens") or 0) * m["audio_out"] + int(o.get("text_tokens") or 0) * m["text_out"]
             + cached * m["cached_in"]) / 1_000_000
+
+
+def backend_usage_usd(p: dict, usage: dict, model_key: str | None) -> float:
+    """Provider cost of one GPT-Live delegated Responses call (Responses usage shape) on the persona's brain model."""
+    mp = model_price(p, model_key) or {"in": 0.0, "out": 0.0}
+    cached = int((usage.get("input_tokens_details") or {}).get("cached_tokens") or 0)
+    ci = pc.find(model_key or "", "cached_in")
+    cached_usd = float(ci[2]["usd"]) if ci else mp["in"] * 0.1
+    return (max(0, int(usage.get("input_tokens") or 0) - cached) * mp["in"] + int(usage.get("output_tokens") or 0) * mp["out"] + cached * cached_usd) / 1_000_000
 
 
 def model_price(p: dict, model_key: str | None) -> dict | None:

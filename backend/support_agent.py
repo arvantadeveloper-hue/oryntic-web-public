@@ -3,6 +3,7 @@
 import os
 import time
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,7 +25,7 @@ SANDBOX_AVATAR_NAME = "Wayne (avatar sandbox LiveAvatar)"
 
 DEFAULT_CONFIG = {
     "enabled": True, "name": "Oryntix", "summary": "Customer Support Agent", "portrait": "/brand/oryntix-support.jpg",
-    "model": "gpt-luna", "voice_model": "gpt-realtime-2.1-mini", "voice": "marin",
+    "model": "gpt-luna", "voice_model": "gpt-live-1", "voice": "marin",
     "system_prompt": DEFAULT_SYSTEM_PROMPT, "knowledge": DEFAULT_KNOWLEDGE,
     "video_enabled": True, "avatar_id": "5341767a-21fe-43d7-a5b5-9fd6bff6d32e", "avatar_name": "Oryntix (custom)", "avatar_preview": "/brand/oryntix-support.jpg", "sandbox": True,
     "video_credits_per_sec": 2, "video_max_minutes": 20, "video_warn_minutes": 2,
@@ -113,8 +114,15 @@ async def _la_post(client: httpx.AsyncClient, path: str, headers: dict, body: Op
     data = r.json() if r.content else {}
     if r.status_code >= 300 or (data.get("code") and data["code"] not in (100, 1000)):
         log.warning("LiveAvatar %s failed %s: %s", path, r.status_code, str(data)[:300])
-        raise HTTPException(503, f"LiveAvatar: {data.get('message') or r.status_code}")
+        raise HTTPException(503, f"LiveAvatar: {_la_error(data) or r.status_code}")
     return data.get("data") or {}
+
+
+def _la_error(data: dict) -> str:
+    det = data.get("detail")
+    if isinstance(det, list) and det:
+        return "; ".join(str(d.get("msg") or d) for d in det if d)[:300]
+    return str(data.get("message") or det or "")[:300]
 
 
 async def _owner_balance(u: dict) -> int:
@@ -140,14 +148,26 @@ async def video_start(call_id: str, u: dict = Depends(current_user)):
         raise HTTPException(402, f"Kredit tidak cukup — video membutuhkan minimal {cps * 60} kredit (1 menit)")
     live = await db.video_sessions.find_one({"call_id": call_id, "status": "active"}, {"_id": 0})
     if live:
-        raise HTTPException(409, "Video sudah aktif di panggilan ini")
+        last = datetime.fromisoformat(live.get("updated_at") or live["created_at"])
+        if (datetime.now(timezone.utc) - last).total_seconds() < 45:
+            raise HTTPException(409, "Video sudah aktif di panggilan ini")
+        await db.video_sessions.update_one({"id": live["id"]}, {"$set": {"status": "ended", "ended_at": now_iso(), "end_reason": "STALE"}})
+        await _la_stop(live, "USER_CLOSED")
     sandbox = bool(c.get("sandbox"))
     max_sec = 60 if sandbox else int(c["video_max_minutes"]) * 60  # LiveAvatar sandbox sessions are capped at 60 s
-    body = {"mode": "LITE", "avatar_id": SANDBOX_AVATAR if sandbox else c["avatar_id"], "is_sandbox": sandbox, "max_session_duration": max_sec if sandbox else max_sec + 30,
+    # Per-SESSION cap: exactly the configured minutes — LiveAvatar rejects any value above the tier limit (the old "+30 s" tripped it).
+    body = {"mode": "LITE", "avatar_id": SANDBOX_AVATAR if sandbox else c["avatar_id"], "is_sandbox": sandbox, "max_session_duration": max_sec,
             "video_settings": {"quality": "high", "encoding": "H264"}}
     headers = _la_headers()
     async with httpx.AsyncClient(timeout=40) as client:
-        tok = await _la_post(client, "/sessions/token", headers, body)
+        try:
+            tok = await _la_post(client, "/sessions/token", headers, body)
+        except HTTPException as exc:
+            if "max_session_duration" not in str(exc.detail):
+                raise
+            log.warning("LiveAvatar refused max_session_duration=%s — retrying with the tier default", max_sec)
+            body.pop("max_session_duration")
+            tok = await _la_post(client, "/sessions/token", headers, body)
         started = await _la_post(client, "/sessions/start", {"authorization": f"Bearer {tok['session_token']}", "accept": "application/json"})
     vs = {"id": new_id(), "call_id": call_id, "conversation_id": call.get("conversation_id"), "user_id": u["id"], "la_session_id": tok["session_id"],
           "session_token": tok["session_token"], "status": "active", "credits_per_sec": cps, "max_seconds": max_sec, "billed_seconds": 0, "credits": 0,
@@ -220,7 +240,7 @@ class SupportConfigIn(BaseModel):
     summary: str = Field(default="Customer Support Agent", max_length=120)
     portrait: str = Field(default="/brand/oryntix-support.jpg", max_length=500)
     model: str = Field(default="gpt-luna", pattern="^[a-z0-9.-]+$")
-    voice_model: str = Field(default="gpt-realtime-2.1-mini", pattern="^[a-z0-9.-]+$")
+    voice_model: str = Field(default="gpt-live-1", pattern="^[a-z0-9.-]+$")
     voice: str = Field(default="marin", pattern="^[a-z]+$")
     system_prompt: str = Field(default="", max_length=20000)
     knowledge: str = Field(default="", max_length=60000)

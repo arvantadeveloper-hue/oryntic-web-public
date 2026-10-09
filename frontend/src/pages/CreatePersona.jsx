@@ -37,7 +37,7 @@ export default function CreatePersona() {
   const [voices, setVoices] = useState([]);
   const [voiceMeta, setVoiceMeta] = useState({ info: {}, realtime: [] });
   const [voice, setVoice] = useState("nova");
-  const [voiceModel, setVoiceModel] = useState("gpt-realtime-2.1-mini");
+  const [voiceModel, setVoiceModel] = useState("gpt-live-1");
   const [tools, setTools] = useState([]);
   const [previewing, setPreviewing] = useState(null);
   const previewAudioRef = useRef(null);
@@ -192,7 +192,7 @@ export default function CreatePersona() {
           </div>
           <div>
             <div className="mb-5"><ToolsPicker modelKey={modelKey} value={tools} onChange={setTools} /></div>
-            <VoiceModelPicker value={voiceModel} onChange={setVoiceModel} />
+            <VoiceModelPicker />
             <label className="mb-1 mt-5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Karakter Suara</label>
             <p className="mb-2 text-xs text-slate-400">Warna suara asisten di panggilan. Tekan ikon speaker untuk mendengar contoh.</p>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">

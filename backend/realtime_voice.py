@@ -15,15 +15,15 @@ from llm import record_usage, quota_exceeded, quota_message
 from chat import _can_access, _persona_system, _history_text
 from realtime import notify
 from ratelimit import rate_limit, get_limits, set_limits
-from pricing import usd_to_credits, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates, REALTIME_MODELS, DEFAULT_REALTIME_MODEL, realtime_credits_per_min
+from pricing import usd_to_credits, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates, REALTIME_MODELS, DEFAULT_REALTIME_MODEL, realtime_credits_per_min, realtime_model_prices, affordable_tokens, LIVE_MODEL, is_live_model, backend_usage_usd, model_price
 from tools import get_routing, TASK_CONTEXT
 from behaviour import get_behaviour, turn_detection
-from llm import MODEL_CATALOG, model_label
+from llm import MODEL_CATALOG, model_label, resolve_model
 
 router = APIRouter(prefix="/api", tags=["realtime-voice"])
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")  # fallback only; each persona chooses its voice_model
+REALTIME_MODEL = LIVE_MODEL  # every call runs on GPT-Live (persona voice_model is kept for backwards compatibility only)
 # Session instructions are always Oryntix's own (assistant_persona.py) — dashboard-stored prompts are not used.
 
 # TTS voice (persona.voice) -> Realtime voice
@@ -54,7 +54,8 @@ def enabled() -> bool:
 async def status(u: dict = Depends(current_user)):
     p = await get_pricing()
     return {"enabled": enabled(), "model": DEFAULT_REALTIME_MODEL, "credits_per_min": realtime_credits_per_min(p, DEFAULT_REALTIME_MODEL), "prompt_id": None, "prompt_version": None,
-            "models": [{"id": k, **{kk: v[kk] for kk in ("label", "tagline")}, "credits_per_min": realtime_credits_per_min(p, k), "default": k == DEFAULT_REALTIME_MODEL} for k, v in REALTIME_MODELS.items()]}
+            "live": True,
+            "models": [{"id": k, **{kk: v[kk] for kk in ("label", "tagline")}, "credits_per_min": realtime_credits_per_min(p, k), "default": k == DEFAULT_REALTIME_MODEL} for k, v in REALTIME_MODELS.items() if is_live_model(k)]}
 
 
 class PricingIn(BaseModel):
@@ -316,7 +317,7 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
     await rate_limit(u, "calls")
     personas = _order_personas(await _call_personas(conv, u), conv)
     p = await get_pricing()
-    await _ensure_affordable(u, len(personas), max(realtime_credits_per_min(p, pp.get("voice_model")) for pp in personas))
+    await _ensure_affordable(u, len(personas), realtime_credits_per_min(p, LIVE_MODEL))
     await _close_stale_calls(u["id"])
 
     history = await _voice_context(conv["id"])
@@ -328,19 +329,19 @@ async def create_call(x: CallIn, u: dict = Depends(current_user)):
     sessions = []
     for i, persona in enumerate(personas):
         role = "solo" if not multi else ("moderator" if i == 0 else "panelist")
-        vm = persona.get("voice_model") if persona.get("voice_model") in REALTIME_MODELS else DEFAULT_REALTIME_MODEL
+        vm = LIVE_MODEL  # all voice calls run on GPT-Live; the persona's own brain model does the reasoning (delegation)
         cpm = realtime_credits_per_min(p, vm)
-        call = {"id": new_id(), "group_id": group_id, "conversation_id": conv["id"], "user_id": u["id"], "persona_id": persona["id"], "model": vm,
+        call = {"id": new_id(), "group_id": group_id, "conversation_id": conv["id"], "user_id": u["id"], "persona_id": persona["id"], "model": vm, "brain_model": persona.get("model"), "live": True,
                 "persona_name": persona["name"], "call_session_id": x.call_session_id or group_id,
                 "voice": VOICE_MAP.get(persona.get("voice", "alloy"), "marin"), "role": role, "roster": roster,
                 "instructions": await _session_instructions(persona, u, roster, history, x.opening, role, conv.get("title", ""), panel),
                 "multi": multi, "primary": i == 0, "status": "created", "billed_minutes": 0, "credits": 0, "credits_per_min": cpm,
                 "created_at": now_iso(), "started_at": None, "ended_at": None, "seconds": 0}
         await db.realtime_calls.insert_one(dict(call))
-        sessions.append({"call_id": call["id"], "voice": call["voice"], "primary": i == 0, "role": role, "model": vm, "credits_per_min": cpm,
+        sessions.append({"call_id": call["id"], "voice": call["voice"], "primary": i == 0, "role": role, "model": vm, "live": True, "credits_per_min": cpm,
                          "persona": {"id": persona["id"], "name": persona["name"], "portrait": persona.get("portrait")}})
     first = sessions[0]
-    return {"call_id": first["call_id"], "voice": first["voice"], "persona": first["persona"], "model": first["model"],
+    return {"call_id": first["call_id"], "voice": first["voice"], "persona": first["persona"], "model": first["model"], "live": True,
             "credits_per_min": first["credits_per_min"], "credits_per_min_total": sum(s_["credits_per_min"] for s_ in sessions), "multi": multi, "group_id": group_id,
             "moderator_persona_id": personas[0]["id"],
             "sessions": sessions, "language": ((u.get("settings") or {}).get("conversation_language") or "id")}
@@ -400,6 +401,16 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         "audio": {"input": audio_in, "output": {"voice": call["voice"]}},
         "instructions": call["instructions"],
     }
+    # Low balance → cap each response to what the wallet can still pay (audio-out tokens); ample balance → no cap.
+    from llm import owner_balance_exact
+    p = await get_pricing()
+    bal = await owner_balance_exact(u)
+    if is_live_model(session["model"]):  # GPT-Live: voice is per-second; the cap applies to the delegated brain model's output tokens
+        cap = affordable_tokens(p, bal, (model_price(p, call.get("brain_model")) or {"out": 0.0})["out"], "realtime_call")
+    else:
+        cap = affordable_tokens(p, bal, realtime_model_prices(p, session["model"])["audio_out"], "realtime_call")
+    if cap is not None:
+        session["max_output_tokens"] = cap
     if role in ("moderator", "solo"):
         conv = await db.conversations.find_one({"id": call["conversation_id"]}, {"_id": 0, "task_id": 1}) or {}
         drive_on = bool(await db.drive_credentials.find_one({"user_id": u["id"]}, {"_id": 1}))
@@ -413,6 +424,8 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         tools = [] if is_support(call["persona_id"]) else [ASSIGN_TOOL, SEARCH_TOOL, CALENDAR_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + ([RUN_CODE_TOOL] if code_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
+    if is_live_model(session["model"]):
+        return await _negotiate_live(call, call_id, u, sdp_offer, role, session.get("tools") or [], cap)
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post("https://api.openai.com/v1/realtime/calls",
                               headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
@@ -420,9 +433,52 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
     if r.status_code >= 300:
         logging.getLogger("realtime").error("Realtime negotiate failed %s: %s", r.status_code, r.text[:500])
         raise HTTPException(502, "Negosiasi Realtime gagal, coba lagi")
-    await db.realtime_calls.update_one({"id": call_id}, {"$set": {"status": "active", "started_at": now_iso(),
+    await db.realtime_calls.update_one({"id": call_id}, {"$set": {"status": "active", "started_at": now_iso(), "max_output_tokens": cap,
                                                                   "openai_call_id": r.headers.get("Location", "").rsplit("/", 1)[-1]}})
     return PlainTextResponse(r.text, media_type="application/sdp")
+
+
+LIVE_VOICE_STYLE = ("\n\nLIVE VOICE: you are the speaking front of this assistant. Anything that needs facts, memory, calculation, an image/video/document, scheduling, "
+                    "search or any tool goes to your backend — say in a few words that you are checking, then relay its result naturally in your own voice. "
+                    "Never say you cannot do something your backend/tools can do. Keep every turn short and spoken.")
+LIVE_BACKEND_PROMPT = ("You are the reasoning backend of {name}, who is in a LIVE VOICE call with {uname}. The voice model does the talking; you do the thinking, "
+                       "facts and tools. Transcripts can contain mistakes, unfinished phrases and later corrections — use the latest context. Call the tools whenever "
+                       "they fit (never claim you cannot). Return concise results for speech in {lang}: the relevant facts, the task's current status and the next step. "
+                       "Report an action as complete only after a tool confirmed it. No markdown, no URLs (tools post links to the chat panel).\n\n"
+                       "ASSISTANT PERSONA & RULES:\n{persona}")
+
+
+async def _negotiate_live(call: dict, call_id: str, u: dict, sdp_offer: str, role: str, tools: list, cap) -> PlainTextResponse:
+    """GPT-Live (`/v1/live/sessions`): voice on gpt-live-1, reasoning + tools delegated to the persona's own brain model (OpenAI only)."""
+    from auth import _lang_name
+    provider, backend = resolve_model(call.get("brain_model"))
+    if provider != "openai":
+        backend = "gpt-6-luna"  # Responses delegation only runs OpenAI models
+    instructions = call["instructions"] + LIVE_VOICE_STYLE
+    session = {"model": LIVE_MODEL, "instructions": instructions[:60000], "audio": {"output": {"voice": call["voice"]}}}
+    if role in ("moderator", "solo"):
+        resp = {"model": backend, "tool_choice": "auto",
+                "instructions": LIVE_BACKEND_PROMPT.format(name=call.get("persona_name") or "the assistant", uname=u.get("name") or "the user", lang=_lang_name(u), persona=call["instructions"][:12000])}
+        if tools:
+            resp["tools"] = tools
+        if cap is not None:
+            resp["max_output_tokens"] = max(16, int(cap))
+        session["delegation"] = {"type": "responses", "responses": resp}
+    else:
+        session["delegation"] = {"type": "client"}  # panelists: text-only context, no tools
+    body = {"session": session, "transport": {"type": "webrtc", "sdp": sdp_offer}}
+    async with httpx.AsyncClient(timeout=40) as client:
+        r = await client.post("https://api.openai.com/v1/live/sessions", headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}, json=body)
+        if r.status_code >= 300 and "voice" in r.text.lower() and call["voice"] != "marin":
+            session["audio"]["output"]["voice"] = "marin"
+            r = await client.post("https://api.openai.com/v1/live/sessions", headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}, json=body)
+    if r.status_code >= 300:
+        logging.getLogger("realtime").error("GPT-Live negotiate failed %s: %s", r.status_code, r.text[:600])
+        raise HTTPException(502, "Negosiasi GPT-Live gagal, coba lagi")
+    data = r.json()
+    sid = (data.get("session") or {}).get("id") or ""
+    await db.realtime_calls.update_one({"id": call_id}, {"$set": {"status": "active", "started_at": now_iso(), "max_output_tokens": cap, "live_session_id": sid, "backend_model": backend}})
+    return PlainTextResponse((data.get("transport") or {}).get("sdp") or "", media_type="application/sdp", headers={"X-Live-Session-Id": sid, "Access-Control-Expose-Headers": "X-Live-Session-Id"})
 
 
 class TranscriptIn(BaseModel):
@@ -511,7 +567,8 @@ class TickIn(BaseModel):
 
 
 class UsageIn(BaseModel):
-    usage: dict  # OpenAI `response.done` → response.usage
+    usage: dict  # OpenAI `response.done` → response.usage, or (kind=backend) GPT-Live nested `response.completed` → response.usage
+    kind: str = Field(default="voice", pattern="^(voice|backend)$")
 
     @field_validator("usage")
     @classmethod
@@ -540,7 +597,7 @@ async def report_usage(call_id: str, x: UsageIn, u: dict = Depends(current_user)
     """Bill one Realtime response from its real token usage (audio in/out, text, cached) × margin."""
     call = await _own_call(call_id, u)
     p = await get_pricing()
-    usd = realtime_usage_usd(p, x.usage or {}, call.get("model"))
+    usd = backend_usage_usd(p, x.usage or {}, call.get("brain_model")) if x.kind == "backend" else realtime_usage_usd(p, x.usage or {}, call.get("model"))
     exact = usd_to_credits(p, usd, "realtime_call")
     acc = round(float(call.get("usage_credits_exact") or 0) + exact, 6)
     if exact > 0:  # fully metered: the exact fraction is billed, the wallet carries the remainder

@@ -8,7 +8,7 @@ const Row = ({ label, hint, children, className = "" }) => (
   <label className={`block ${className}`}><span className="mb-1 block text-xs font-semibold text-slate-700">{label}</span>{children}{hint && <span className="mt-1 block text-[11px] text-slate-400">{hint}</span>}</label>
 );
 const BRAINS = [["gpt-luna", "GPT Luna (default)"], ["gpt-astra", "GPT Astra"], ["gpt-terra", "GPT Terra"], ["gpt-5-5", "GPT 5.5"], ["claude-sonnet", "Claude Sonnet 5.5"], ["gemini-pro", "Gemini 3.1 Pro"]];
-const VOICE_MODELS = [["gpt-realtime-2.1-mini", "GPT Realtime 2.1 Mini (default)"], ["gpt-realtime-2.1", "GPT Realtime 2.1"], ["gpt-realtime-2.0", "GPT Realtime 2.0"]];
+const VOICE_MODELS = [["gpt-live-1", "GPT-Live (default, semua panggilan)"]];
 const VOICES = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 
 // Pengaturan asisten bawaan Oryntix (Customer Support Agent) — hanya untuk platform admin.

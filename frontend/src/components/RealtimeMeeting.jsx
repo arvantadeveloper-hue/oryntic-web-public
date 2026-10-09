@@ -385,12 +385,13 @@ export function RealtimeMeeting({ conv, cid, messages = [], onClose, onRefresh, 
         await beat(); presenceRef.current = setInterval(beat, 30000);
       }
       if (!runAI) { startedAtRef.current = Date.now(); listening(); return; }
-      const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, role: x.role, stream: aiInput, sendAudio: x.role !== "panelist", sensitivity: micPrefs.sensitivity, createResponse: false, onEvent: handleEvent, onError: () => { if (!endedRef.current) toast.error("Koneksi salah satu asisten tidak dapat dipulihkan"); }, onStatus: (sess, st) => { if (endedRef.current) return; setReconnecting((r) => { const n = new Set(r); if (st === "reconnecting") n.add(sess.callId); else n.delete(sess.callId); return n; }); if (st === "connected") toast.success(`${sess.persona?.name || "Asisten"} tersambung kembali`); },
+      const sessions = created.map((x) => new RealtimeSession({ callId: x.call_id, persona: x.persona, primary: x.primary, role: x.role, model: x.model, stream: aiInput, sendAudio: x.role !== "panelist", sensitivity: micPrefs.sensitivity, createResponse: false, onEvent: handleEvent, onError: () => { if (!endedRef.current) toast.error("Koneksi salah satu asisten tidak dapat dipulihkan"); }, onStatus: (sess, st) => { if (endedRef.current) return; setReconnecting((r) => { const n = new Set(r); if (st === "reconnecting") n.add(sess.callId); else n.delete(sess.callId); return n; }); if (st === "connected") toast.success(`${sess.persona?.name || "Asisten"} tersambung kembali`); },
         onTrack: (rs) => { if (mixRef.current) mixRef.current.outMix.add(rs); } }));
       sessionsRef.current = sessions;
       await Promise.all(sessions.map((s) => s.connect()));
       if (stale()) return;
       startedAtRef.current = Date.now();
+      listening();
       // the user opens the conversation — no automatic greeting from the moderator
       tickRef.current = setInterval(async () => {
         try { await Promise.all(sessionsRef.current.map((s) => api.post(`/realtime/calls/${s.callId}/tick`, { elapsed_seconds: secs() }))); onRefresh && onRefresh(); }

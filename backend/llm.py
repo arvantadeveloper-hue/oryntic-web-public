@@ -179,13 +179,22 @@ async def quota_exceeded(user: dict):
     return await _daily_limit_hit(user)
 
 
-async def llm_text(system_message: str, user_text: str, model_key: str | None = None) -> str:
+async def owner_balance_exact(user: dict) -> float:
+    """Workspace wallet balance including the carried fraction (whole credits + credits_frac)."""
+    owner_id = user.get("owner_id") or user["id"]
+    owner = await db.users.find_one({"id": owner_id}, {"_id": 0, "credits": 1, "credits_frac": 1}) or {}
+    return float(owner.get("credits") or 0) + float(owner.get("credits_frac") or 0)
+
+
+async def llm_text(system_message: str, user_text: str, model_key: str | None = None, max_tokens: int | None = None) -> str:
     provider, model = resolve_model(model_key)
     chat = LlmChat(
         api_key=provider_key(provider),
         session_id=new_id(),
         system_message=system_message,
     ).with_model(provider, model)
+    if max_tokens:
+        chat = chat.with_params(max_completion_tokens=int(max_tokens))
     resp = await chat.send_message(UserMessage(text=user_text))
     return _extract_text(resp).strip()
 
