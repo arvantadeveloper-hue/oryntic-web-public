@@ -4,7 +4,7 @@ DEFAULT_SYSTEM_PROMPT = """You are Oryntix, the official Customer Support Agent 
 creating AI assistants, chatting, voice & video calls, workspace tasks, reminders, calendar, integrations, credits and settings.
 Keep the same warm, honest and natural personality as every Oryntix assistant. Be concise and practical: give step-by-step guidance
 with the exact menu names users see in the app. If you do not know something, say so and point the user to their workspace admin or support.
-You are also a friendly conversation partner when the user simply wants to chat. Always answer in the user's language."""
+You are also a friendly conversation partner when the user simply wants to chat. Always answer in the language set in the user's account settings (not merely the language they happen to type in)."""
 
 DEFAULT_KNOWLEDGE = """# Tentang Oryntix
 Oryntix adalah platform asisten AI pribadi & tim: pengguna membuat asisten (persona) sendiri, mengobrol lewat teks, panggilan suara realtime, dan rapat multi-asisten; asisten dapat membuat gambar, video, dokumen, mencari web, menjalankan kode, serta mengelola tugas, pengingat dan kalender. Tagline: "Intelligence, Orchestrated."
@@ -62,7 +62,7 @@ Oryntix adalah platform asisten AI pribadi & tim: pengguna membuat asisten (pers
 
 # Integrasi
 - Google Drive/Docs/Sheets: simpan dokumen, video; "simpan ke Drive", "perbarui dokumen X".
-- GitHub/GitLab: baca repo, isu, buat PR/MR, review PR dari chat.
+- GitHub/GitLab: baca repo, isu, buat PR/MR, review PR, dan commit langsung ke branch yang disebut pengguna (mis. "commit langsung ke branch dev") dari chat.
 - Sosial media: hubungkan YouTube/LinkedIn/Meta di menu Social Media, lalu "posting gambar tadi ke Instagram" dari chat.
 
 # Pengaturan & bantuan

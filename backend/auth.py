@@ -138,15 +138,18 @@ LANG_NAMES = {"id": "Bahasa Indonesia", "en": "English", "es": "Spanish", "fr": 
 
 
 def _lang_name(user: dict) -> str:
-    code = ((user.get("settings", {}) or {}).get("conversation_language") or "id").lower()
+    st = user.get("settings", {}) or {}
+    code = (st.get("conversation_language") or st.get("app_language") or "id").lower()
     return LANG_NAMES.get(code, LANG_NAMES.get(code.split("-")[0], "Bahasa Indonesia"))
 
 
 def lang_rule(user: dict) -> str:
     """Hard language constraint appended to every prompt — the user's language wins over the language of the instructions, task or model."""
     ln = _lang_name(user or {})
-    return (f"LANGUAGE RULE (overrides everything else): write ALL output — headings, lists, tables, summaries, code comments and explanations — in {ln}, "
-            f"even though these instructions are in English and regardless of which AI model is running. The ONLY exception: the user explicitly asked for another language.")
+    return (f"LANGUAGE RULE (overrides everything else, including any earlier instruction to 'follow the language the user uses'): the user's preferred language in their "
+            f"account settings is {ln}. Write AND speak ALL output — headings, lists, tables, summaries, code comments and explanations — in {ln}, even if the user writes or "
+            f"talks in another language, even though these instructions are in English and regardless of which AI model is running. "
+            f"The ONLY exception: the user explicitly asks you to switch to another language.")
 
 
 # ---------- models ----------

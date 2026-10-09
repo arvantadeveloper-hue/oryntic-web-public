@@ -828,9 +828,9 @@ def _repo_provider(name: str) -> dict:
     """Git hosting providers share one chat flow; only the API module and wording differ."""
     if name == "gitlab":
         import gitlab as m
-        return {"label": "GitLab", "pr": "Merge request", "connected": m.gl_connected, "repos": m.gl_projects, "tree": m.gl_tree, "read": m.gl_read, "issues": m.gl_issues, "create": m.gl_create_mr, "diff": m.gl_mr_diff}
+        return {"label": "GitLab", "pr": "Merge request", "connected": m.gl_connected, "repos": m.gl_projects, "tree": m.gl_tree, "read": m.gl_read, "issues": m.gl_issues, "create": m.gl_create_mr, "commit": m.gl_commit, "diff": m.gl_mr_diff}
     import github as m
-    return {"label": "GitHub", "pr": "Pull request", "connected": m.gh_connected, "repos": m.gh_repos, "tree": m.gh_tree, "read": m.gh_read, "issues": m.gh_issues, "create": m.gh_create_pr, "diff": m.gh_pr_diff}
+    return {"label": "GitHub", "pr": "Pull request", "connected": m.gh_connected, "repos": m.gh_repos, "tree": m.gh_tree, "read": m.gh_read, "issues": m.gh_issues, "create": m.gh_create_pr, "commit": m.gh_commit, "diff": m.gh_pr_diff}
 
 
 REVIEW_SYS = ("You are a meticulous senior code reviewer. Review the pull/merge request below and answer in the user's language ({lang}), in markdown, spoken-friendly but precise:\n"
@@ -1050,9 +1050,12 @@ async def _github_turn(ctx, plan: dict):
             yield ctx.sse(status=f"Meninjau {len(d['files'])} file...")
             text, credits = await git_review_text(prov, d, ctx.user, ctx.model_key, ctx.user_text)
             extra = {"tool": tool, "review_of": {"repo": repo, "number": d["number"], "url": d["url"]}}
-        else:
+        else:  # pr | commit
             if not repo:
                 raise HTTPException(400, "Sebutkan nama repo-nya (owner/repo) ya.")
+            branch = (plan.get("branch") or "").strip() if kind == "commit" else ""
+            if kind == "commit" and not branch:
+                raise HTTPException(400, "Sebutkan branch tujuan commit-nya ya (mis. `dev`) — atau minta aku buat pull request saja.")
             files = [p.strip("/") for p in (plan.get("files") or []) if p]
             tree = await gh_tree(ctx.user["id"], repo)
             if not files:
@@ -1071,15 +1074,23 @@ async def _github_turn(ctx, plan: dict):
                 except HTTPException:
                     current[p] = ""
             ctx_files = "\n\n".join(f"=== {p} ({'NEW FILE' if not c else 'current content'}) ===\n{c[:25000]}" for p, c in current.items())
-            res = await llm_json("You are a senior engineer preparing a pull request. Return the COMPLETE new content of every file you change (no diffs, no placeholders, no truncation). "
+            res = await llm_json(f"You are a senior engineer preparing a {'direct commit' if kind == 'commit' else 'pull request'}. Return the COMPLETE new content of every file you change (no diffs, no placeholders, no truncation). "
                                  "Reply JSON only: {\"title\":str,\"body\":str (markdown summary of changes),\"changes\":[{\"path\":str,\"content\":str}|{\"path\":str,\"delete\":true}]}. Keep unrelated code untouched.",
                                  f"Request: {plan.get('instructions') or ctx.user_text}\nSuggested title: {plan.get('title') or ''}\n\n{ctx_files}", ctx.model_key)
             changes = [c for c in (res.get("changes") or []) if isinstance(c, dict) and c.get("path")]
             credits = text_credits(ctx_files, json.dumps(changes, ensure_ascii=False), ctx.model_key)
-            yield ctx.sse(status="Membuat branch, commit & pull request...")
-            pr = await gh_create_pr(ctx.user["id"], repo, (res.get("title") or plan.get("title") or "Perubahan dari Oryntix")[:200], res.get("body") or "", changes)
-            text = f"{prov['pr']} **!{pr['number']} {pr['title']}** sudah dibuka di **{repo}** — [lihat di {prov['label']}]({pr['url']}).\n\nBranch `{pr['branch']}` → `{pr['base']}` · file: " + ", ".join(f"`{p}`" for p in pr["files"]) + f"\n\n{res.get('body') or ''}"
-            extra = {"tool": tool, "github_pr": pr}
+            title = (res.get("title") or plan.get("title") or "Perubahan dari Oryntix")[:200]
+            if kind == "commit":
+                yield ctx.sse(status=f"Commit langsung ke branch `{branch}`...")
+                cm = await prov["commit"](ctx.user["id"], repo, title, changes, branch)
+                note = " (branch baru dibuat dari default)" if cm.get("created_branch") else (" — ini default branch" if cm["branch"] == cm.get("default_branch") else "")
+                text = f"Commit **{cm['title']}** sudah masuk ke branch `{cm['branch']}`{note} di **{repo}** — [lihat di {prov['label']}]({cm['url']}).\n\nFile: " + ", ".join(f"`{p}`" for p in cm["files"]) + f"\n\n{res.get('body') or ''}"
+                extra = {"tool": tool, "github_commit": cm}
+            else:
+                yield ctx.sse(status="Membuat branch, commit & pull request...")
+                pr = await gh_create_pr(ctx.user["id"], repo, title, res.get("body") or "", changes)
+                text = f"{prov['pr']} **!{pr['number']} {pr['title']}** sudah dibuka di **{repo}** — [lihat di {prov['label']}]({pr['url']}).\n\nBranch `{pr['branch']}` → `{pr['base']}` · file: " + ", ".join(f"`{p}`" for p in pr["files"]) + f"\n\n{res.get('body') or ''}"
+                extra = {"tool": tool, "github_pr": pr}
     except HTTPException as e:
         text, extra = f"{e.detail}", {"tool": tool, "error": True}
     if credits:

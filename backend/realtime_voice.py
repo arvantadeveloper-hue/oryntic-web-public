@@ -15,7 +15,7 @@ from llm import record_usage, quota_exceeded, quota_message
 from chat import _can_access, _persona_system, _history_text
 from realtime import notify
 from ratelimit import rate_limit, get_limits, set_limits
-from pricing import usd_to_credits, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates, REALTIME_MODELS, DEFAULT_REALTIME_MODEL, realtime_credits_per_min, realtime_model_prices, affordable_tokens, LIVE_MODEL, is_live_model, backend_usage_usd, model_price
+from pricing import usd_to_credits, margin_for, realtime_usage_usd, get_pricing as platform_pricing, set_pricing as platform_set_pricing, compute_rates, REALTIME_MODELS, DEFAULT_REALTIME_MODEL, realtime_credits_per_min, realtime_model_prices, affordable_tokens, LIVE_MODEL, is_live_model, backend_usage_usd, model_price
 from tools import get_routing, TASK_CONTEXT
 from behaviour import get_behaviour, turn_detection
 from llm import MODEL_CATALOG, model_label, resolve_model
@@ -58,24 +58,13 @@ async def status(u: dict = Depends(current_user)):
             "models": [{"id": k, **{kk: v[kk] for kk in ("label", "tagline")}, "credits_per_min": realtime_credits_per_min(p, k), "default": k == DEFAULT_REALTIME_MODEL} for k, v in REALTIME_MODELS.items() if is_live_model(k)]}
 
 
-class PricingIn(BaseModel):
-    provider_usd_per_min: float = Field(gt=0)
-    margin_pct: float = Field(ge=0, le=500)
-    tax_pct: float = Field(ge=0, le=100)
-    usd_to_idr: float = Field(gt=0)
-    idr_per_credit: float = Field(gt=0)
-
-
 @router.get("/admin/realtime-pricing")
 async def admin_pricing(_: dict = Depends(require_platform_admin)):
-    p = await get_pricing()
-    return {**p, "credits_per_min": credits_per_min(p), "model": REALTIME_MODEL, "enabled": enabled()}
-
-
-@router.put("/admin/realtime-pricing")
-async def admin_set_pricing(x: PricingIn, _: dict = Depends(require_platform_admin)):
-    doc = await platform_set_pricing(x.model_dump())
-    return {**doc, "credits_per_min": credits_per_min(doc)}
+    """Read-only: the GPT-Live per-minute price comes from the price catalog (gpt-live/per_minute)."""
+    p = await platform_pricing()
+    m = realtime_model_prices(p, LIVE_MODEL)
+    return {"model": REALTIME_MODEL, "enabled": enabled(), "provider_usd_per_min": m.get("per_min_usd", 0.0), "margin_pct": margin_for(p, "realtime_call"),
+            "tax_pct": p["tax_pct"], "usd_to_idr": p["usd_to_idr"], "credits_per_min": realtime_credits_per_min(p, LIVE_MODEL), "catalog_path": "openai/gpt-live/per_minute"}
 
 
 class LimitsIn(BaseModel):
@@ -184,6 +173,9 @@ GITHUB_TOOLS = [
     {"type": "function", "name": "github_pr", "description": "Create a branch, commit the given full file contents and open a pull request on the user's GitHub repo. Only after the user explicitly asked for a PR; read the files first and pass complete new contents.",
      "parameters": {"type": "object", "properties": {"repo": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string", "description": "markdown summary of the changes"},
                                                      "changes": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}, "delete": {"type": "boolean"}}, "required": ["path"]}}}, "required": ["repo", "title", "changes"]}},
+    {"type": "function", "name": "github_commit", "description": "Commit the given full file contents DIRECTLY to a named branch of the user's GitHub repo (no pull request). Only when the user explicitly asked to commit/push directly and named the branch; read the files first and pass complete new contents.",
+     "parameters": {"type": "object", "properties": {"repo": {"type": "string"}, "title": {"type": "string", "description": "commit message"}, "branch": {"type": "string", "description": "exact branch name the user named"},
+                                                     "changes": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}, "delete": {"type": "boolean"}}, "required": ["path"]}}}, "required": ["repo", "title", "branch", "changes"]}},
 ]
 GITHUB_TOOLS.append({"type": "function", "name": "github_review", "description": "Fetch a pull request's diff (latest open PR when number omitted) so you can review it: summarize, point out risks and suggest fixes. The full written review is posted to the chat panel.",
                      "parameters": {"type": "object", "properties": {"repo": {"type": "string"}, "number": {"type": "integer"}}, "required": ["repo"]}})
@@ -440,7 +432,8 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
 
 LIVE_VOICE_STYLE = ("\n\nLIVE VOICE: you are the speaking front of this assistant. Anything that needs facts, memory, calculation, an image/video/document, scheduling, "
                     "search or any tool goes to your backend — say in a few words that you are checking, then relay its result naturally in your own voice. "
-                    "Never say you cannot do something your backend/tools can do. Keep every turn short and spoken.")
+                    "Never say you cannot do something your backend/tools can do. Keep every turn short and spoken.\n"
+                    "SPOKEN LANGUAGE: always speak {lang} (the caller's language setting), even if the caller speaks another language, unless they explicitly ask you to switch.")
 LIVE_BACKEND_PROMPT = ("You are the reasoning backend of {name}, who is in a LIVE VOICE call with {uname}. The voice model does the talking; you do the thinking, "
                        "facts and tools. Transcripts can contain mistakes, unfinished phrases and later corrections — use the latest context. Call the tools whenever "
                        "they fit (never claim you cannot). Return concise results for speech in {lang}: the relevant facts, the task's current status and the next step. "
@@ -454,7 +447,7 @@ async def _negotiate_live(call: dict, call_id: str, u: dict, sdp_offer: str, rol
     provider, backend = resolve_model(call.get("brain_model"))
     if provider != "openai":
         backend = "gpt-6-luna"  # Responses delegation only runs OpenAI models
-    instructions = call["instructions"] + LIVE_VOICE_STYLE
+    instructions = call["instructions"] + LIVE_VOICE_STYLE.format(lang=_lang_name(u))
     session = {"model": LIVE_MODEL, "instructions": instructions[:60000], "audio": {"output": {"voice": call["voice"]}}}
     if role in ("moderator", "solo"):
         resp = {"model": backend, "tool_choice": "auto",

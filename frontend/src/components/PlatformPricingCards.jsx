@@ -3,16 +3,14 @@ import { Percent, Gift, Save } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 
+// Hanya pengali global — harga provider diatur di tab Katalog Harga (satu-satunya sumber tarif)
 const PRICE_FIELDS = [
   ["margin_pct", "Margin platform (%)", 1], ["tax_pct", "PPN (%)", 0.5], ["usd_to_idr", "Kurs USD → IDR", 100], ["usd_per_credit", "Nilai 1 kredit (USD)", 0.0001], ["idr_per_credit", "Nilai 1 kredit (IDR, tampilan)", 1],
-  ["text_usd_per_1k_chars", "Teks (USD / 1k karakter)", 0.0001], ["image_usd", "Gambar (USD / gambar)", 0.001], ["profile_usd", "Profil persona (USD)", 0.001],
-  ["stt_usd", "Transkripsi (USD / permintaan)", 0.001], ["tts_usd", "Suara TTS (USD / permintaan)", 0.001], ["provider_usd_per_min", "Biaya koneksi Realtime (USD / menit)", 0.01],
-  ["rt_audio_in_usd_1m", "Realtime audio masuk (USD / 1M token)", 1], ["rt_audio_out_usd_1m", "Realtime audio keluar (USD / 1M token)", 1], ["rt_text_in_usd_1m", "Realtime teks masuk (USD / 1M token)", 0.5], ["rt_text_out_usd_1m", "Realtime teks keluar (USD / 1M token)", 0.5], ["rt_cached_in_usd_1m", "Realtime cache (USD / 1M token)", 0.1], ["video_usd_per_sec", "Video Seedance (USD / detik)", 0.001],
-  ["vision_usd", "Cuplikan layar ke asisten (USD / cuplikan)", 0.001], ["bandwidth_usd_per_gb", "Data panggilan teman — TURN (USD / GB)", 0.05], ["package_margin_pct", "Margin paket kredit (%)", 1],
+  ["chars_per_token", "Karakter per token (estimasi teks)", 0.5], ["video_res_480_mult", "Pengali video 480p", 0.1], ["video_res_1080_mult", "Pengali video 1080p", 0.1], ["video_real_person_mult", "Pengali video orang nyata", 0.05], ["package_margin_pct", "Margin paket kredit (%)", 1],
 ];
-const RATE_LABELS = { text_per_1k: "kredit / 1k karakter", image: "kredit / gambar", profile: "kredit / profil", stt: "kredit / transkripsi", tts: "kredit / TTS", realtime_per_min: "kredit / menit koneksi realtime (+ token audio aktual)", vision: "kredit / cuplikan layar", bandwidth_per_mb: "kredit / MB data panggilan", video_per_sec: "kredit / detik video" };
+const RATE_LABELS = { text_per_1k: "kredit / 1k karakter (model tanpa harga)", image: "kredit / gambar", profile: "kredit / profil", stt: "kredit / transkripsi", tts: "kredit / TTS", realtime_per_min: "kredit / menit GPT-Live", vision: "kredit / cuplikan layar", bandwidth_per_mb: "kredit / MB data panggilan", video_per_sec: "kredit / detik video" };
 
-export function PlatformPricingCard({ pricing, rates, rtModels, tools, onSaved }) {
+export function PlatformPricingCard({ pricing, rates, tools, onSaved }) {
   const [form, setForm] = useState(pricing);
   const [saving, setSaving] = useState(false);
   useEffect(() => setForm(pricing), [pricing]);
@@ -26,7 +24,7 @@ export function PlatformPricingCard({ pricing, rates, rtModels, tools, onSaved }
     <div className="aivora-card p-5" data-testid="platform-pricing-card">
       <div className="flex items-center gap-2">
         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#7C3AED]/10 text-[#7C3AED]"><Percent size={18} /></span>
-        <div><p className="text-sm font-bold text-slate-900">Tarif & Margin Platform</p><p className="text-xs text-slate-500">Semua kredit dihitung: biaya provider × (1 + margin) × (1 + PPN) × kurs ÷ nilai kredit, dibulatkan ke atas.</p></div>
+        <div><p className="text-sm font-bold text-slate-900">Margin & Pengali Global</p><p className="text-xs text-slate-500">Kredit = harga provider (dari <b>Katalog Harga</b>) × (1 + margin) × (1 + PPN) ÷ nilai kredit. Harga provider per model/layanan hanya diubah di tab Katalog Harga.</p></div>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-5">
         {PRICE_FIELDS.map(([k, label, step]) => (
@@ -34,25 +32,12 @@ export function PlatformPricingCard({ pricing, rates, rtModels, tools, onSaved }
             <input type="number" step={step} min="0" value={form[k]} onChange={(e) => setForm({ ...form, [k]: parseFloat(e.target.value) || 0 })} data-testid={`pp-${k}`} className="input-dark py-2 text-sm" /></label>
         ))}
       </div>
-      <div className="mt-5" data-testid="pp-realtime-models">
-        <p className="mb-2 text-xs font-bold text-slate-700">Model suara Realtime — harga provider (USD / 1M token) & tarif per menit</p>
-        <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left text-slate-500"><th className="py-1 pr-3">Model</th><th className="pr-3">Audio masuk</th><th className="pr-3">Audio keluar</th><th className="pr-3">Teks masuk</th><th className="pr-3">Teks keluar</th><th className="pr-3">Cached</th><th>Kredit/menit</th></tr></thead>
-          <tbody>{(rtModels || []).map((m) => {
-            const ov = (form.realtime_models || {})[m.id] || {};
-            const cell = (k) => <td key={k} className="pr-3 py-1"><input type="number" step="0.1" min="0" value={ov[k] ?? m[k]} data-testid={`pp-rt-${m.id}-${k}`} onChange={(e) => setForm({ ...form, realtime_models: { ...(form.realtime_models || {}), [m.id]: { ...ov, [k]: parseFloat(e.target.value) || 0 } } })} className="input-dark w-24 py-1.5 text-xs" /></td>;
-            return <tr key={m.id} className="border-t border-[#E7ECF3]"><td className="py-1 pr-3 font-semibold text-slate-800">{m.label}</td>{["audio_in", "audio_out", "text_in", "text_out", "cached_in"].map(cell)}<td className="font-bold text-[#2F6BFF]" data-testid={`pp-rt-${m.id}-cpm`}>~{m.credits_per_min}</td></tr>;
-          })}</tbody></table></div>
-      </div>
       {tools && (
         <div className="mt-5" data-testid="pp-tools">
-          <p className="mb-2 text-xs font-bold text-slate-700">Alat bawaan provider — biaya provider (USD / pemakaian) → kredit yang ditagih</p>
-          <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left text-slate-500"><th className="py-1 pr-3">Alat</th><th className="pr-3">Provider</th><th className="pr-3">USD / pemakaian</th><th>Kredit</th></tr></thead>
-            <tbody>{tools.map((t) => {
-              const v = (form.tool_prices || {})[t.id];
-              return <tr key={t.id} className="border-t border-[#E7ECF3]"><td className="py-1 pr-3 font-semibold text-slate-800">{t.label}</td><td className="pr-3 text-slate-500">{t.provider}</td>
-                <td className="pr-3 py-1"><input type="number" step="0.001" min="0" value={v ?? t.usd} data-testid={`pp-tool-${t.id.replace(":", "-")}`} onChange={(e) => setForm({ ...form, tool_prices: { ...(form.tool_prices || {}), [t.id]: parseFloat(e.target.value) || 0 } })} className="input-dark w-24 py-1.5 text-xs" /></td>
-                <td className="font-bold text-[#2F6BFF]" data-testid={`pp-tool-${t.id.replace(":", "-")}-credits`}>{t.credits > 0 ? t.credits : "token saja"}</td></tr>;
-            })}</tbody></table></div>
+          <p className="mb-2 text-xs font-bold text-slate-700">Alat bawaan provider — dibaca dari Katalog Harga (ubah di tab Katalog Harga)</p>
+          <div className="flex flex-wrap gap-2">{tools.map((t) => (
+            <span key={t.id} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700" data-testid={`pp-tool-${t.id.replace(":", "-")}-credits`}>{t.label} <span className="text-slate-400">({t.provider})</span> · <b className="text-[#2F6BFF]">{t.credits > 0 ? `${t.credits} kredit` : "token saja"}</b></span>
+          ))}</div>
         </div>
       )}
       {rates && (

@@ -116,44 +116,18 @@ async def tasks(_: dict = Depends(require_platform_admin)):
 
 
 class PlatformPricingIn(BaseModel):
+    """Global multipliers only — provider prices live in the price catalog (/admin/pricing-catalog)."""
     margin_pct: float = Field(ge=0, le=500)
     tax_pct: float = Field(ge=0, le=100)
     usd_to_idr: float = Field(gt=0)
-    realtime_models: Optional[dict] = None  # {model_id: {audio_in, audio_out, text_in, text_out, cached_in}} USD/1M overrides per voice model
     idr_per_credit: float = Field(gt=0)
-    text_usd_per_1k_chars: float = Field(gt=0)
-    image_usd: float = Field(gt=0)
-    profile_usd: float = Field(gt=0)
-    stt_usd: float = Field(gt=0)
-    tts_usd: float = Field(gt=0)
-    provider_usd_per_min: float = Field(gt=0)
     usd_per_credit: float = Field(default=0.001, gt=0)
-    rt_audio_in_usd_1m: float = Field(default=32.0, ge=0)
-    rt_audio_out_usd_1m: float = Field(default=64.0, ge=0)
-    rt_text_in_usd_1m: float = Field(default=4.0, ge=0)
-    rt_text_out_usd_1m: float = Field(default=24.0, ge=0)
-    rt_cached_in_usd_1m: float = Field(default=0.4, ge=0)
-    video_usd_per_sec: float = Field(default=0.80, ge=0)
-    video20_usd_per_sec: float = Field(default=0.60, ge=0)
     video_res_480_mult: float = Field(default=0.6, gt=0, le=5)
     video_res_1080_mult: float = Field(default=1.6, gt=0, le=10)
     video_real_person_mult: float = Field(default=1.45, gt=0, le=10)
     video_audio_mult: float = Field(default=1.0, gt=0, le=10)
-    vision_usd: float = Field(default=0.006, ge=0)
-    bandwidth_usd_per_gb: float = Field(default=0.5, ge=0)
     margin_overrides: dict[str, float] = Field(default_factory=lambda: {"call_bandwidth": 50.0})
     chars_per_token: float = Field(default=4.0, ge=1, le=10)
-    model_prices: dict[str, dict[str, float]] = Field(default_factory=lambda: dict(DEFAULT_PRICING["model_prices"]))
-    tool_prices: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_PRICING["tool_prices"]))  # USD per use of a provider built-in tool
-
-    @field_validator("tool_prices")
-    @classmethod
-    def _tools_known(cls, v):
-        from pricing import TOOL_BY_ID
-        bad = [k for k in v if k not in TOOL_BY_ID]
-        if bad or any(x < 0 or x > 10 for x in v.values()):
-            raise ValueError(f"tool_prices tidak valid: {bad or 'nilai harus 0–10 USD'}")
-        return v
     package_margin_pct: float = Field(default=15.0, ge=0, le=500)
     package_round_idr: int = Field(default=1000, ge=1, le=1_000_000)
     packages: list[PackageTierIn] = Field(default_factory=lambda: [PackageTierIn(**t) for t in DEFAULT_PRICING["packages"]], min_length=1, max_length=12)
@@ -191,13 +165,13 @@ async def pricing(_: dict = Depends(require_platform_staff)):
         "rates": compute_rates(p),
         "features": feature_table(p),
         "models": model_table(p, MODEL_CATALOG),
-        "realtime_models": [{"id": k, **realtime_model_prices(p, k), "credits_per_min": realtime_credits_per_min(p, k)} for k in REALTIME_MODELS],
+        "realtime_models": [{"id": k, **realtime_model_prices(p, k), "credits_per_min": realtime_credits_per_min(p, k)} for k in REALTIME_MODELS if k == "gpt-live-1"],
         "tools": tool_table(p),
         "trial": await get_trial(),
         "providers": [
             {"provider": "OpenAI", "model": GPT_MODEL, "capability": "text", "unit": "1k chars", "rate_credits_per_1k_chars": RATES["text_per_1k"], "status": "active"},
             {"provider": "Gemini (Nano Banana)", "model": IMAGE_MODEL, "capability": "image", "unit": "image", "rate_credits": RATES["image"], "status": "active"},
-            {"provider": "OpenAI", "model": "gpt-realtime-2", "capability": "realtime voice", "unit": "minute", "rate_credits": RATES["realtime_per_min"], "status": "active"},
+            {"provider": "OpenAI", "model": "gpt-live-1", "capability": "realtime voice", "unit": "minute", "rate_credits": RATES["realtime_per_min"], "status": "active"},
         ],
         "tariff": {
             "profile_generation_credits": RATES["profile"], "image_generation_credits": RATES["image"],

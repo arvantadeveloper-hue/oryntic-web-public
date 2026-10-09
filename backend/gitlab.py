@@ -142,6 +142,37 @@ async def gl_create_mr(uid: str, project: str, title: str, body: str, changes: l
     return {"repo": project, "number": mr["iid"], "url": mr["web_url"], "branch": branch, "base": target, "title": mr["title"], "files": [a["file_path"] for a in actions]}
 
 
+async def gl_commit(uid: str, project: str, title: str, changes: list, branch: str) -> dict:
+    """One commit with all file changes straight onto `branch` (created from the default branch when missing)."""
+    tok, base = await _cred(uid)
+    pid = _pid(project)
+    if not changes:
+        raise HTTPException(400, "Tidak ada perubahan berkas untuk di-commit.")
+    info = await _gl(tok, base, "GET", f"/projects/{pid}")
+    default = info.get("default_branch", "main")
+    branch = (branch or "").strip() or default
+    created = False
+    try:
+        await _gl(tok, base, "GET", f"/projects/{pid}/repository/branches/{branch.replace('/', '%2F')}")
+    except HTTPException:
+        await _gl(tok, base, "POST", f"/projects/{pid}/repository/branches", params={"branch": branch, "ref": default})
+        created = True
+    existing = set((await gl_tree(uid, project, branch, limit=100000))["paths"])
+    actions = []
+    for ch in changes:
+        path = (ch.get("path") or "").strip("/")
+        if not path:
+            continue
+        if ch.get("delete"):
+            if path in existing:
+                actions.append({"action": "delete", "file_path": path})
+            continue
+        actions.append({"action": "update" if path in existing else "create", "file_path": path, "content": ch.get("content") or ""})
+    c = await _gl(tok, base, "POST", f"/projects/{pid}/repository/commits", json={"branch": branch, "commit_message": title[:200], "actions": actions})
+    return {"repo": project, "branch": branch, "default_branch": default, "created_branch": created, "title": title, "files": [a["file_path"] for a in actions],
+            "url": c.get("web_url") or f"{info.get('web_url', '')}/-/commits/{branch}"}
+
+
 async def gl_mr_diff(uid: str, project: str, number: Optional[int] = None, max_chars: int = 45_000) -> dict:
     """MR metadata + per-file diffs for code review (latest open MR when number is omitted)."""
     tok, base = await _cred(uid)
@@ -237,6 +268,18 @@ async def issues(x: RepoIn, u: dict = Depends(current_user)):
 @router.post("/pr")
 async def create_mr(x: MrIn, u: dict = Depends(current_user)):
     return await gl_create_mr(u["id"], x.repo, x.title, x.body, x.changes, x.base)
+
+
+class CommitIn(BaseModel):
+    repo: str = Field(max_length=200)
+    title: str = Field(min_length=3, max_length=200)
+    changes: list = Field(min_length=1, max_length=20)
+    branch: str = Field(min_length=1, max_length=120)
+
+
+@router.post("/commit")
+async def commit(x: CommitIn, u: dict = Depends(current_user)):
+    return await gl_commit(u["id"], x.repo, x.title, x.changes, x.branch)
 
 
 class ReviewIn(BaseModel):

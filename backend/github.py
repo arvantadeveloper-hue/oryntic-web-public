@@ -129,6 +129,47 @@ async def gh_create_pr(uid: str, repo: str, title: str, body: str, changes: list
     return {"repo": repo, "number": pr["number"], "url": pr["html_url"], "branch": branch, "base": base, "title": pr["title"], "files": [c.get("path") for c in changes if c.get("path")]}
 
 
+async def gh_commit(uid: str, repo: str, title: str, changes: list, branch: str) -> dict:
+    """Commit file changes straight onto `branch` (created from the default branch when it does not exist yet)."""
+    tok = await _token(uid)
+    repo = _repo(repo)
+    if not changes:
+        raise HTTPException(400, "Tidak ada perubahan berkas untuk di-commit.")
+    info = await _gh(tok, "GET", f"/repos/{repo}")
+    default = info.get("default_branch", "main")
+    branch = (branch or "").strip() or default
+    created = False
+    try:
+        await _gh(tok, "GET", f"/repos/{repo}/git/ref/heads/{branch}")
+    except HTTPException:
+        base_sha = (await _gh(tok, "GET", f"/repos/{repo}/git/ref/heads/{default}"))["object"]["sha"]
+        await _gh(tok, "POST", f"/repos/{repo}/git/refs", json={"ref": f"refs/heads/{branch}", "sha": base_sha})
+        created = True
+    files = []
+    for ch in changes:
+        path = (ch.get("path") or "").strip("/")
+        if not path:
+            continue
+        sha = None
+        try:
+            cur = await _gh(tok, "GET", f"/repos/{repo}/contents/{path}", params={"ref": branch})
+            sha = cur.get("sha") if isinstance(cur, dict) else None
+        except HTTPException:
+            sha = None
+        if ch.get("delete"):
+            if sha:
+                await _gh(tok, "DELETE", f"/repos/{repo}/contents/{path}", json={"message": f"{title}: hapus {path}", "sha": sha, "branch": branch})
+                files.append(path)
+            continue
+        payload = {"message": f"{title}: {path}", "content": base64.b64encode((ch.get("content") or "").encode("utf-8")).decode(), "branch": branch}
+        if sha:
+            payload["sha"] = sha
+        await _gh(tok, "PUT", f"/repos/{repo}/contents/{path}", json=payload)
+        files.append(path)
+    return {"repo": repo, "branch": branch, "default_branch": default, "created_branch": created, "title": title, "files": files,
+            "url": f"https://github.com/{repo}/commits/{branch}"}
+
+
 async def gh_pr_diff(uid: str, repo: str, number: Optional[int] = None, max_chars: int = 45_000) -> dict:
     """PR metadata + per-file patches for code review (latest open PR when number is omitted)."""
     tok = await _token(uid)
@@ -220,6 +261,18 @@ async def issues(x: RepoIn, u: dict = Depends(current_user)):
 @router.post("/pr")
 async def create_pr(x: PrIn, u: dict = Depends(current_user)):
     return await gh_create_pr(u["id"], x.repo, x.title, x.body, x.changes, x.base)
+
+
+class CommitIn(BaseModel):
+    repo: str = Field(max_length=200)
+    title: str = Field(min_length=3, max_length=200)
+    changes: list = Field(min_length=1, max_length=20)
+    branch: str = Field(min_length=1, max_length=120)
+
+
+@router.post("/commit")
+async def commit(x: CommitIn, u: dict = Depends(current_user)):
+    return await gh_commit(u["id"], x.repo, x.title, x.changes, x.branch)
 
 
 class ReviewIn(BaseModel):

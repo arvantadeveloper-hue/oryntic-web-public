@@ -91,9 +91,9 @@ def is_media_refusal(user_text: str, reply: str) -> bool:
 
 async def plan_tool(text: str, history: str) -> dict:
     sys = ('Decide if the user\'s LAST message explicitly asks the assistant to CREATE a deliverable or act on an external service. Reply JSON only: '
-           '{"tool":"image"|"image_edit"|"video"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"github_review"|"gitlab_repos"|"gitlab_read"|"gitlab_issues"|"gitlab_pr"|"gitlab_review"|"social_publish"|"none",'
+           '{"tool":"image"|"image_edit"|"video"|"document"|"drive_save"|"drive_update"|"drive_link"|"github_repos"|"github_read"|"github_issues"|"github_pr"|"github_commit"|"github_review"|"gitlab_repos"|"gitlab_read"|"gitlab_issues"|"gitlab_pr"|"gitlab_commit"|"gitlab_review"|"social_publish"|"none",'
            '"image_prompt":str,"image_prompts":[str],"quality":"hemat"|"standar"|"tinggi","preset":"ig_story"|"ig_feed"|"yt_thumb"|"li_banner","video_prompt":str,"duration":int,"aspect_ratio":"16:9"|"9:16"|"1:1"|"4:3"|"3:4"|"21:9","resolution":"480p"|"720p"|"1080p","real_person":bool,"with_audio":bool,"from_image":bool,"edit_prompt":str,"title":str,"instructions":str,"file":str,"text":str,"mode":"append"|"replace","kind":"doc"|"sheet",'
-           '"repo":str,"path":str,"query":str,"state":"open"|"closed"|"all","files":[str],"number":int,"providers":[str],"caption":str,"content_kind":"text"|"image"|"video"}. '
+           '"repo":str,"path":str,"query":str,"state":"open"|"closed"|"all","files":[str],"number":int,"branch":str,"providers":[str],"caption":str,"content_kind":"text"|"image"|"video"}. '
            '"image" = the user wants ANY still visual generated, shown or rendered: photo, photorealistic/realistic picture, render, illustration, logo, poster, banner, wallpaper, thumbnail, sketch, painting, visualization ("tunjukkan", "tampilkan", "render", "visualisasikan", "gambarkan" count as a request). If they ask for MORE THAN ONE image (e.g. "3 variasi", "beberapa poster", '
            '"gambar A dan gambar B"), put one detailed English prompt PER image in image_prompts (max 6) and the first one in image_prompt; for a single image image_prompts has exactly one item. '
            'For image/image_edit also set aspect_ratio: "9:16" for portrait/vertical/story/poster/phone wallpaper ("potret", "vertikal", "tegak"), "16:9" for landscape/wide/banner/desktop wallpaper/thumbnail/presentation ("lanskap", "melebar", "horizontal"), "21:9" for ultra-wide/LinkedIn or website banner/header/cover, "4:3"/"3:4" only when explicitly asked, else "1:1"; '
@@ -117,8 +117,9 @@ async def plan_tool(text: str, history: str) -> dict:
            '"github_read" = user asks to read/show/explain a file, folder or the structure of a GitHub repo (repo = owner/name as mentioned or from context; path = file/folder path or "" for the tree). '
            '"github_issues" = user asks about issues/PRs of a repo (repo; state). '
            '"github_pr" = user asks to change code/files in a repo and open a pull request / make a PR / fix something in the repo (repo; instructions = what to change; files = file paths they mentioned, may be empty; title = short PR title). '
+           '"github_commit" = user asks to change code/files in a repo and COMMIT/PUSH DIRECTLY to a branch WITHOUT a pull request (e.g. "commit langsung ke branch dev", "push ke main tanpa PR"); repo; instructions; files; title = short commit message; branch = the exact branch name they mentioned ("" if they did not name one). Prefer github_pr unless the user clearly wants a direct commit. '
            '"github_review" = user asks to review/check/evaluate/summarize a pull request or MR, its changes or diff (repo; number = PR/MR number if mentioned, e.g. "#12" or "!12", else omit → latest open one). '
-           'Use gitlab_* (same meanings; gitlab_pr = open a Merge Request, gitlab_review = review an MR) when the user says GitLab / merge request / MR or the project is known to be on GitLab; otherwise github_*. '
+           'Use gitlab_* (same meanings; gitlab_pr = open a Merge Request, gitlab_commit = direct commit, gitlab_review = review an MR) when the user says GitLab / merge request / MR or the project is known to be on GitLab; otherwise github_*. '
            'Only use github_*/gitlab_* when a code repository, PR/MR or issue is clearly meant. '
            '"social_publish" = user asks to post/publish/share content to social media (providers from: linkedin, meta (Facebook Page/Instagram), youtube — map Instagram/Facebook→meta; content_kind: image = the latest generated image, video = the latest video, text = a text-only post; caption = the caption they gave, or write a fitting one in their language).')
     plan: dict = {}
@@ -126,7 +127,7 @@ async def plan_tool(text: str, history: str) -> dict:
         plan = await llm_json(sys, f"Recent conversation:\n{history[-2500:]}\n\nLAST MESSAGE: {text}")
     except Exception:
         plan = {}
-    if plan.get("tool") not in ("image", "image_edit", "video", "document", "drive_save", "drive_update", "drive_link", "github_repos", "github_read", "github_issues", "github_pr", "github_review", "gitlab_repos", "gitlab_read", "gitlab_issues", "gitlab_pr", "gitlab_review", "social_publish"):
+    if plan.get("tool") not in ("image", "image_edit", "video", "document", "drive_save", "drive_update", "drive_link", "github_repos", "github_read", "github_issues", "github_pr", "github_commit", "github_review", "gitlab_repos", "gitlab_read", "gitlab_issues", "gitlab_pr", "gitlab_commit", "gitlab_review", "social_publish"):
         return {"tool": "none"}
     if plan["tool"] == "image":
         prompts = [str(p).strip() for p in (plan.get("image_prompts") or []) if str(p).strip()][:6]

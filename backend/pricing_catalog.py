@@ -1,9 +1,10 @@
-"""Hierarchical price catalog: provider → service/model → price component → unit.
+"""Hierarchical price catalog: provider → service/model → price component → unit. THE single source of provider prices.
 
 ONE formula for every component (easy to change in one place):
     base_usd = usd * qty / qty_basis
     sell_usd = base_usd × (1 + margin%) × (1 + tax%)      # steps listed in PIPELINE
     credits  = sell_usd / usd_per_credit
+Per-image prices are flat: unit "image", qty_basis 1, usd = price of one image.
 
 margin/tax resolution order: component → service → provider → platform feature override → platform global.
 Stored in Mongo as config/pricing_catalog; DEFAULT_CATALOG below is the seed taken from the providers' docs.
@@ -22,7 +23,7 @@ UNITS = {
     "token": "token", "character": "karakter", "minute": "menit", "second": "detik", "image": "gambar",
     "request": "permintaan", "call": "panggilan API", "search": "pencarian", "session": "sesi",
     "container_hour": "jam kontainer", "GB": "GB", "GB_day": "GB per hari", "profile": "profil",
-    "snapshot": "cuplikan", "page": "halaman", "song": "lagu", "video_second": "detik video",
+    "snapshot": "cuplikan", "page": "halaman", "k_chars": "1.000 karakter", "song": "lagu", "video_second": "detik video",
 }
 M1 = 1_000_000
 
@@ -31,7 +32,7 @@ def comp(cid, label, unit, qty_basis, usd, **kw) -> dict:
     return {"id": cid, "label": label, "unit": unit, "qty_basis": qty_basis, "usd": usd,
             "modality": kw.get("modality", "text"), "direction": kw.get("direction", "flat"),
             "margin_pct": kw.get("margin_pct"), "tax_pct": kw.get("tax_pct"), "enabled": kw.get("enabled", True),
-            "flat_qty": kw.get("flat_qty"), "doc_col": kw.get("doc_col"), "note": kw.get("note", "")}
+            "doc_col": kw.get("doc_col"), "note": kw.get("note", "")}
 
 
 def _text_model(sid, label, doc_model, usd_in, usd_out, cached=None, note="") -> dict:
@@ -43,7 +44,7 @@ def _text_model(sid, label, doc_model, usd_in, usd_out, cached=None, note="") ->
 
 
 DEFAULT_CATALOG = {
-    "version": 2,
+    "version": 3,
     "providers": [
         {"id": "openai", "label": "OpenAI", "docs_url": "https://developers.openai.com/api/docs/pricing", "margin_pct": None, "tax_pct": None,
          "doc_cols": {"text_in": 0, "cached_in": 1, "text_out": 3}, "services": [
@@ -75,11 +76,10 @@ DEFAULT_CATALOG = {
                 comp("text_out", "Teks output", "token", M1, 24.0, direction="output"),
                 comp("cached_in", "Input (cache hit)", "token", M1, 0.40, direction="input")]},
             {"id": "gpt-image", "label": "GPT Image 2.5", "kind": "image", "doc_model": "gpt-image-2.5-sunburst", "margin_pct": None, "tax_pct": None, "components": [
-                comp("image_in", "Gambar input", "token", M1, 8.0, modality="image", direction="input",
-                     flat_qty={"default": 0}),
-                comp("image_out", "Gambar output", "token", M1, 30.0, modality="image", direction="output",
-                     flat_qty={"1024x1024:low": 272, "1024x1024:medium": 1056, "1024x1024:high": 4160, "default": 1056},
-                     note="Token flat per gambar sesuai ukuran:kualitas (kalkulator OpenAI)."),
+                comp("image_in", "Gambar input (per gambar)", "image", 1, 0.0084, modality="image", direction="input",
+                     note="Flat per gambar referensi ≤1024² (≈1.056 token × $8/1M)."),
+                comp("image_out", "Gambar output (per gambar, 1024² medium)", "image", 1, 0.032, modality="image", direction="output",
+                     note="Flat per gambar: low ≈ $0,008 · medium ≈ $0,032 · high ≈ $0,125 (kalkulator OpenAI)."),
                 comp("text_in", "Teks prompt", "token", M1, 5.0, direction="input")]},
             {"id": "openai-whisper", "label": "Transkripsi suara (Whisper)", "kind": "stt", "doc_model": "gpt-transcribe", "margin_pct": None, "tax_pct": None, "components": [
                 comp("per_request", "Per permintaan transkripsi", "request", 1, 0.0165, modality="audio", direction="input")]},
@@ -92,8 +92,7 @@ DEFAULT_CATALOG = {
             {"id": "openai:code_interpreter", "label": "Tool: Code Interpreter", "kind": "tool", "doc_model": "Containers", "margin_pct": None, "tax_pct": None, "components": [
                 comp("per_session", "Per sesi kontainer 20 menit (1 GB)", "session", 1, 0.03)]},
             {"id": "openai:image_generation", "label": "Tool: Pembuatan gambar", "kind": "tool", "doc_model": "", "margin_pct": None, "tax_pct": None, "components": [
-                comp("per_image", "Per gambar (1024², medium)", "token", M1, 30.0, modality="image", direction="output",
-                     flat_qty={"default": 1056})]},
+                comp("per_image", "Per gambar (1024², medium)", "image", 1, 0.032, modality="image", direction="output")]},
             {"id": "openai:file_search", "label": "Tool: File search", "kind": "tool", "doc_model": "File search", "margin_pct": None, "tax_pct": None, "components": [
                 comp("per_call", "Per 1.000 panggilan tool", "call", 1000, 2.50),
                 comp("storage", "Penyimpanan per GB per hari", "GB_day", 1, 0.10, note="1 GB pertama gratis.")]},
@@ -107,9 +106,8 @@ DEFAULT_CATALOG = {
             _text_model("gemini-3-5-flash", "Gemini 3.5 Flash", "gemini-3.5-flash", 1.50, 9.0, 0.15),
             _text_model("gemini-3-flash", "Gemini 3 Flash", "gemini-3-flash-preview", 0.50, 3.0, 0.05),
             {"id": "gemini-nano-banana", "label": "Gemini 2.5 Flash Image (Nano Banana)", "kind": "image", "doc_model": "gemini-2.5-flash-image", "margin_pct": None, "tax_pct": None, "components": [
-                comp("image_out", "Gambar output", "token", M1, 30.0, modality="image", direction="output",
-                     flat_qty={"1024x1024": 1290, "2048x2048": 1120, "4096x4096": 2000, "default": 1290},
-                     note="Gambar ≤1024² = 1.290 token flat (≈$0,039/gambar)."),
+                comp("image_out", "Gambar output (per gambar)", "image", 1, 0.039, modality="image", direction="output",
+                     note="Flat per gambar ≤1024² (1.290 token × $30/1M)."),
                 comp("text_in", "Teks/gambar input", "token", M1, 0.30, direction="input")]},
             {"id": "gemini:google_search", "label": "Tool: Google Search grounding", "kind": "tool", "doc_model": "Google Search", "margin_pct": None, "tax_pct": None, "components": [
                 comp("per_request", "Per 1.000 permintaan (Gemini 3+)", "request", 1000, 14.0, note="5.000 permintaan pertama per bulan gratis.")]},
@@ -142,11 +140,14 @@ DEFAULT_CATALOG = {
                      note="Tarif overage metered.ca: $0,40/GB (Growth), $0,20/GB (Business), $0,10/GB (Enterprise).")]},
             {"id": "persona-profile", "label": "Pembuatan profil persona", "kind": "infra", "doc_model": "", "margin_pct": None, "tax_pct": None, "components": [
                 comp("per_profile", "Per profil", "profile", 1, 0.026)]},
+            {"id": "text-default", "label": "Teks default (model tanpa harga di katalog)", "kind": "text", "doc_model": "", "margin_pct": None, "tax_pct": None, "components": [
+                comp("per_1k_chars", "Per 1.000 karakter (input + output)", "k_chars", 1, 0.00675, note="Dipakai hanya bila model otak tidak ada di katalog.")]},
         ]},
     ],
 }
 # platform feature key → (service id, component id) used by the billing engine
 FEATURE_COMPONENT = {
+    "text": ("text-default", "per_1k_chars"),
     "image": ("gemini-nano-banana", "image_out"),
     "profile": ("persona-profile", "per_profile"),
     "stt": ("openai-whisper", "per_request"),
@@ -163,6 +164,7 @@ _cache = {"at": 0.0, "cat": None}
 def _merge(stored: dict | None) -> dict:
     """Defaults + admin edits: match by id so new seed entries appear and custom entries survive."""
     out = {"version": DEFAULT_CATALOG["version"], "providers": [], "updated_at": (stored or {}).get("updated_at")}
+    legacy = int((stored or {}).get("version") or 0) < 3  # v2 stored flat-token image rows → superseded by the per-image seed
     sp = {p["id"]: p for p in (stored or {}).get("providers") or []}
     for dp in DEFAULT_CATALOG["providers"]:
         p = {**dp, **{k: v for k, v in sp.get(dp["id"], {}).items() if k != "services"}}
@@ -170,7 +172,8 @@ def _merge(stored: dict | None) -> dict:
         services = []
         for dsv in dp["services"]:
             sv = {**dsv, **{k: v for k, v in ss.get(dsv["id"], {}).items() if k != "components"}}
-            sc = {c["id"]: c for c in (ss.get(dsv["id"], {}).get("components") or [])}
+            sc = {c["id"]: {k: v for k, v in c.items() if k != "flat_qty"} for c in (ss.get(dsv["id"], {}).get("components") or [])
+                  if not (legacy and c.get("flat_qty"))}
             sv["components"] = [{**dc, **sc.get(dc["id"], {})} for dc in dsv["components"]] + \
                                [c for cid, c in sc.items() if cid not in {d["id"] for d in dsv["components"]}]
             services.append(sv)
@@ -223,18 +226,17 @@ def _pct(field: str, c: dict, s: dict, p: dict, pricing: dict, feature: str | No
     return float(pricing.get("tax_pct", 11.0))
 
 
-def quote(service_id: str, component_id: str, qty: float, pricing: dict, feature: str | None = None,
-          variant: str | None = None, cat: dict | None = None) -> Optional[dict]:
-    """The ONE calculation. Returns the full breakdown, or None when the component does not exist."""
+def quote(service_id: str, component_id: str, qty: float | None, pricing: dict, feature: str | None = None,
+          cat: dict | None = None) -> Optional[dict]:
+    """The ONE calculation. Returns the full breakdown, or None when the component does not exist/is disabled."""
     hit = find(service_id, component_id, cat)
     if not hit:
         return None
     p, s, c = hit
     if not c.get("enabled", True):
         return None
-    if qty is None:  # flat quantity from the docs (e.g. tokens per image)
-        fq = c.get("flat_qty") or {}
-        qty = float(fq.get(variant or "default", fq.get("default", 1)))
+    if qty is None:
+        qty = 1.0
     margin = _pct("margin_pct", c, s, p, pricing, feature)
     tax = _pct("tax_pct", c, s, p, pricing, feature)
     base = float(c["usd"]) * float(qty) / max(float(c.get("qty_basis") or 1), 1e-9)
@@ -249,9 +251,8 @@ def quote(service_id: str, component_id: str, qty: float, pricing: dict, feature
             "total_usd": sell, "credits_exact": sell / upc, "credits": max(1, math.ceil(sell / upc))}
 
 
-def credits(service_id: str, component_id: str, qty: float, pricing: dict, feature: str | None = None,
-            variant: str | None = None) -> Optional[float]:
-    q = quote(service_id, component_id, qty, pricing, feature, variant)
+def credits(service_id: str, component_id: str, qty: float | None, pricing: dict, feature: str | None = None) -> Optional[float]:
+    q = quote(service_id, component_id, qty, pricing, feature)
     return q["credits_exact"] if q else None
 
 
@@ -264,11 +265,11 @@ def unit_usd(service_id: str, component_id: str) -> Optional[float]:
 
 
 def feature_usd(feature: str, pricing: dict) -> Optional[float]:
-    """Provider cost of one unit of a platform feature (flat token tables resolved)."""
+    """Provider cost of ONE unit of a platform feature (one image, one minute, one request, 1k chars …)."""
     path = FEATURE_COMPONENT.get(feature)
     if not path:
         return None
-    q = quote(path[0], path[1], None if (find(path[0], path[1]) or (None, None, {}))[2].get("flat_qty") else 1, pricing, feature)
+    q = quote(path[0], path[1], 1, pricing, feature)
     return q["base_usd"] if q else None
 
 
@@ -280,9 +281,7 @@ def table(pricing: dict) -> list:
         for s in p["services"]:
             rows = []
             for c in s["components"]:
-                fq = c.get("flat_qty") or {}
-                qty = float(fq.get("default", 1)) if fq else 1.0
-                q = quote(s["id"], c["id"], qty, pricing, None) or {}
+                q = quote(s["id"], c["id"], 1.0, pricing, None) or {}
                 rows.append({**c, "unit_label": UNITS.get(c["unit"], c["unit"]), "calc": q})
             services.append({**s, "components": rows})
         out.append({**p, "services": services})

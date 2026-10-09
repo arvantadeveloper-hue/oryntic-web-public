@@ -12,12 +12,12 @@ const pct = (field, c, s, p, g) => {
   for (const src of [c, s, p]) if (src?.[field] !== null && src?.[field] !== undefined && src?.[field] !== "") return N(src[field]);
   return N(g[field]);
 };
+// biaya 1 satuan: harga ÷ qty dasar (gambar = flat per gambar karena qty dasar 1)
 const calc = (c, s, p, g) => {
-  const flat = c.flat_qty && Object.keys(c.flat_qty).length ? N(c.flat_qty.default ?? Object.values(c.flat_qty)[0]) : 1;
-  const base = (N(c.usd) * flat) / Math.max(N(c.qty_basis) || 1, 1e-9);
+  const base = N(c.usd) / Math.max(N(c.qty_basis) || 1, 1e-9);
   const m = pct("margin_pct", c, s, p, g), t = pct("tax_pct", c, s, p, g);
   const total = base * (1 + m / 100) * (1 + t / 100);
-  return { qty: flat, base, m, t, total, credits: total / Math.max(N(g.usd_per_credit) || 0.001, 1e-9) };
+  return { base, m, t, total, credits: total / Math.max(N(g.usd_per_credit) || 0.001, 1e-9) };
 };
 
 const ComponentRow = ({ c, s, p, g, onChange, onDelete }) => {
@@ -31,11 +31,10 @@ const ComponentRow = ({ c, s, p, g, onChange, onDelete }) => {
       <td className="px-1"><input value={c.usd} onChange={(e) => onChange({ usd: e.target.value })} className={`${IN} w-20`} data-testid={`pc-usd-${s.id}-${c.id}`} /></td>
       <td className="px-1"><input value={c.qty_basis} onChange={(e) => onChange({ qty_basis: e.target.value })} className={`${IN} w-20`} data-testid={`pc-basis-${s.id}-${c.id}`} /></td>
       <td className="px-1"><input value={c.unit} onChange={(e) => onChange({ unit: e.target.value })} className={`${IN} w-20`} data-testid={`pc-unit-${s.id}-${c.id}`} /></td>
-      <td className="px-1"><input value={c.flat_qty ? JSON.stringify(c.flat_qty) : ""} placeholder="—" onChange={(e) => { try { onChange({ flat_qty: e.target.value ? JSON.parse(e.target.value) : null }); } catch { /* biarkan user selesai mengetik */ } }} className={`${IN} w-28 font-mono`} data-testid={`pc-flat-${s.id}-${c.id}`} /></td>
       <td className="px-1"><input value={c.margin_pct ?? ""} placeholder={`${pct("margin_pct", {}, s, p, g)}`} onChange={(e) => onChange({ margin_pct: e.target.value === "" ? null : e.target.value })} className={`${IN} w-16`} data-testid={`pc-margin-${s.id}-${c.id}`} /></td>
       <td className="px-1"><input value={c.tax_pct ?? ""} placeholder={`${pct("tax_pct", {}, s, p, g)}`} onChange={(e) => onChange({ tax_pct: e.target.value === "" ? null : e.target.value })} className={`${IN} w-16`} data-testid={`pc-tax-${s.id}-${c.id}`} /></td>
-      <td className="px-2 text-right text-slate-500">{usd(k.base)}</td>
-      <td className="px-2 text-right text-slate-500">{usd(k.total)}</td>
+      <td className="px-2 text-right text-slate-500" title="biaya provider per 1 satuan">{usd(k.base)}</td>
+      <td className="px-2 text-right text-slate-500" title="setelah margin & PPN">{usd(k.total)}</td>
       <td className="px-2 text-right font-bold text-[#2F6BFF]" data-testid={`pc-credits-${s.id}-${c.id}`}>{k.credits < 1 ? k.credits.toFixed(3) : Math.ceil(k.credits)}</td>
       <td className="px-1 text-right">
         <label className="mr-2 text-[10px] text-slate-500"><input type="checkbox" checked={c.enabled !== false} onChange={(e) => onChange({ enabled: e.target.checked })} /> aktif</label>
@@ -82,7 +81,7 @@ export const PricingCatalogCard = () => {
 
   const addComponent = (pid, sid) => mutate(pid, sid, null, {
     components: [...(data.catalog.providers.find((p) => p.id === pid).services.find((s) => s.id === sid).components),
-      { id: `komponen_${Date.now().toString(36)}`, label: "Komponen baru", unit: "token", qty_basis: 1000000, usd: 0, modality: "text", direction: "input", margin_pct: null, tax_pct: null, enabled: true, flat_qty: null, note: "" }],
+      { id: `komponen_${Date.now().toString(36)}`, label: "Komponen baru", unit: "token", qty_basis: 1000000, usd: 0, modality: "text", direction: "input", margin_pct: null, tax_pct: null, enabled: true, note: "" }],
   });
   const delComponent = (pid, sid, cid) => mutate(pid, sid, null, {
     components: data.catalog.providers.find((p) => p.id === pid).services.find((s) => s.id === sid).components.filter((c) => c.id !== cid),
@@ -128,7 +127,7 @@ export const PricingCatalogCard = () => {
     <div data-testid="pricing-catalog">
       <p className="text-sm text-slate-500">
         Provider → layanan/model → komponen harga → satuan. Rumus satu pintu: <b>biaya = harga × qty ÷ satuan dasar</b>, lalu <b>× (1+margin) × (1+PPN) ÷ nilai kredit</b>.
-        Margin/PPN kosong = ikut induknya (layanan → provider → global {g.margin_pct}% / {g.tax_pct}%). Penagihan chat, panggilan, gambar, video, dan tool membaca katalog ini.
+        Margin/PPN kosong = ikut induknya (layanan → provider → global {g.margin_pct}% / {g.tax_pct}%). <b>Katalog ini satu-satunya sumber tarif</b> — chat, panggilan, gambar (flat per gambar), video, STT/TTS, dan tool semuanya menagih dari sini.
       </p>
 
       <div className="mt-4 space-y-3">
@@ -159,11 +158,11 @@ export const PricingCatalogCard = () => {
                       <button onClick={() => addComponent(p.id, s.id)} className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-[#2F6BFF]" data-testid={`pc-add-${s.id}`}><Plus size={11} /> Komponen</button>
                     </div>
                     <div className="mt-2 overflow-x-auto">
-                      <table className="w-full min-w-[900px] text-left">
+                      <table className="w-full min-w-[820px] text-left">
                         <thead><tr className="text-[10px] uppercase tracking-wide text-slate-400">
                           <th className="pb-1">Komponen</th><th className="px-1 pb-1">Harga USD</th><th className="px-1 pb-1">Per (qty dasar)</th><th className="px-1 pb-1">Satuan</th>
-                          <th className="px-1 pb-1">Qty flat</th><th className="px-1 pb-1">Margin</th><th className="px-1 pb-1">PPN</th>
-                          <th className="px-2 pb-1 text-right">Biaya</th><th className="px-2 pb-1 text-right">Total</th><th className="px-2 pb-1 text-right">Kredit</th><th /></tr></thead>
+                          <th className="px-1 pb-1">Margin</th><th className="px-1 pb-1">PPN</th>
+                          <th className="px-2 pb-1 text-right">Biaya / satuan</th><th className="px-2 pb-1 text-right">Total / satuan</th><th className="px-2 pb-1 text-right">Kredit / satuan</th><th /></tr></thead>
                         <tbody>
                           {s.components.map((c) => (
                             <ComponentRow key={c.id} c={c} s={s} p={p} g={g}
@@ -188,7 +187,7 @@ export const PricingCatalogCard = () => {
             <select value={`${sim.service_id}|${sim.component_id}`} onChange={(e) => { const [s, c] = e.target.value.split("|"); setSim({ ...sim, service_id: s, component_id: c, result: null }); }} className="input-dark w-80 py-1.5 text-xs" data-testid="pc-sim-select">
               {flat.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
             </select></label>
-          <label className="text-xs"><span className="mb-1 block font-semibold text-slate-700">Jumlah (kosong = qty flat docs)</span>
+          <label className="text-xs"><span className="mb-1 block font-semibold text-slate-700">Jumlah (satuan komponen)</span>
             <input value={sim.qty} onChange={(e) => setSim({ ...sim, qty: e.target.value })} className="input-dark w-40 py-1.5 text-xs" data-testid="pc-sim-qty" /></label>
           <button onClick={runQuote} className="btn-primary py-1.5 text-xs" data-testid="pc-sim-run">Hitung</button>
           {sim.result && (

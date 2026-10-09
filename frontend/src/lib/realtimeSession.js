@@ -280,6 +280,11 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       await postCard(callId, `${gitProv === "gitlab" ? "Merge request" : "Pull request"} dibuka: **!${r.data.number} ${r.data.title}** di ${r.data.repo} — [lihat di ${gitLabel}](${r.data.url})`);
       return { ok: true, number: r.data.number, url: r.data.url, branch: r.data.branch, note: "the PR link was posted to the chat panel (no need to read the URL aloud)" };
     }
+    if (name === "github_commit" || name === "gitlab_commit") {
+      const r = await api.post(`/integrations/${gitProv}/commit`, { repo: args.repo, title: args.title, changes: args.changes || [], branch: args.branch });
+      await postCard(callId, `Commit **${r.data.title}** masuk ke branch \`${r.data.branch}\` di ${r.data.repo}${r.data.created_branch ? " (branch baru)" : ""} — [lihat di ${gitLabel}](${r.data.url})`);
+      return { ok: true, branch: r.data.branch, files: r.data.files, created_branch: r.data.created_branch, note: "the commit link was posted to the chat panel" };
+    }
     if (name === "update_task") {
       const c = await api.get(`/conversations/${cid}/messages?limit=1`);
       const tid = c.data?.conversation?.task_id;
