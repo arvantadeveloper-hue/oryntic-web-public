@@ -1,0 +1,22 @@
+{
+  "summary": "Iter45 covers: (1) GET /api/wallet/video-sessions grouping + pagination, (2) resume+exhausted budget errors, (3) /video/stop reason enum + bogus 404, (4) /video/start {resume:true} on bogus 404, (5) DB-seeded end-to-end resume flow (incl. billed>>max → 400 'Sisa waktu'), (6) scheduler social_tick creating next weekly occurrence with repeat_label + /scheduled/{jid}/stop-repeat endpoint, (7) chat._schedule_utc 4-tuple roll-forward unit, (8) Frontend /wallet tabbed Riwayat (wallet-history, wallet-tab-calls|video|txns, video-call-*, video-session-*), (9) /social social-scheduled card still renders, (10) Home/chat loads cleanly with the Oryntix support avatar — no console errors from SupportVideo.jsx/avatarVideo.js on page load.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter45.py",
+    "/app/test_reports/pytest/iter45.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "support_agent._close_stale_video uses `updated_at` fallback to `created_at`; a session that is < 45s old during a legitimate reconnect raises 409 'Video sudah aktif di panggilan ini'. The resume flow therefore depends on the previous session being marked ended with DISCONNECTED/STALE — ensure the frontend reliably POSTs /video/stop with reason=DISCONNECTED before invoking resume.",
+    "social.schedule_post: when caller passes meta containing series_id, the code uses `job.get('series_id') or job['id']` AFTER inserting job id — this works but is fragile. _schedule_next passes series_id via meta so it is preserved; OK.",
+    "wallet.video_session_report queries only video_sessions, which means a seeded realtime_call without video_sessions would not appear — this is intended per spec (video sessions grouped per call)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter45.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100%"},
+  "test_credentials": "demo@aivora.ai / demo123456",
+  "seed_data_creation": "All seeded docs (realtime_calls t-call-1, video_sessions t-vs-1 + any active child, social_schedules series) were cleaned up in try/finally of each test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter45.py disables xdist via -o addopts=\"\" because /app/backend/pytest.ini forces loadscope parallelism. Login page has two 'Masuk' buttons (Google + submit) — use get_by_role('button', name='Masuk').last to click the gradient submit."
+}
