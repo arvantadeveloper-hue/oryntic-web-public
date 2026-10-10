@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Headset, Loader2, Save, Video, CheckCircle2, AlertTriangle, RefreshCw, Image as ImageIcon, Sparkles, Send } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
@@ -45,11 +45,10 @@ export default function PlatformSupportAgent() {
     set(k, n);
   };
 
-  const loadAvatars = async (scope) => {
-    const sc = scope || avScope;
+  const loadAvatars = useCallback(async (scope) => {
     setLoadingAv(true);
     try {
-      const r = await api.get("/platform/support-agent/avatars", { params: { mine: sc === "mine", page_size: 24 } });
+      const r = await api.get("/platform/support-agent/avatars", { params: { mine: scope === "mine", page_size: 24 } });
       const items = r.data.items || [];
       setAvatars(items);
       setPreviewById((m) => ({ ...m, ...Object.fromEntries(items.filter((a) => a.preview).map((a) => [a.id, a.preview])) }));
@@ -57,10 +56,11 @@ export default function PlatformSupportAgent() {
       toast.error(apiErr(e, "Gagal memuat daftar avatar"));
       setAvatars([]);
     } finally { setLoadingAv(false); }
-  };
+  }, []);
 
   // Resolve the current avatar's preview live by id on mount (stored path/URL may be main-app-only or stale).
-  useEffect(() => { if (cfg && cfg.liveavatar_key_set) loadAvatars("mine"); /* eslint-disable-next-line */ }, [cfg?.liveavatar_key_set]);
+  const keySet = Boolean(cfg?.liveavatar_key_set);
+  useEffect(() => { if (keySet) loadAvatars("mine"); }, [keySet, loadAvatars]);
 
   const pickAvatar = (a) => { setCfg((c) => ({ ...c, avatar_id: a.id, avatar_name: a.name || "", avatar_preview: a.preview || "", portrait: a.preview || c.portrait })); };
 
@@ -183,7 +183,7 @@ export default function PlatformSupportAgent() {
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600"><input type="radio" name="avscope" checked={avScope === "mine"} onChange={() => setAvScope("mine")} /> Avatar saya</label>
             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600"><input type="radio" name="avscope" checked={avScope === "public"} onChange={() => setAvScope("public")} /> Publik</label>
-            <button onClick={() => loadAvatars()} disabled={loadingAv} className="btn-soft !py-1.5 !text-xs" data-testid="sa-load-avatars">{loadingAv ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Muat daftar</button>
+            <button onClick={() => loadAvatars(avScope)} disabled={loadingAv} className="btn-soft !py-1.5 !text-xs" data-testid="sa-load-avatars">{loadingAv ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Muat daftar</button>
           </div>
 
           {avatars && (
@@ -211,7 +211,7 @@ export default function PlatformSupportAgent() {
       {/* Kartu 3 — Pratinjau (uji chat) */}
       <div className="mt-6 aivora-card p-6" data-testid="sa-preview">
         <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Sparkles size={16} className="text-[#2F6BFF]" /> Pratinjau — uji chat Oryntix</h2>
-        <p className="mt-1 text-xs text-slate-500">Uji kepribadian & pengetahuan dengan konfigurasi tersimpan saat ini. Pratinjau memakai model nyata (gpt-5.4-mini) via Emergent key; produksi tetap memakai model app utama. Simpan dulu bila Anda baru mengubah prompt/knowledge.</p>
+        <p className="mt-1 text-xs text-slate-500">Uji kepribadian & pengetahuan dengan konfigurasi tersimpan saat ini. Pratinjau memakai model otak yang dikonfigurasi di atas (sama dengan produksi). Simpan dulu bila Anda baru mengubah prompt/knowledge.</p>
         <div className="mt-4 flex gap-2">
           <input className="input-dark flex-1" placeholder="Tulis pertanyaan uji, mis. Bagaimana cara membuat asisten?" value={pvMsg} onChange={(e) => setPvMsg(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !pvBusy) sendPreview(); }} maxLength={2000} data-testid="sa-preview-input" />
           <button onClick={sendPreview} disabled={pvBusy || !pvMsg.trim()} className="btn-primary shrink-0" data-testid="sa-preview-send">{pvBusy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} Kirim</button>
