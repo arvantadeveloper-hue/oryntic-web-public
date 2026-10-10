@@ -12,14 +12,14 @@ const PRICE_FIELDS = [
 ];
 const RATE_LABELS = { text_per_1k: "kredit / 1k karakter", image: "kredit / gambar", profile: "kredit / profil", stt: "kredit / transkripsi", tts: "kredit / TTS", realtime_per_min: "kredit / menit koneksi realtime (+ token audio aktual)", vision: "kredit / cuplikan layar", bandwidth_per_mb: "kredit / MB data panggilan", video_per_sec: "kredit / detik video" };
 
-export function PlatformPricingCard({ pricing, rates, rtModels, onSaved }) {
+export function PlatformPricingCard({ pricing, rates, onSaved }) {
   const [form, setForm] = useState(pricing);
   const [saving, setSaving] = useState(false);
   useEffect(() => setForm(pricing), [pricing]);
   if (!form) return null;
   const save = async () => {
     setSaving(true);
-    try { const r = await api.put("/admin/pricing", form); toast.success("Tarif platform disimpan"); onSaved && onSaved(r.data); }
+    try { const r = await api.put("/platform/pricing", form); toast.success("Tarif platform disimpan"); onSaved && onSaved(r.data); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal menyimpan"); } finally { setSaving(false); }
   };
   return (
@@ -33,15 +33,6 @@ export function PlatformPricingCard({ pricing, rates, rtModels, onSaved }) {
           <label key={k} className="block"><span className="mb-1 block text-[11px] font-semibold text-slate-500">{label}</span>
             <input type="number" step={step} min="0" value={form[k]} onChange={(e) => setForm({ ...form, [k]: parseFloat(e.target.value) || 0 })} data-testid={`pp-${k}`} className="input-dark py-2 text-sm" /></label>
         ))}
-      </div>
-      <div className="mt-5" data-testid="pp-realtime-models">
-        <p className="mb-2 text-xs font-bold text-slate-700">Model suara Realtime — harga provider (USD / 1M token) & tarif per menit</p>
-        <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left text-slate-500"><th className="py-1 pr-3">Model</th><th className="pr-3">Audio masuk</th><th className="pr-3">Audio keluar</th><th className="pr-3">Teks masuk</th><th className="pr-3">Teks keluar</th><th className="pr-3">Cached</th><th>Kredit/menit</th></tr></thead>
-          <tbody>{(rtModels || []).map((m) => {
-            const ov = (form.realtime_models || {})[m.id] || {};
-            const cell = (k) => <td key={k} className="pr-3 py-1"><input type="number" step="0.1" min="0" value={ov[k] ?? m[k]} data-testid={`pp-rt-${m.id}-${k}`} onChange={(e) => setForm({ ...form, realtime_models: { ...(form.realtime_models || {}), [m.id]: { ...ov, [k]: parseFloat(e.target.value) || 0 } } })} className="input-dark w-24 py-1.5 text-xs" /></td>;
-            return <tr key={m.id} className="border-t border-[#E7ECF3]"><td className="py-1 pr-3 font-semibold text-slate-800">{m.label}</td>{["audio_in", "audio_out", "text_in", "text_out", "cached_in"].map(cell)}<td className="font-bold text-[#2F6BFF]" data-testid={`pp-rt-${m.id}-cpm`}>~{m.credits_per_min}</td></tr>;
-          })}</tbody></table></div>
       </div>
       {rates && (
         <div className="mt-4 flex flex-wrap gap-2" data-testid="pp-rates">
@@ -60,7 +51,7 @@ export function TrialCard({ trial, onSaved }) {
   if (!form) return null;
   const save = async () => {
     setSaving(true);
-    try { const r = await api.put("/admin/trial", form); toast.success("Paket percobaan disimpan"); onSaved && onSaved(r.data.trial); }
+    try { const r = await api.put("/platform/trial", form); toast.success("Paket percobaan disimpan"); onSaved && onSaved(r.data.trial); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal menyimpan"); } finally { setSaving(false); }
   };
   return (

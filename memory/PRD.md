@@ -706,3 +706,6 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
   - `common.py` (`_audit`, `_diff_summary`, ROLE_LABELS), `csvsafe.py`; `mailer.py` ditambah `efaktur_reminder_email`, `budget_alert_email`; `seed_finance.py` di root backend; `reportlab` ditambahkan ke requirements.
 - **API Spec**: `/app/memory/PLATFORM_API_SPEC.md` (ringkasan semua endpoint + detail Pricing API/skema body), OpenAPI di `GET /api/openapi.json`, Swagger `GET /api/docs`.
 - Tests: `backend/tests/test_iter46.py`.
+
+## Update 2026-06 (cb) — Frontend admin repo → `/api/platform/*`
+- `/app/platform-admin/frontend` diganti dengan frontend terbaru dari repo `oryntix-web-admin` (termasuk Expenses, PPN, Audit, apiErr) lalu semua path `/admin/*` diubah ke `/platform/*` (pricing, pricing/preview, trial → `GET /platform/trial`, rate-limits, support-agent*, realtime-behaviour). Halaman lokal `PlatformBehaviour.jsx` (Conversation Behaviour) dipertahankan & didaftarkan di nav/route. Build CRA berhasil dan diuji login + navigasi terhadap backend utama tanpa error konsol. Catatan: `CI=true yarn build` gagal karena warning eslint pre-existing (`react-hooks/exhaustive-deps` di PlatformSupportAgent.jsx:63) — gunakan `CI=false` atau perbaiki warning tsb.

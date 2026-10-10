@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Save, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { apiErr } from "../../lib/apiErr";
 
 // Shared state/logic for the tariff + package editors: edit a draft of `platform_pricing`, preview (never saved) on every change, Save = PUT.
 export function usePricingDraft() {
@@ -11,25 +12,25 @@ export function usePricingDraft() {
   const [busy, setBusy] = useState(false);
   const timer = useRef(null);
   const load = useCallback(async () => {
-    const r = await api.get("/admin/pricing");
+    const r = await api.get("/platform/pricing");
     setSaved(r.data.pricing); setDraft(r.data.pricing);
-    setPreview({ rates: r.data.rates, features: r.data.features, packages: r.data.packages, models: r.data.models, realtime_models: r.data.realtime_models });
+    setPreview({ rates: r.data.rates, features: r.data.features, packages: r.data.packages, models: r.data.models, tools: r.data.tools, realtime_models: r.data.realtime_models });
   }, []);
   useEffect(() => { load().catch(() => toast.error("Gagal memuat tarif")); }, [load]);
   const update = (patch) => {
     setDraft((d) => {
       const nd = typeof patch === "function" ? patch(d) : { ...d, ...patch };
       clearTimeout(timer.current);
-      timer.current = setTimeout(() => api.post("/admin/pricing/preview", nd).then((r) => setPreview(r.data)).catch(() => {}), 350);
+      timer.current = setTimeout(() => api.post("/platform/pricing/preview", nd).then((r) => setPreview(r.data)).catch(() => {}), 350);
       return nd;
     });
   };
   const save = async () => {
     setBusy(true);
-    try { const r = await api.put("/admin/pricing", draft); setSaved(r.data.pricing); setDraft(r.data.pricing); setPreview({ rates: r.data.rates, features: r.data.features, packages: r.data.packages, models: r.data.models, realtime_models: r.data.realtime_models }); toast.success("Tarif disimpan"); }
-    catch (e) { const d = e?.response?.data?.detail; toast.error(Array.isArray(d) ? d.map((x) => x.msg).join(", ") : d || "Gagal menyimpan"); } finally { setBusy(false); }
+    try { const r = await api.put("/platform/pricing", draft); setSaved(r.data.pricing); setDraft(r.data.pricing); setPreview({ rates: r.data.rates, features: r.data.features, packages: r.data.packages, models: r.data.models, tools: r.data.tools, realtime_models: r.data.realtime_models }); toast.success("Tarif disimpan"); }
+    catch (e) { toast.error(apiErr(e, "Gagal menyimpan")); } finally { setBusy(false); }
   };
-  const reset = () => { setDraft(saved); api.post("/admin/pricing/preview", saved).then((r) => setPreview(r.data)).catch(() => {}); };
+  const reset = () => { setDraft(saved); api.post("/platform/pricing/preview", saved).then((r) => setPreview(r.data)).catch(() => {}); };
   const dirty = JSON.stringify(saved) !== JSON.stringify(draft);
   return { draft, preview, update, save, reset, busy, dirty };
 }

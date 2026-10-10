@@ -12,12 +12,12 @@ const Row = ({ label, hint, children }) => (
 export default function PlatformBehaviour() {
   const [f, setF] = useState(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api.get("/admin/realtime-behaviour").then((r) => setF(r.data)).catch(() => toast.error("Gagal memuat")); }, []);
+  useEffect(() => { api.get("/platform/realtime-behaviour").then((r) => setF(r.data)).catch(() => toast.error("Gagal memuat")); }, []);
   if (!f) return <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 size={14} className="animate-spin" /> Memuat…</p>;
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.type === "number" ? parseFloat(e.target.value) || 0 : e.target.value });
   const save = async () => {
     setBusy(true);
-    try { const r = await api.put("/admin/realtime-behaviour", f); setF(r.data); toast.success("Conversation Behaviour disimpan — berlaku untuk panggilan berikutnya"); }
+    try { const r = await api.put("/platform/realtime-behaviour", f); setF(r.data); toast.success("Conversation Behaviour disimpan — berlaku untuk panggilan berikutnya"); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal menyimpan"); } finally { setBusy(false); }
   };
   const semantic = f.turn_detection === "semantic_vad";

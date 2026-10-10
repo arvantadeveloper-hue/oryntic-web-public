@@ -1,18 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Percent, Package, Users, ShieldCheck, Timer, LogOut, Loader2, Lock, Receipt, AudioWaveform, Headset } from "lucide-react";
+import { LayoutDashboard, Percent, Package, Users, ShieldCheck, Timer, LogOut, Loader2, Lock, Receipt, History, Wallet, FileSpreadsheet, Headset, AudioWaveform } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
+import { apiErr } from "../../lib/apiErr";
 import PlatformDashboard from "./PlatformDashboard";
 import PlatformPricing from "./PlatformPricing";
 import PlatformPackages from "./PlatformPackages";
 import PlatformUsers from "./PlatformUsers";
 import PlatformStaff from "./PlatformStaff";
 import PlatformTrial from "./PlatformTrial";
+import PlatformFinance from "./PlatformFinance";
+import PlatformAudit from "./PlatformAudit";
+import PlatformExpenses from "./PlatformExpenses";
+import PlatformPPN from "./PlatformPPN";
 import PlatformBehaviour from "./PlatformBehaviour";
 import PlatformSupportAgent from "./PlatformSupportAgent";
-import PlatformFinance from "./PlatformFinance";
 
 // Separate back-office site. PLATFORM_MODE (env REACT_APP_PLATFORM_MODE=1 or host "admin.*"/"platform.*") serves it at "/" for admin.oryntix.com.
 export const PLATFORM_MODE = true; // standalone back-office project: always mounted at "/"
@@ -21,13 +25,16 @@ export const BASE = "";
 const NAV = [
   { to: BASE || "/", end: true, icon: LayoutDashboard, label: "Dasbor", roles: ["super_admin", "finance"] },
   { to: `${BASE}/finance`, icon: Receipt, label: "Laporan Keuangan", roles: ["super_admin", "finance"] },
+  { to: `${BASE}/expenses`, icon: Wallet, label: "Pengeluaran", roles: ["super_admin", "finance"] },
+  { to: `${BASE}/ppn`, icon: FileSpreadsheet, label: "SPT PPN", roles: ["super_admin", "finance"] },
   { to: `${BASE}/pricing`, icon: Percent, label: "Tarif & Margin", roles: ["super_admin", "finance"] },
-  { to: `${BASE}/packages`, icon: Package, label: "Paket Kredit", roles: ["super_admin"] },
-  { to: `${BASE}/users`, icon: Users, label: "Pengguna", roles: ["super_admin", "finance"] },
-  { to: `${BASE}/staff`, icon: ShieldCheck, label: "Staf & Peran", roles: ["super_admin"] },
-  { to: `${BASE}/trial`, icon: Timer, label: "Trial & Batas", roles: ["super_admin"] },
   { to: `${BASE}/behaviour`, icon: AudioWaveform, label: "Conversation Behaviour", roles: ["super_admin"] },
   { to: `${BASE}/support-agent`, icon: Headset, label: "Asisten Oryntix", roles: ["super_admin"] },
+  { to: `${BASE}/packages`, icon: Package, label: "Paket Kredit", roles: ["super_admin"] },
+  { to: `${BASE}/users`, icon: Users, label: "Pengguna", roles: ["super_admin"] },
+  { to: `${BASE}/staff`, icon: ShieldCheck, label: "Staf & Peran", roles: ["super_admin"] },
+  { to: `${BASE}/trial`, icon: Timer, label: "Trial & Batas", roles: ["super_admin"] },
+  { to: `${BASE}/audit`, icon: History, label: "Jejak Audit", roles: ["super_admin"] },
 ];
 export const ROLE_LABEL = { super_admin: "Super Admin", finance: "Finance" };
 
@@ -37,7 +44,7 @@ function PlatformLogin() {
   const submit = async (e) => {
     e.preventDefault(); setBusy(true);
     try { const u = await login(email, password); if (!u.platform_role) toast.error("Akun ini bukan staf platform"); }
-    catch (err) { toast.error(err?.response?.data?.detail?.message || err?.response?.data?.detail || "Login gagal"); } finally { setBusy(false); }
+    catch (err) { toast.error(apiErr(err, "Login gagal")); } finally { setBusy(false); }
   };
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#070B18] p-6" data-testid="platform-login">
@@ -65,12 +72,14 @@ function Shell() {
   const { user, logout } = useAuth(); const nav = useNavigate();
   const role = user.platform_role;
   const items = NAV.filter((n) => n.roles.includes(role));
+  const [pending, setPending] = useState(0);
+  useEffect(() => { api.get("/platform/expenses/pending-efaktur").then((r) => setPending(r.data.count || 0)).catch(() => {}); }, []);
   return (
     <div className="flex min-h-screen bg-[#F3F6FB]" data-testid="platform-shell">
       <aside className="flex w-60 shrink-0 flex-col bg-[#070B18] text-white">
         <div className="flex items-center gap-2 px-5 py-5"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#2F6BFF] text-sm font-black">O</span><div><p className="text-sm font-black tracking-tight">Oryntix Platform</p><p className="text-[10px] uppercase tracking-widest text-white/40">Back-office</p></div></div>
         <nav className="mt-2 flex-1 space-y-1 px-3">
-          {items.map((n) => <NavLink key={n.to} to={n.to} end={n.end} data-testid={`pnav-${n.end ? "dashboard" : n.to.split("/").pop()}`} className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${isActive ? "bg-[#2F6BFF] text-white" : "text-white/65 hover:bg-white/5 hover:text-white"}`}><n.icon size={17} /> {n.label}</NavLink>)}
+          {items.map((n) => <NavLink key={n.to} to={n.to} end={n.end} data-testid={`pnav-${n.end ? "dashboard" : n.to.split("/").pop()}`} className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${isActive ? "bg-[#2F6BFF] text-white" : "text-white/65 hover:bg-white/5 hover:text-white"}`}><n.icon size={17} /> <span className="flex-1">{n.label}</span>{n.to.endsWith("expenses") && pending > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-bold text-white" data-testid="pnav-efaktur-badge" title="Pengeluaran menunggu e-faktur">{pending}</span>}</NavLink>)}
         </nav>
         <div className="border-t border-white/10 p-4">
           <p className="truncate text-xs font-semibold">{user.name || user.email}</p>
@@ -96,13 +105,16 @@ export default function PlatformApp() {
       <Route element={<Shell />}>
         <Route index element={<PlatformDashboard />} />
         <Route path="finance" element={<PlatformFinance />} />
-        <Route path="pricing" element={<PlatformPricing readOnly={!can(["super_admin"])} />} />
-        <Route path="packages" element={can(["super_admin"]) ? <PlatformPackages /> : <Navigate to={BASE || "/"} replace />} />
-        <Route path="users" element={<PlatformUsers readOnly={!can(["super_admin"])} />} />
-        <Route path="staff" element={can(["super_admin"]) ? <PlatformStaff /> : <Navigate to={BASE || "/"} replace />} />
-        <Route path="trial" element={can(["super_admin"]) ? <PlatformTrial /> : <Navigate to={BASE || "/"} replace />} />
+        <Route path="expenses" element={<PlatformExpenses />} />
+        <Route path="ppn" element={<PlatformPPN />} />
         <Route path="behaviour" element={can(["super_admin"]) ? <PlatformBehaviour /> : <Navigate to={BASE || "/"} replace />} />
         <Route path="support-agent" element={can(["super_admin"]) ? <PlatformSupportAgent /> : <Navigate to={BASE || "/"} replace />} />
+        <Route path="pricing" element={<PlatformPricing readOnly={!can(["super_admin"])} />} />
+        <Route path="packages" element={can(["super_admin"]) ? <PlatformPackages /> : <Navigate to={BASE || "/"} replace />} />
+        <Route path="users" element={can(["super_admin"]) ? <PlatformUsers /> : <Navigate to={BASE || "/"} replace />} />
+        <Route path="staff" element={can(["super_admin"]) ? <PlatformStaff /> : <Navigate to={BASE || "/"} replace />} />
+        <Route path="trial" element={can(["super_admin"]) ? <PlatformTrial /> : <Navigate to={BASE || "/"} replace />} />
+        <Route path="audit" element={can(["super_admin"]) ? <PlatformAudit /> : <Navigate to={BASE || "/"} replace />} />
         <Route path="*" element={<Navigate to={BASE || "/"} replace />} />
       </Route>
     </Routes>

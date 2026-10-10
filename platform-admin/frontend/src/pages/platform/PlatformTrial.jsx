@@ -6,7 +6,7 @@ import { RateLimitsCard } from "../../components/RateLimitsCard";
 
 export default function PlatformTrial() {
   const [trial, setTrial] = useState(null);
-  useEffect(() => { api.get("/admin/pricing").then((r) => setTrial(r.data.trial)).catch(() => setTrial({})); }, []);
+  useEffect(() => { api.get("/platform/trial").then((r) => setTrial(r.data.trial)).catch(() => setTrial({})); }, []);
   return (
     <div data-testid="platform-trial">
       <h1 className="text-2xl font-black text-slate-900">Trial & Batas</h1>

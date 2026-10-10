@@ -3,7 +3,8 @@ import { Loader2 } from "lucide-react";
 import { usePricingDraft, NumField, SaveBar } from "./pricingDraft";
 
 const FIELD = { text: "text_usd_per_1k_chars", image: "image_usd", profile: "profile_usd", stt: "stt_usd", tts: "tts_usd", realtime_call: "provider_usd_per_min", vision: "vision_usd", call_bandwidth: "bandwidth_usd_per_gb", video: "video_usd_per_sec", video20: "video20_usd_per_sec" };
-const RT = [["rt_audio_in_usd_1m", "Audio masuk"], ["rt_audio_out_usd_1m", "Audio keluar"], ["rt_text_in_usd_1m", "Teks masuk"], ["rt_text_out_usd_1m", "Teks keluar"], ["rt_cached_in_usd_1m", "Cache"]];
+const RT_FIELDS = [["audio_in", "Audio in"], ["audio_out", "Audio out"], ["text_in", "Teks in"], ["text_out", "Teks out"], ["cached_in", "Cache"]];
+const ICELL = "w-20 rounded-lg border border-[#E7ECF3] px-2 py-1.5 text-sm outline-none focus:border-[#2F6BFF] disabled:bg-slate-50";
 
 export default function PlatformPricing({ readOnly }) {
   const { draft, preview, update, save, reset, busy, dirty } = usePricingDraft();
@@ -70,31 +71,47 @@ export default function PlatformPricing({ readOnly }) {
           <NumField label="Suara / ambience (×)" value={draft.video_audio_mult ?? 1} onChange={(v) => update({ video_audio_mult: v })} step={0.05} testid="pp-video_audio_mult" disabled={readOnly} />
         </div>
       </div>
-      <div className="mt-6 aivora-card p-5" data-testid="pp-realtime">
-        <p className="text-sm font-bold text-slate-900">Harga token OpenAI Realtime — gpt-realtime-2.1 (USD / 1M token)</p>
-        <p className="text-xs text-slate-500">Ditagih per respons dari laporan pemakaian OpenAI, memakai margin fitur "Koneksi Realtime". Harga resmi gpt-realtime-2.1: audio masuk $32, audio keluar $64, teks masuk $4, teks keluar $24, cache $0,40.</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-5">{RT.map(([k, l]) => <NumField key={k} label={l} value={draft[k]} onChange={(v) => update({ [k]: v })} step={0.1} testid={`pp-${k}`} disabled={readOnly} />)}</div>
+      <div className="mt-6 aivora-card overflow-hidden" data-testid="pp-realtime">
+        <div className="border-b border-[#E7ECF3] p-4">
+          <p className="text-sm font-bold text-slate-900">Model suara Realtime — USD / 1M token</p>
+          <p className="text-xs text-slate-500">Setiap model suara ditagih per respons dari laporan pemakaian OpenAI, memakai margin fitur "Koneksi Realtime". Kredit/menit dihitung dari harga audio model (kalibrasi pada gpt-realtime-2.1).</p>
+        </div>
+        <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500"><tr><th className="px-4 py-2.5 text-left">Model</th>{RT_FIELDS.map(([, l]) => <th key={l} className="px-3 py-2.5 text-left">{l} $/1M</th>)}<th className="px-4 py-2.5 text-right">Kredit / menit</th></tr></thead>
+          <tbody className="divide-y divide-slate-100">
+            {(preview.realtime_models || []).map((m) => (
+              <tr key={m.id} data-testid={`pp-rt-${m.id}`}>
+                <td className="px-4 py-2"><p className="font-semibold text-slate-800">{m.label}</p><p className="text-[11px] text-slate-400">{m.tagline}</p></td>
+                {RT_FIELDS.map(([k]) => (
+                  <td key={k} className="px-3 py-2"><input type="number" step="0.1" min="0" disabled={readOnly} value={(draft.realtime_models || {})[m.id]?.[k] ?? m[k]} data-testid={`pp-rt-${m.id}-${k}`}
+                    onChange={(e) => update((d) => ({ ...d, realtime_models: { ...(d.realtime_models || {}), [m.id]: { audio_in: m.audio_in, audio_out: m.audio_out, text_in: m.text_in, text_out: m.text_out, cached_in: m.cached_in, ...((d.realtime_models || {})[m.id] || {}), [k]: Number(e.target.value) } } }))}
+                    className={ICELL} /></td>
+                ))}
+                <td className="px-4 py-2 text-right font-black text-slate-900" data-testid={`pp-rt-${m.id}-cpm`}>{m.credits_per_min}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
       </div>
-      <div className="mt-6 aivora-card p-5" data-testid="pp-realtime-models">
-        <p className="text-sm font-bold text-slate-900">Model suara per persona — harga provider (USD / 1M token) & tarif per menit</p>
-        <p className="text-xs text-slate-500">Setiap persona memilih model suaranya (default gpt-realtime-2.1-mini). Tarif/menit di UI = tarif "Koneksi Realtime" × rasio harga audio model terhadap gpt-realtime-2.1; penagihan sebenarnya memakai token aktual × harga model.</p>
-        <div className="mt-3 overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left text-slate-500"><th className="py-1 pr-3">Model</th><th className="pr-3">Audio masuk</th><th className="pr-3">Audio keluar</th><th className="pr-3">Teks masuk</th><th className="pr-3">Teks keluar</th><th className="pr-3">Cache</th><th>Kredit/menit</th></tr></thead>
-          <tbody>{(preview?.realtime_models || []).map((m) => {
-            const ov = (draft.realtime_models || {})[m.id] || {};
-            const cell = (k) => <td key={k} className="py-1 pr-3"><input type="number" step="0.1" min="0" disabled={readOnly} value={ov[k] ?? m[k]} data-testid={`pp-rt-${m.id}-${k}`} onChange={(e) => update({ realtime_models: { ...(draft.realtime_models || {}), [m.id]: { ...ov, [k]: parseFloat(e.target.value) || 0 } } })} className="input-dark w-24 py-1.5 text-xs" /></td>;
-            return <tr key={m.id} className="border-t border-[#E7ECF3]"><td className="py-1 pr-3 font-semibold text-slate-800">{m.label}</td>{["audio_in", "audio_out", "text_in", "text_out", "cached_in"].map(cell)}<td className="font-bold text-[#2F6BFF]" data-testid={`pp-rt-${m.id}-cpm`}>~{m.credits_per_min}</td></tr>;
-          })}</tbody></table></div>
-      </div>
-      <div className="mt-6 aivora-card p-5" data-testid="pp-tools">
-        <p className="text-sm font-bold text-slate-900">Alat bawaan provider — biaya provider (USD / pemakaian) → kredit yang ditagih</p>
-        <p className="text-xs text-slate-500">Diaktifkan per persona (Kemampuan Tambahan). Harga resmi: OpenAI web search $10/1k, Code Interpreter $0,03/sesi, GPT Image ≈ $0,04/gambar; Gemini grounding $35/1k permintaan, eksekusi kode hanya token; Claude web search $10/1k, eksekusi kode ≈ $0,05/jam container. Kredit memakai margin fitur "Teks / chat".</p>
-        <div className="mt-3 overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left text-slate-500"><th className="py-1 pr-3">Alat</th><th className="pr-3">Provider</th><th className="pr-3">Satuan</th><th className="pr-3">USD / pemakaian</th><th>Kredit</th></tr></thead>
-          <tbody>{(preview?.tools || []).map((t) => {
-            const v = (draft.tool_prices || {})[t.id];
-            return <tr key={t.id} className="border-t border-[#E7ECF3]"><td className="py-1 pr-3 font-semibold text-slate-800">{t.label}</td><td className="pr-3 text-slate-500">{t.provider}</td><td className="pr-3 text-slate-500">{t.unit}</td>
-              <td className="py-1 pr-3"><input type="number" step="0.001" min="0" disabled={readOnly} value={v ?? t.usd} data-testid={`pp-tool-${t.id.replace(":", "-")}`} onChange={(e) => update({ tool_prices: { ...(draft.tool_prices || {}), [t.id]: parseFloat(e.target.value) || 0 } })} className="input-dark w-24 py-1.5 text-xs" /></td>
-              <td className="font-bold text-[#2F6BFF]" data-testid={`pp-tool-${t.id.replace(":", "-")}-credits`}>{t.credits > 0 ? t.credits : "token saja"}</td></tr>;
-          })}</tbody></table></div>
+      <div className="mt-6 aivora-card overflow-hidden" data-testid="pp-tools">
+        <div className="border-b border-[#E7ECF3] p-4">
+          <p className="text-sm font-bold text-slate-900">Alat provider — pencarian web, kode, gambar</p>
+          <p className="text-xs text-slate-500">Biaya saat asisten pengguna memakai alat bawaan provider. Kredit = biaya × (1 + margin "Teks") × (1 + PPN) ÷ nilai 1 kredit. Biaya 0 = provider menagih sebagai token saja.</p>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500"><tr><th className="px-4 py-2.5 text-left">Alat</th><th className="px-3 py-2.5 text-left">Biaya (USD / panggilan)</th><th className="px-4 py-2.5 text-right">Kredit</th></tr></thead>
+          <tbody className="divide-y divide-slate-100">
+            {(preview.tools || []).map((t) => (
+              <tr key={t.id} data-testid={`pp-tool-${t.id}`}>
+                <td className="px-4 py-2.5"><p className="font-semibold text-slate-800">{t.label}</p><p className="text-[11px] uppercase text-slate-400">{t.provider} · per {t.unit}</p></td>
+                <td className="px-3 py-2.5"><input type="number" step="0.001" min="0" disabled={readOnly} value={(draft.tool_prices || {})[t.id] ?? t.usd} data-testid={`pp-tool-${t.id}-usd`}
+                  onChange={(e) => update((d) => ({ ...d, tool_prices: { ...(d.tool_prices || {}), [t.id]: Number(e.target.value) } }))}
+                  className="w-28 rounded-lg border border-[#E7ECF3] px-2 py-1.5 text-sm outline-none focus:border-[#2F6BFF] disabled:bg-slate-50" /></td>
+                <td className="px-4 py-2.5 text-right font-black text-slate-900" data-testid={`pp-tool-${t.id}-credits`}>{t.credits}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

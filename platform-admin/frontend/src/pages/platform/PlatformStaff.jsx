@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Loader2, UserPlus, Trash2, Crown, Link2, History } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { apiErr } from "../../lib/apiErr";
 import { useAuth } from "../../context/AuthContext";
 import { ROLE_LABEL } from "./PlatformApp";
 
@@ -16,10 +17,10 @@ export default function PlatformStaff() {
   const add = async (e) => {
     e.preventDefault(); setBusy(true); setInviteLink("");
     try { const r = await api.post("/platform/staff", { email, role }); toast.success(r.data.created ? `Undangan dikirim ke ${email}` : `${email} kini ${ROLE_LABEL[role]}`); if (r.data.debug_link) setInviteLink(r.data.debug_link); setEmail(""); load(); }
-    catch (err) { const d = err?.response?.data?.detail; toast.error(Array.isArray(d) ? d.map((x) => x.msg).join(", ") : d || "Gagal"); } finally { setBusy(false); }
+    catch (err) { toast.error(apiErr(err, "Gagal")); } finally { setBusy(false); }
   };
-  const setR = async (s, r) => { try { await api.put(`/platform/staff/${s.id}`, { role: r }); toast.success("Peran diperbarui"); load(); } catch (e) { toast.error(e?.response?.data?.detail || "Gagal"); } };
-  const revoke = async (s) => { if (!window.confirm(`Cabut akses platform ${s.email}?`)) return; try { await api.delete(`/platform/staff/${s.id}`); toast.success("Akses dicabut"); load(); } catch (e) { toast.error(e?.response?.data?.detail || "Gagal"); } };
+  const setR = async (s, r) => { try { await api.put(`/platform/staff/${s.id}`, { role: r }); toast.success("Peran diperbarui"); load(); } catch (e) { toast.error(apiErr(e, "Gagal")); } };
+  const revoke = async (s) => { if (!window.confirm(`Cabut akses platform ${s.email}?`)) return; try { await api.delete(`/platform/staff/${s.id}`); toast.success("Akses dicabut"); load(); } catch (e) { toast.error(apiErr(e, "Gagal")); } };
   return (
     <div data-testid="platform-staff">
       <h1 className="text-2xl font-black text-slate-900">Staf & Peran</h1>

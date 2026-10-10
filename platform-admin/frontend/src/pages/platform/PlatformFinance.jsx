@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Download, Loader2, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { apiErr } from "../../lib/apiErr";
 import { rp, num } from "./PlatformDashboard";
 
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -13,7 +14,7 @@ export default function PlatformFinance() {
   const [data, setData] = useState(null); const [busy, setBusy] = useState(false);
   useEffect(() => {
     setData(null);
-    api.get("/platform/finance", { params: { date_from: from, date_to: to, group } }).then((r) => setData(r.data)).catch((e) => { toast.error(e?.response?.data?.detail || "Gagal memuat laporan"); setData({ rows: [], total: {}, packages: [] }); });
+    api.get("/platform/finance", { params: { date_from: from, date_to: to, group } }).then((r) => setData(r.data)).catch((e) => { toast.error(apiErr(e, "Gagal memuat laporan")); setData({ rows: [], total: {}, packages: [] }); });
   }, [from, to, group]);
   const download = async () => {
     setBusy(true);
@@ -26,7 +27,7 @@ export default function PlatformFinance() {
   return (
     <div data-testid="platform-finance">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div><h1 className="text-2xl font-black text-slate-900">Laporan Keuangan</h1><p className="text-sm text-slate-500">Pendapatan top-up, penyesuaian kredit, dan kredit terpakai per periode.</p></div>
+        <div><h1 className="text-2xl font-black text-slate-900">Laporan Keuangan</h1><p className="text-sm text-slate-500">Pendapatan (sudah termasuk PPN 11%), pengeluaran, PPN keluaran/masukan, dan laba bersih per periode.</p></div>
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs text-slate-500">Dari<input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} data-testid="fin-from" className="mt-1 block rounded-xl border border-[#E7ECF3] bg-white px-3 py-2 text-sm text-slate-900 outline-none" /></label>
           <label className="text-xs text-slate-500">Sampai<input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} data-testid="fin-to" className="mt-1 block rounded-xl border border-[#E7ECF3] bg-white px-3 py-2 text-sm text-slate-900 outline-none" /></label>
@@ -37,16 +38,24 @@ export default function PlatformFinance() {
       {!data ? <p className="mt-6 flex items-center gap-2 text-sm text-slate-400"><Loader2 size={14} className="animate-spin" /> Memuat…</p> : (
         <>
           <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {[["Pendapatan", rp(t.revenue_idr), `${num(t.topups)} top-up · ${num(t.buyers)} pembeli`, "fin-revenue"], ["Kredit terjual", num(t.credits_sold), "dari top-up", "fin-sold"], ["Penyesuaian", `${t.credits_adjusted > 0 ? "+" : ""}${num(t.credits_adjusted)}`, `${num(t.adjustments)} transaksi manual`, "fin-adj"], ["Kredit terpakai", num(t.credits_consumed), "beban layanan periode ini", "fin-consumed"]].map(([l, v, s, id]) => (
+            {[["Pendapatan (incl. PPN)", rp(t.revenue_idr), `${num(t.topups)} top-up · ${num(t.buyers)} pembeli`, "fin-revenue"],
+              ["PPN Keluaran (11%)", rp(t.ppn_out), "dari pendapatan", "fin-ppn-out"],
+              ["Pengeluaran (incl. PPN)", rp(t.expenses_idr), "beban operasional", "fin-expenses"],
+              ["PPN Masukan (11%)", rp(t.ppn_in), "dari e-faktur", "fin-ppn-in"]].map(([l, v, s, id]) => (
               <div key={id} className="aivora-card p-5" data-testid={id}><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{l}</p><p className="mt-2 text-2xl font-black text-slate-900">{v}</p><p className="text-xs text-slate-500">{s}</p></div>))}
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div className="aivora-card p-5" data-testid="fin-ppn-net"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">PPN Disetor (Keluaran − Masukan)</p><p className={`mt-2 text-2xl font-black ${t.ppn_net < 0 ? "text-emerald-600" : "text-slate-900"}`}>{rp(t.ppn_net)}</p><p className="text-xs text-slate-500">{t.ppn_net < 0 ? "lebih bayar (dapat dikompensasi)" : "kurang bayar ke negara"}</p></div>
+            <div className="aivora-card p-5" data-testid="fin-dpp-out"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pendapatan Neto (DPP)</p><p className="mt-2 text-2xl font-black text-slate-900">{rp(t.dpp_out)}</p><p className="text-xs text-slate-500">tanpa PPN</p></div>
+            <div className="aivora-card p-5 ring-1 ring-[#2F6BFF]/20" data-testid="fin-profit"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Laba Bersih</p><p className={`mt-2 text-2xl font-black ${t.profit < 0 ? "text-rose-600" : "text-emerald-600"}`}>{rp(t.profit)}</p><p className="text-xs text-slate-500">DPP pendapatan − DPP pengeluaran</p></div>
           </div>
           <div className="mt-6 grid gap-4 lg:grid-cols-3">
             <div className="aivora-card overflow-hidden lg:col-span-2">
               <table className="w-full text-sm" data-testid="fin-table">
-                <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500"><tr><th className="px-4 py-2.5 text-left">Periode</th><th className="px-3 py-2.5 text-right">Top-up</th><th className="px-3 py-2.5 text-right">Kredit terjual</th><th className="px-3 py-2.5 text-right">Pendapatan</th><th className="px-3 py-2.5 text-right">Penyesuaian</th><th className="px-4 py-2.5 text-right">Terpakai</th></tr></thead>
+                <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500"><tr><th className="px-4 py-2.5 text-left">Periode</th><th className="px-3 py-2.5 text-right">Pendapatan</th><th className="px-3 py-2.5 text-right">PPN Kel.</th><th className="px-3 py-2.5 text-right">Pengeluaran</th><th className="px-3 py-2.5 text-right">PPN Mas.</th><th className="px-3 py-2.5 text-right">PPN Neto</th><th className="px-4 py-2.5 text-right">Laba Bersih</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
-                  {data.rows.map((r) => <tr key={r.period} data-testid={`fin-row-${r.period}`}><td className="px-4 py-2 font-semibold text-slate-800">{r.period}</td><td className="px-3 py-2 text-right">{num(r.topups)}</td><td className="px-3 py-2 text-right">{num(r.credits_sold)}</td><td className="px-3 py-2 text-right font-bold text-slate-900">{rp(r.revenue_idr)}</td><td className="px-3 py-2 text-right">{r.credits_adjusted ? `${r.credits_adjusted > 0 ? "+" : ""}${num(r.credits_adjusted)}` : "–"}</td><td className="px-4 py-2 text-right">{num(r.credits_consumed)}</td></tr>)}
-                  {data.rows.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-sm text-slate-500" data-testid="fin-empty">Tidak ada transaksi pada periode ini.</td></tr>}
+                  {data.rows.map((r) => <tr key={r.period} data-testid={`fin-row-${r.period}`}><td className="px-4 py-2 font-semibold text-slate-800">{r.period}</td><td className="px-3 py-2 text-right font-bold text-slate-900">{rp(r.revenue_idr)}</td><td className="px-3 py-2 text-right text-slate-600">{rp(r.ppn_out)}</td><td className="px-3 py-2 text-right text-slate-700">{rp(r.expenses_idr)}</td><td className="px-3 py-2 text-right text-slate-600">{rp(r.ppn_in)}</td><td className="px-3 py-2 text-right text-slate-600">{rp(r.ppn_net)}</td><td className={`px-4 py-2 text-right font-bold ${r.profit < 0 ? "text-rose-600" : "text-emerald-600"}`}>{rp(r.profit)}</td></tr>)}
+                  {data.rows.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-sm text-slate-500" data-testid="fin-empty">Tidak ada transaksi pada periode ini.</td></tr>}
                 </tbody>
               </table>
             </div>

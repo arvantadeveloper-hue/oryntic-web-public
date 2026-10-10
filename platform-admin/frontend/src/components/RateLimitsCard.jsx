@@ -19,11 +19,11 @@ const FIELDS = [
 export function RateLimitsCard() {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
-  useEffect(() => { api.get("/admin/rate-limits").then((r) => setForm(r.data)).catch(() => {}); }, []);
+  useEffect(() => { api.get("/platform/rate-limits").then((r) => setForm(r.data)).catch(() => {}); }, []);
   if (!form) return null;
   const save = async () => {
     setSaving(true);
-    try { const r = await api.put("/admin/rate-limits", form); setForm(r.data); toast.success("Batas pemakaian disimpan"); }
+    try { const r = await api.put("/platform/rate-limits", form); setForm(r.data); toast.success("Batas pemakaian disimpan"); }
     catch (e) { toast.error(e?.response?.data?.detail || "Gagal menyimpan"); } finally { setSaving(false); }
   };
   return (
