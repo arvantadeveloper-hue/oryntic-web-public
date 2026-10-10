@@ -1,25 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { Users, Briefcase, MessageSquare, Sparkles, Bell, Server } from "lucide-react";
 import { api } from "../lib/api";
-import { RealtimePricingCard } from "../components/RealtimePricingCard";
-import { RateLimitsCard } from "../components/RateLimitsCard";
-import { ModelRoutingCard } from "../components/ModelRoutingCard";
-import { PlatformPricingCard, TrialCard } from "../components/PlatformPricingCards";
 import { SupportAgentCard } from "../components/SupportAgentCard";
 import { PricingCatalogCard } from "../components/PricingCatalogCard";
+import { ModelRoutingCard } from "../components/ModelRoutingCard";
 
 export default function Admin() {
   const [tab, setTab] = useState("overview");
   const [ov, setOv] = useState(null);
   const [users, setUsers] = useState([]);
   const [tasks, setTasks] = useState([]);
-  const [pricing, setPricing] = useState(null);
 
   useEffect(() => {
     api.get("/admin/overview").then((r) => setOv(r.data)).catch(() => {});
     api.get("/admin/users").then((r) => setUsers(r.data)).catch(() => {});
     api.get("/admin/tasks").then((r) => setTasks(r.data)).catch(() => {});
-    api.get("/admin/pricing").then((r) => setPricing(r.data)).catch(() => {});
   }, []);
 
   const stats = ov ? [
@@ -36,7 +31,7 @@ export default function Admin() {
       <h1 className="text-3xl font-extrabold text-slate-900">Admin Console</h1>
 
       <div className="mt-5 flex gap-2 border-b border-slate-200">
-        {[["overview", "Ringkasan"], ["users", "Pengguna"], ["tasks", "Tugas"], ["pricing", "Tarif & Margin"], ["catalog", "Katalog Harga"], ["support", "Asisten Oryntix"]].map(([k, l]) => (
+        {[["overview", "Ringkasan"], ["users", "Pengguna"], ["tasks", "Tugas"], ["catalog", "Pricing"], ["support", "Asisten Oryntix"]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} data-testid={`admin-tab-${k}`}
             className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium ${tab === k ? "border-[#00D1FF] text-slate-900" : "border-transparent text-slate-500"}`}>{l}</button>
         ))}
@@ -89,61 +84,19 @@ export default function Admin() {
       )}
 
       {tab === "catalog" && (
-        <div className="mt-6" data-testid="admin-catalog-tab"><PricingCatalogCard /></div>
+        <div className="mt-6 space-y-6" data-testid="admin-catalog-tab">
+          <PricingCatalogCard />
+          <div>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Model Routing</h3>
+            <ModelRoutingCard />
+          </div>
+        </div>
       )}
 
       {tab === "support" && (
         <div className="mt-6" data-testid="admin-support-tab"><SupportAgentCard /></div>
       )}
 
-      {tab === "pricing" && pricing && (
-        <div className="mt-6 space-y-6">
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Credit Packages</h3>
-            <div className="grid gap-4 sm:grid-cols-5">
-              {pricing.packages.map((p) => (
-                <div key={p.id} className="aivora-card p-4">
-                  <p className="font-bold text-slate-900">{p.name}</p>
-                  <p className="text-sm text-slate-600">{p.credits} kredit</p>
-                  <p className="text-xs text-slate-500">Rp {p.price_idr.toLocaleString("id-ID")}</p>
-                  <p className="mt-1 text-xs text-[#2F6BFF]">${p.usd}{p.discount_pct ? ` · diskon ${p.discount_pct}%` : ""}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Providers & Tariff</h3>
-            <div className="aivora-card p-5 text-sm text-slate-600">
-              {pricing.providers.map((pr, i) => (
-                <div key={i} className="flex items-center justify-between border-b border-slate-200 py-2 last:border-0">
-                  <span>{pr.provider} · <span className="text-slate-500">{pr.model}</span></span>
-                  <span className="rounded-full bg-[#10B981]/20 px-2 py-0.5 text-xs text-[#10B981]">{pr.status}</span>
-                </div>
-              ))}
-              <p className="mt-3 text-xs text-slate-500">Metode: {pricing.tariff.method}. Teks: {pricing.tariff.text_credits_per_1k_chars} kredit/1k char · Gambar: {pricing.tariff.image_generation_credits} kredit · Profil: {pricing.tariff.profile_generation_credits} kredit.</p>
-            </div>
-          </div>
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Platform Tariff & Trial</h3>
-            <div className="space-y-4">
-              <PlatformPricingCard pricing={pricing.pricing} rates={pricing.rates} tools={pricing.tools} onSaved={(d) => setPricing({ ...pricing, pricing: d.pricing, rates: d.rates, tools: d.tools || pricing.tools })} />
-              <TrialCard trial={pricing.trial} onSaved={(tr) => setPricing({ ...pricing, trial: tr })} />
-            </div>
-          </div>
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Realtime Voice Tariff</h3>
-            <RealtimePricingCard />
-          </div>
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Rate Limits</h3>
-            <RateLimitsCard />
-          </div>
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">Model Routing & Tools</h3>
-            <ModelRoutingCard />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

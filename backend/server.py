@@ -38,7 +38,7 @@ from realtime import manager, user_manager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("aivora")
 
-app = FastAPI(title="Oryntix API")
+app = FastAPI(title="Oryntix API", openapi_url="/api/openapi.json", docs_url="/api/docs", redoc_url=None)
 
 
 @app.get("/api/")
@@ -56,6 +56,9 @@ app.include_router(agents_router)
 app.include_router(reminders_router)
 app.include_router(wallet_router)
 app.include_router(admin_router)
+from platform_api import routers as platform_routers  # noqa: E402
+for _r in platform_routers:
+    app.include_router(_r)
 app.include_router(integrations_router)
 app.include_router(google_auth_router)
 app.include_router(github_router)

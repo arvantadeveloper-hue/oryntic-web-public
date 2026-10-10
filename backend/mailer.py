@@ -88,3 +88,49 @@ def friend_invite_email(inviter: str, link: str) -> tuple:
     html = _layout("Ajakan bergabung", body, "Daftar Sekarang", link, "Gunakan alamat email yang sama saat mendaftar agar permintaan pertemanan langsung muncul.")
     text = f"{inviter} mengajak Anda bergabung di {BRAND}.\nDaftar di: {link}"
     return subject, html, text
+
+
+def _rp(n) -> str:
+    return "Rp " + f"{int(n or 0):,}".replace(",", ".")
+
+
+def efaktur_reminder_email(count: int, total_ppn: int, items: list, link: str) -> tuple:
+    subject = f"{count} pengeluaran menunggu e-faktur — {BRAND}"
+    rows = "".join(
+        f"<tr><td style='padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px'>{escape(str(e.get('date', '')))} · {escape(str(e.get('vendor', '')))}</td>"
+        f"<td style='padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px;text-align:right;color:#8fb4ff'>{_rp(e.get('ppn_idr', 0))}</td></tr>"
+        for e in items[:20]
+    )
+    html = f"""<!doctype html><html><body style="margin:0;background:#0a0f1f;font-family:Segoe UI,Arial,sans-serif;padding:32px 16px">
+<table role="presentation" width="100%" style="max-width:560px;margin:0 auto;background:#111a33;border-radius:16px;color:#fff">
+<tr><td style="padding:28px 32px 4px"><table role="presentation"><tr><td style="width:36px;height:36px;background:linear-gradient(135deg,#2F6BFF,#7C3AED);border-radius:10px;text-align:center;font-weight:800;font-size:18px;color:#fff">O</td><td style="padding-left:10px;font-size:20px;font-weight:800">{BRAND}</td></tr></table></td></tr>
+<tr><td style="padding:12px 32px 0"><h2 style="margin:0 0 10px;font-size:19px">Pengingat e-Faktur</h2>
+<p style="margin:0;font-size:14px;line-height:1.6;color:rgba(255,255,255,.8)">Ada <b>{count}</b> pengeluaran kena PPN yang belum dilampiri e-faktur (total PPN masukan <b>{_rp(total_ppn)}</b>). Unggah e-faktur agar PPN masukan sah dikreditkan.</p></td></tr>
+<tr><td style="padding:14px 32px 0"><table style="width:100%;border-collapse:collapse;background:rgba(255,255,255,.03);border-radius:10px">{rows}</table></td></tr>
+<tr><td style="padding:22px 32px 8px"><a href="{link}" style="display:inline-block;background:linear-gradient(90deg,#2F6BFF,#7C3AED);color:#fff;text-decoration:none;font-weight:700;padding:13px 24px;border-radius:12px;font-size:14px">Buka Pengeluaran</a></td></tr>
+<tr><td style="padding:8px 32px 30px;font-size:12px;color:rgba(255,255,255,.45)">Email otomatis dari back-office {BRAND}. Dikirim tiap akhir bulan.</td></tr></table></body></html>"""
+    lines = "\n".join(f"- {e.get('date', '')} {e.get('vendor', '')}: PPN {_rp(e.get('ppn_idr', 0))}" for e in items[:20])
+    text = f"{count} pengeluaran menunggu e-faktur (total PPN masukan {_rp(total_ppn)}).\n{lines}\n\nBuka Pengeluaran: {link}"
+    return subject, html, text
+
+
+def budget_alert_email(month: str, breaches: list, link: str) -> tuple:
+    subject = f"Anggaran terlampaui ({month}) — {BRAND}"
+    rows = "".join(
+        f"<tr><td style='padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px'>{escape(str(label))}</td>"
+        f"<td style='padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px;text-align:right'>Anggaran {_rp(b)}</td>"
+        f"<td style='padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px;text-align:right;color:#ff8a8a'>Terpakai {_rp(s)}</td></tr>"
+        for (label, b, s) in breaches
+    )
+    html = f"""<!doctype html><html><body style="margin:0;background:#0a0f1f;font-family:Segoe UI,Arial,sans-serif;padding:32px 16px">
+<table role="presentation" width="100%" style="max-width:560px;margin:0 auto;background:#111a33;border-radius:16px;color:#fff">
+<tr><td style="padding:28px 32px 4px"><table role="presentation"><tr><td style="width:36px;height:36px;background:linear-gradient(135deg,#2F6BFF,#7C3AED);border-radius:10px;text-align:center;font-weight:800;font-size:18px;color:#fff">O</td><td style="padding-left:10px;font-size:20px;font-weight:800">{BRAND}</td></tr></table></td></tr>
+<tr><td style="padding:12px 32px 0"><h2 style="margin:0 0 10px;font-size:19px;color:#ff8a8a">⚠ Anggaran bulan {escape(month)} terlampaui</h2>
+<p style="margin:0;font-size:14px;line-height:1.6;color:rgba(255,255,255,.8)">Pengeluaran bulan berjalan telah melewati ambang anggaran yang ditetapkan:</p></td></tr>
+<tr><td style="padding:14px 32px 0"><table style="width:100%;border-collapse:collapse;background:rgba(255,255,255,.03);border-radius:10px">{rows}</table></td></tr>
+<tr><td style="padding:22px 32px 8px"><a href="{link}" style="display:inline-block;background:linear-gradient(90deg,#2F6BFF,#7C3AED);color:#fff;text-decoration:none;font-weight:700;padding:13px 24px;border-radius:12px;font-size:14px">Tinjau Pengeluaran</a></td></tr>
+<tr><td style="padding:8px 32px 30px;font-size:12px;color:rgba(255,255,255,.45)">Peringatan otomatis dari back-office {BRAND}.</td></tr></table></body></html>"""
+    lines = "\n".join(f"- {label}: anggaran {_rp(b)}, terpakai {_rp(s)}" for (label, b, s) in breaches)
+    text = f"Anggaran bulan {month} terlampaui:\n{lines}\n\nTinjau: {link}"
+    return subject, html, text
+

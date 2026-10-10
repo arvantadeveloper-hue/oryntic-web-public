@@ -1,22 +1,21 @@
 import os
+import io
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 from db import db, now_iso, new_id
+from platform_api.csvsafe import SafeWriter
 from auth import (require_platform_admin, require_platform_staff, platform_role, PLATFORM_ROLES, public_user,
                   issue_reset_link, app_url, pw_hash)
 from mailer import send_email, debug_links
-from labels import FEATURE_LABELS
+from admin import FEATURE_LABELS
+from platform_api.common import _audit, ROLE_LABELS
 
-# Platform back-office API (separate admin website). Roles: super_admin (everything) · finance (read-only reports).
+# Platform back-office API (consumed by the separate admin website). Roles: super_admin (everything) · finance (read-only reports).
 router = APIRouter(prefix="/api/platform", tags=["platform"])
-ROLE_LABELS = {"super_admin": "Super Admin", "finance": "Finance"}
-
-
-async def _audit(actor: dict, action: str, target: Optional[str] = None, meta: Optional[dict] = None) -> None:
-    await db.platform_audit.insert_one({"id": new_id(), "actor_id": actor["id"], "actor_email": actor["email"], "action": action,
-                                        "target": target, "meta": meta or {}, "created_at": now_iso()})
 
 
 def _staff_pub(u: dict) -> dict:
@@ -51,8 +50,35 @@ async def stats(days: int = 30, u: dict = Depends(require_platform_staff)):
     balance_total = 0
     async for x in db.users.aggregate([{"$group": {"_id": None, "s": {"$sum": "$credits"}}}]):
         balance_total = int(x["s"] or 0)
+    # 6-month profit & loss trend (revenue incl. PPN, expenses, net profit on DPP basis)
+    pnl_rev, pnl_exp = {}, {}
+    y0, m0 = now.year, now.month
+    months = []
+    for i in range(5, -1, -1):
+        mi = m0 - i
+        yy = y0 + (mi - 1) // 12
+        mm = (mi - 1) % 12 + 1
+        months.append(f"{yy:04d}-{mm:02d}")
+    pnl_start = months[0] + "-01"
+    async for t in db.credit_transactions.find({"type": "topup", "created_at": {"$gte": pnl_start}}, {"_id": 0, "meta": 1, "created_at": 1}):
+        k = (t.get("created_at") or "")[:7]
+        if k in months:
+            pnl_rev[k] = pnl_rev.get(k, 0) + int((t.get("meta") or {}).get("price_idr") or 0)
+    async for x in db.platform_expenses.find({"is_deleted": False, "date": {"$gte": pnl_start[:7] + "-01"}}, {"_id": 0, "date": 1, "amount_idr": 1, "dpp_idr": 1}):
+        k = (x.get("date") or "")[:7]
+        if k in months:
+            pnl_exp[k] = pnl_exp.get(k, 0) + int(x.get("dpp_idr") or 0)
+    pnl_exp_full = {}
+    async for x in db.platform_expenses.find({"is_deleted": False, "date": {"$gte": pnl_start[:7] + "-01"}}, {"_id": 0, "date": 1, "amount_idr": 1}):
+        k = (x.get("date") or "")[:7]
+        if k in months:
+            pnl_exp_full[k] = pnl_exp_full.get(k, 0) + int(x.get("amount_idr") or 0)
+    pnl = []
+    for k in months:
+        rev = pnl_rev.get(k, 0); dpp_out = round(rev / 1.11); exp_dpp = pnl_exp.get(k, 0)
+        pnl.append({"month": k, "revenue_idr": rev, "expenses_idr": pnl_exp_full.get(k, 0), "profit": dpp_out - exp_dpp})
     return {"days": days, "users_total": users_total, "users_new": users_new, "credits_sold": sold, "topups": topups, "revenue_idr": revenue_idr,
-            "credits_consumed": consumed, "credits_outstanding": balance_total, "active_calls": active_calls, "active_rooms": active_rooms,
+            "credits_consumed": consumed, "credits_outstanding": balance_total, "active_calls": active_calls, "active_rooms": active_rooms, "pnl": pnl,
             "by_feature": sorted([{"feature": f, "label": FEATURE_LABELS.get(f, f.replace("_", " ").title()), "credits": c} for f, c in by_feature.items()], key=lambda x: -x["credits"]),
             "daily": [{"date": d, "credits": daily.get(d, 0)} for d in ((now - timedelta(days=i)).date().isoformat() for i in range(days - 1, -1, -1))]}
 
@@ -139,11 +165,10 @@ async def revoke_staff(uid: str, u: dict = Depends(require_platform_admin)):
 
 # ---------- end users ----------
 @router.get("/users")
-async def list_users(q: Optional[str] = None, before: Optional[str] = None, limit: int = 30, u: dict = Depends(require_platform_staff)):
+async def list_users(q: Optional[str] = None, before: Optional[str] = None, limit: int = 30, u: dict = Depends(require_platform_admin)):
     limit = max(1, min(limit, 100))
     query = {}
     if q:
-        import re
         rx = {"$regex": re.escape(q.strip()), "$options": "i"}
         query["$or"] = [{"email": rx}, {"name": rx}]
     if before:
@@ -161,22 +186,21 @@ async def list_users(q: Optional[str] = None, before: Optional[str] = None, limi
 
 
 class CreditAdjustIn(BaseModel):
-    delta: int = Field(ge=-1_000_000, le=1_000_000)
+    delta: int = Field(ge=1, le=1_000_000)  # top-up only: credits can be added, never reduced
     note: str = Field(default="", max_length=200)
 
 
 @router.post("/users/{uid}/credits")
 async def adjust_credits(uid: str, x: CreditAdjustIn, u: dict = Depends(require_platform_admin)):
-    if x.delta == 0:
-        raise HTTPException(400, "Jumlah tidak boleh 0")
     t = await db.users.find_one({"id": uid}, {"_id": 0, "credits": 1, "email": 1})
     if not t:
         raise HTTPException(404, "Pengguna tidak ditemukan")
-    new_balance = max(0, int(t.get("credits") or 0) + x.delta)
+    before = int(t.get("credits") or 0)
+    new_balance = before + x.delta
     await db.users.update_one({"id": uid}, {"$set": {"credits": new_balance}})
-    await db.credit_transactions.insert_one({"id": new_id(), "user_id": uid, "type": "adjustment", "amount": new_balance - int(t.get("credits") or 0), "balance_after": new_balance,
-                                             "description": x.note or ("Penyesuaian oleh Oryntix Platform"), "meta": {"by": u["email"]}, "created_at": now_iso()})
-    await _audit(u, "user.credits", t["email"], {"delta": x.delta, "note": x.note, "balance_after": new_balance})
+    await db.credit_transactions.insert_one({"id": new_id(), "user_id": uid, "type": "adjustment", "amount": x.delta, "balance_after": new_balance,
+                                             "description": x.note or ("Top up oleh Oryntix Platform"), "meta": {"by": u["email"]}, "created_at": now_iso()})
+    await _audit(u, "user.credits", t["email"], {"delta": x.delta, "note": x.note, "balance_before": before, "balance_after": new_balance})
     return {"credits": new_balance}
 
 
@@ -189,16 +213,69 @@ class DisableIn(BaseModel):
 async def disable_user(uid: str, x: DisableIn, u: dict = Depends(require_platform_admin)):
     if uid == u["id"]:
         raise HTTPException(400, "Tidak dapat menonaktifkan akun sendiri")
+    if x.disabled and not (x.reason or "").strip():
+        raise HTTPException(400, "Alasan suspend wajib diisi")
     t = await db.users.find_one({"id": uid}, {"_id": 0, "email": 1, "platform_role": 1})
     if not t:
         raise HTTPException(404, "Pengguna tidak ditemukan")
     if platform_role(t) == "super_admin":
         raise HTTPException(400, "Super Admin tidak dapat dinonaktifkan; cabut perannya dulu")
-    await db.users.update_one({"id": uid}, {"$set": {"disabled": x.disabled, "disabled_reason": x.reason if x.disabled else "", "updated_at": now_iso()}})
-    await _audit(u, "user.disable" if x.disabled else "user.enable", t["email"], {"reason": x.reason})
+    reason = (x.reason or "").strip()
+    await db.users.update_one({"id": uid}, {"$set": {"disabled": x.disabled, "disabled_reason": reason if x.disabled else "", "updated_at": now_iso()}})
+    await _audit(u, "user.disable" if x.disabled else "user.enable", t["email"], {"reason": reason})
     return {"ok": True, "disabled": x.disabled}
 
 
+@router.get("/users/{uid}/history")
+async def user_history(uid: str, u: dict = Depends(require_platform_admin)):
+    user = await db.users.find_one({"id": uid}, {"_id": 0, "email": 1, "name": 1, "credits": 1})
+    if not user:
+        raise HTTPException(404, "Pengguna tidak ditemukan")
+    txns = await db.credit_transactions.find({"user_id": uid}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    usage_raw = await db.usage_events.find({"user_id": uid}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    usage = [{"feature": e.get("feature"), "label": FEATURE_LABELS.get(e.get("feature"), e.get("feature") or "Pemakaian"),
+              "credits": int(e.get("credits") or 0), "created_at": e.get("created_at")} for e in usage_raw]
+    return {"user": {"email": user.get("email"), "name": user.get("name"), "credits": int(user.get("credits") or 0)},
+            "transactions": txns, "usage": usage}
+
+
+def _audit_filter(q: Optional[str], action: Optional[str], start: Optional[str], end: Optional[str]) -> dict:
+    f = {}
+    if q:
+        f["actor_email"] = {"$regex": re.escape(q.strip()), "$options": "i"}
+    if action:
+        f["action"] = action
+    cr = {}
+    try:
+        if start:
+            cr["$gte"] = datetime.strptime(start, "%Y-%m-%d").date().isoformat()
+        if end:
+            cr["$lt"] = (datetime.strptime(end, "%Y-%m-%d").date() + timedelta(days=1)).isoformat()
+    except ValueError as exc:
+        raise HTTPException(400, "Format tanggal harus YYYY-MM-DD") from exc
+    if cr:
+        f["created_at"] = cr
+    return f
+
+
 @router.get("/audit")
-async def audit_log(limit: int = 50, u: dict = Depends(require_platform_admin)):
-    return {"items": await db.platform_audit.find({}, {"_id": 0}).sort("created_at", -1).to_list(max(1, min(limit, 200)))}
+async def audit_log(limit: int = 50, q: Optional[str] = None, action: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None, u: dict = Depends(require_platform_admin)):
+    f = _audit_filter(q, action, start, end)
+    return {"items": await db.platform_audit.find(f, {"_id": 0}).sort("created_at", -1).to_list(max(1, min(limit, 500)))}
+
+
+@router.get("/audit/export.csv")
+async def audit_csv(q: Optional[str] = None, action: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None, u: dict = Depends(require_platform_admin)):
+    f = _audit_filter(q, action, start, end)
+    items = await db.platform_audit.find(f, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    buf = io.StringIO()
+    w = SafeWriter(buf, delimiter=";")
+    w.writerow(["waktu", "aktor", "aksi", "target", "detail"])
+    for a in items:
+        meta = a.get("meta") or {}
+        detail = "; ".join(f"{k}={v}" for k, v in meta.items()) if meta else ""
+        w.writerow([a.get("created_at"), a.get("actor_email"), a.get("action"), a.get("target") or "", detail])
+    tag = f"{start or 'awal'}-{end or 'kini'}"
+    await _audit(u, "audit.export", tag, {"count": len(items), "q": q or "", "action": action or ""})
+    name = f"oryntix-audit-{tag}.csv"
+    return StreamingResponse(iter(["\ufeff" + buf.getvalue()]), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})

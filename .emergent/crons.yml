@@ -1,0 +1,17 @@
+crons:
+  - name: recurring-expenses
+    description: "Membuat pengeluaran langganan bulanan + cek anggaran platform (tiap tanggal 1, 01:00 WIB)"
+    cron: "0 1 1 * *"
+    timezone: "Asia/Jakarta"
+    endpoint: "{{BASE_URL}}/api/platform/cron/recurring-expenses"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true
+  - name: efaktur-reminder
+    description: "Mengingatkan tim finance soal pengeluaran kena PPN yang belum ada e-faktur (tiap tanggal 25, 09:00 WIB)"
+    cron: "0 9 25 * *"
+    timezone: "Asia/Jakarta"
+    endpoint: "{{BASE_URL}}/api/platform/cron/efaktur-reminder"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true
