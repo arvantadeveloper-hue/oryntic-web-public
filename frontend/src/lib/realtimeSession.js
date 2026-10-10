@@ -255,6 +255,16 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       const r = await api.post("/events", { title: args.title, start_at: args.start_at, notes: args.notes || "", remind_mode: mode, remind_offsets: offsets, repeat: ["daily", "weekly", "monthly"].includes(args.repeat) ? args.repeat : "none", conversation_id: cid });
       return { ok: true, event: { title: r.data.title, start_at: r.data.start_at, remind: r.data.remind }, note: "confirm briefly: title, day & time, and how/when they will be reminded; the card is already in the chat panel" };
     }
+    if (name === "find_calendar_event") {
+      const r = await api.get("/events/upcoming", { params: { q: args.query || "" } });
+      const items = r.data.items || [];
+      return { ok: true, count: items.length, items: items.map((i) => ({ id: i.id, kind: i.kind, title: i.title, when: i.when, remind_mode: i.remind_mode, repeat: i.repeat })),
+        note: items.length ? "tell the user which recorded agenda matches (title + day & time) and ASK before deleting; call cancel_calendar_event only after they confirm" : "nothing recorded matches — tell the user it was not in their Oryntix calendar, so there is nothing to delete" };
+    }
+    if (name === "cancel_calendar_event") {
+      const r = await api.post("/events/cancel", { id: args.id, kind: args.kind, conversation_id: cid });
+      return { ok: true, item: { title: r.data.item.title, when: r.data.item.when }, note: "confirm briefly that the agenda and its reminder were removed; the card is already in the chat panel" };
+    }
     const gitProv = name.startsWith("gitlab_") ? "gitlab" : "github";
     const gitLabel = gitProv === "gitlab" ? "GitLab" : "GitHub";
     if (name === "github_repos" || name === "gitlab_repos") {

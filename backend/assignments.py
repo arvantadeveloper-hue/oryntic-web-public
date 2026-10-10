@@ -285,13 +285,51 @@ def event_markdown(ev: dict) -> str:
     return f"📅 **Tercatat di kalender:** {ev['title']}\n🕒 {when}{line}" + (f"\n📝 {ev['notes']}" if ev.get("notes") else "")
 
 
-@router.delete("/events/{eid}")
-async def delete_event(eid: str, u: dict = Depends(current_user)):
-    ev = await db.events.find_one({"id": eid, "user_id": u["id"]}, {"_id": 0, "reminder_id": 1})
-    res = await db.events.delete_one({"id": eid, "user_id": u["id"]})
+async def delete_event_doc(eid: str, uid: str) -> None:
+    """Remove an event together with its linked reminder(s)."""
+    ev = await db.events.find_one({"id": eid, "user_id": uid}, {"_id": 0, "reminder_id": 1})
+    res = await db.events.delete_one({"id": eid, "user_id": uid})
     if not res.deleted_count:
         raise HTTPException(404, "Event tidak ditemukan")
-    await db.reminders.delete_many({"$or": [{"event_id": eid}, {"id": ev.get("reminder_id") or "-"}], "user_id": u["id"]})
+    await db.reminders.delete_many({"$or": [{"event_id": eid}, {"id": ev.get("reminder_id") or "-"}], "user_id": uid})
+
+
+@router.get("/events/upcoming")
+async def events_upcoming(q: str = "", u: dict = Depends(current_user)):
+    """Voice tool `find_calendar_event`: the user's recorded agenda (events + standalone reminders), optionally filtered by title words."""
+    from agenda_flow import upcoming_items, _tz
+    return {"items": (await upcoming_items(u["id"], _tz(u), q))[:15]}
+
+
+class CancelAgendaIn(BaseModel):
+    id: str
+    kind: str = Field(pattern="^(event|reminder)$")
+    conversation_id: Optional[str] = None
+
+
+@router.post("/events/cancel")
+async def events_cancel(x: CancelAgendaIn, u: dict = Depends(current_user)):
+    """Voice tool `cancel_calendar_event` (after the user confirmed aloud): delete the agenda + reminder and post a card to the chat."""
+    from agenda_flow import upcoming_items, delete_item, _tz
+    item = next((i for i in await upcoming_items(u["id"], _tz(u)) if i["id"] == x.id and i["kind"] == x.kind), None)
+    if not item:
+        raise HTTPException(404, "Agenda tidak ditemukan")
+    await delete_item(u["id"], item)
+    if x.conversation_id:
+        conv = await db.conversations.find_one({"id": x.conversation_id, "participants": u["id"]}, {"_id": 0, "persona_id": 1, "persona_ids": 1})
+        pid = conv and ((conv.get("persona_ids") or [conv.get("persona_id")])[0])
+        persona = pid and await db.personas.find_one({"id": pid}, {"_id": 0})
+        if persona:
+            from chat import notify
+            await _save_ai_msg(x.conversation_id, persona, f"Agenda **{item['title']}** ({item['when']}) {'beserta pengingatnya ' if item.get('remind_mode') else ''}sudah dihapus ✅ dari kalender Oryntix.", 0, "voice",
+                               {"tool": "calendar_cancelled", "item": item, "cta": {"label": "Buka Kalender", "href": "/calendar"}})
+            await notify(x.conversation_id, {"type": "message", "role": "assistant"})
+    return {"ok": True, "item": item}
+
+
+@router.delete("/events/{eid}")
+async def delete_event(eid: str, u: dict = Depends(current_user)):
+    await delete_event_doc(eid, u["id"])
     return {"ok": True}
 
 

@@ -143,7 +143,9 @@ RUN_CODE_TOOL = {"type": "function", "name": "run_code",
                  "parameters": {"type": "object", "properties": {"task": {"type": "string", "description": "The calculation to perform, with all numbers and assumptions, in the user's words"}}, "required": ["task"]}}
 CALENDAR_TOOL = {"type": "function", "name": "add_calendar_event",
                  "description": "Record an activity, meeting, appointment, deadline or reminder the user mentions into their calendar. Use whenever the user asks you to note/schedule/remind them about something at a time. "
-                                "If the date or time is missing, ASK first. Confirm verbally afterwards (title, when, how they will be reminded).",
+                                "BEFORE calling: make sure you know (1) the date, (2) the time, and (3) whether they want to be reminded by a PHONE CALL from you or just a chat message — ask for whatever is missing "
+                                "(one short question), then repeat the summary (title, day & time, call/chat reminder) and call this tool only after the user agrees. Afterwards confirm briefly that it is in their calendar "
+                                "and, for call reminders, that you will phone them automatically.",
                  "parameters": {"type": "object", "properties": {
                      "title": {"type": "string", "description": "Short Indonesian title (max 8 words)"},
                      "start_at": {"type": "string", "description": "ISO-8601 datetime WITH timezone offset, resolved from the user's words (e.g. 'besok jam 10' → tomorrow 10:00 +07:00)"},
@@ -152,6 +154,13 @@ CALENDAR_TOOL = {"type": "function", "name": "add_calendar_event",
                      "remind_offsets": {"type": "array", "items": {"type": "integer"}, "description": "Minutes before start to remind, e.g. [30] or [30, 60] when the user asks for 30 minutes AND 1 hour. Default [30]"},
                      "repeat": {"type": "string", "enum": ["none", "daily", "weekly", "monthly"], "description": "Recurrence when the user says setiap hari/minggu/bulan or tiap <hari>; start_at is then the first occurrence. Default none"}},
                      "required": ["title", "start_at"]}}
+FIND_AGENDA_TOOL = {"type": "function", "name": "find_calendar_event",
+                    "description": "Look up the user's RECORDED agenda (calendar events + reminders) when they say a plan is cancelled/postponed or ask to remove a reminder. Returns the matching items; "
+                                   "tell the user whether it was recorded in Oryntix (title + day & time) and ASK whether to delete it together with its reminder. If nothing matches, say it was not recorded so there is nothing to delete.",
+                    "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Title words and/or time the user mentioned, e.g. 'rapat tim besok'"}}, "required": ["query"]}}
+CANCEL_AGENDA_TOOL = {"type": "function", "name": "cancel_calendar_event",
+                      "description": "Delete one recorded agenda item (and its reminder) ONLY after the user explicitly confirmed the title and time aloud. Use the id and kind returned by find_calendar_event.",
+                      "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "kind": {"type": "string", "enum": ["event", "reminder"]}}, "required": ["id", "kind"]}}
 SEARCH_TOOL = {"type": "function", "name": "search_workspace",
                "description": "Search the user's Workspace (saved task results, documents, meeting minutes) by keywords and drop clickable links into the chat panel. Use when the user asks to find or look up existing material.",
                "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Keywords to search for"}}, "required": ["query"]}}
@@ -414,7 +423,7 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         call_persona = await db.personas.find_one({"id": call["persona_id"]}, {"_id": 0, "model": 1, "tools": 1}) or {}
         web_on, code_on = bool(web_search_tool(call_persona)), bool(code_tool(call_persona))
         from support_agent import is_support
-        tools = [] if is_support(call["persona_id"]) else [ASSIGN_TOOL, SEARCH_TOOL, CALENDAR_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + ([RUN_CODE_TOOL] if code_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        tools = [] if is_support(call["persona_id"]) else [ASSIGN_TOOL, SEARCH_TOOL, CALENDAR_TOOL, FIND_AGENDA_TOOL, CANCEL_AGENDA_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + ([RUN_CODE_TOOL] if code_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     if is_live_model(session["model"]):
