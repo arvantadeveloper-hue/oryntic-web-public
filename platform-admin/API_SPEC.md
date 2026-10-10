@@ -23,6 +23,7 @@ Spesifikasi OpenAPI lengkap (termasuk skema body): **`GET /api/openapi.json`**, 
 | Pengeluaran | `GET /expenses?q&category&start&end` · `POST /expenses` (multipart: date, category, vendor, amount_idr, description, taxable, efaktur_no, file) · `DELETE /expenses/{eid}` · `GET /expenses/export.csv` · `GET /expenses/pending-efaktur` · `PUT /expenses/{eid}/efaktur` (multipart) · `GET /expenses/{eid}/file` · `GET/POST /expenses/recurring` · `PUT/DELETE /expenses/recurring/{rid}` · `POST /expenses/recurring/run` · `GET/PUT /expenses/budget` | staff |
 | Asisten Oryntix | `GET /support-agent` (staff) · `PUT /support-agent` · `GET /support-agent/avatars?page&page_size&mine` (staff) · `POST /support-agent/preview {message, session_id?}` | super_admin |
 | **Pricing** | lihat bagian di bawah | |
+| **Karakter Persona** | `GET/POST /persona-characters` · `PUT/DELETE /persona-characters/{cid}` — lihat bagian di bawah | staff baca · super_admin ubah |
 | Cron | `POST /cron/recurring-expenses` · `POST /cron/efaktur-reminder` — header `Authorization: Bearer <WEBHOOK_CRON_SECRET>`; dijadwalkan di `.emergent/crons.yml` | cron |
 
 ---
@@ -115,6 +116,30 @@ Respons = objek `calc` (lihat di atas) untuk kuantitas tersebut; `404` jika komp
 ### 10. Pengaturan terkait
 - `GET/PUT /api/platform/realtime-behaviour` — **BehaviourIn**: `turn_detection` `semantic_vad|server_vad`*, `eagerness` `low|medium|high|auto`*, `interrupt_response` (false), `create_response` (true), `threshold` 0–1 (0.5), `prefix_padding_ms` 0–2000 (300), `silence_duration_ms` 100–5000 (500), `barge_confirm_ms` 200–5000 (1300), `backchannel_resume` (true), `backchannel_window_ms` 1000–30000 (8000), `note`.
 - `GET/PUT /api/platform/model-routing` — **RoutingIn**: `enabled` (true), `it_model`* `^[a-z0-9-]+$`, `research_model`*, `confirm_threshold`* 0–1000.
+
+## Karakter Persona API (`/api/platform/persona-characters`)
+Preset "Karakter Persona" yang dipilih pengguna saat membuat persona (combo box di langkah *Describe with AI / Combine Both / From Photo*).
+Karakter **bawaan** (`id: "default"`, `builtin: true`) = prompt inti `assistant_persona.py` (CORE_SECTIONS) — hanya bisa dibaca. Jika pengguna memilih karakter lain, **prompt karakter tersebut MENIMPA** prompt inti bawaan untuk persona itu (chat teks maupun suara Realtime); instruksi lain (bahasa, memori, tools, profil persona) tetap berlaku.
+
+| Method & path | Peran | Keterangan |
+|---|---|---|
+| `GET /api/platform/persona-characters` | staff | `{items:[Character]}` — bawaan selalu pertama, lalu urut `sort`, `name`; termasuk `prompt` lengkap |
+| `POST /api/platform/persona-characters` | super_admin | body **CharacterIn** → `201 Character`; audit `persona_character.create` |
+| `PUT /api/platform/persona-characters/{cid}` | super_admin | body **CharacterIn** → `Character`; `400` bila `cid="default"`; `404` tidak ada; audit `persona_character.update` |
+| `DELETE /api/platform/persona-characters/{cid}` | super_admin | → `{ok:true, personas_reset:n}` — persona pengguna yang memakainya otomatis kembali ke bawaan; `400` bila bawaan |
+
+**CharacterIn**
+| Field | Tipe | Batas | Arti |
+|---|---|---|---|
+| `name` | string | 1–80 | nama yang tampil di combo box |
+| `description` | string | ≤ 600 | *Deskripsi Karakter* — ditampilkan di bawah combo box dan dipakai AI saat menyusun profil persona |
+| `prompt` | string | 20–20.000 | *Prompt Karakter* — menggantikan CORE_SECTIONS (`{{language}}` boleh dipakai sebagai placeholder bahasa) |
+| `enabled` | bool | default true | nonaktif = tidak muncul untuk pengguna; persona yang sudah memakainya jatuh ke bawaan |
+| `sort` | int | 0–10.000, default 100 | urutan tampil |
+
+**Character** (respons) = CharacterIn + `id`, `builtin`, `created_at`, `updated_at`.
+
+Sisi pengguna (app utama): `GET /api/personas/characters` → `{items:[{id,name,description,enabled,sort,builtin}], default:"default"}` (hanya yang aktif, tanpa prompt); `POST /api/personas/generate-profile {description (penampilan), method, photo_b64?, character_id?}`; `POST /api/personas {…, character_id}`; `PUT /api/personas/{pid} {…, character_id?}` → `400 "Karakter persona tidak ditemukan atau dinonaktifkan"` bila id tidak valid.
 
 ## Cron (`.emergent/crons.yml`)
 | name | jadwal (Asia/Jakarta) | endpoint |

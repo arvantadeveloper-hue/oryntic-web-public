@@ -6,5 +6,6 @@ from platform_api.expenses import router as expenses_router
 from platform_api.crons import router as cron_router
 from platform_api.support import router as support_router
 from platform_api.pricing_routes import router as pricing_router, legacy as legacy_pricing_router
+from platform_api.characters import router as characters_router
 
-routers = (console_router, finance_router, expenses_router, cron_router, support_router, pricing_router, legacy_pricing_router)
+routers = (console_router, finance_router, expenses_router, cron_router, support_router, pricing_router, legacy_pricing_router, characters_router)

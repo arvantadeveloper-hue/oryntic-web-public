@@ -278,7 +278,8 @@ Example:
 """
 
 
-def persona_block(name: str, lang_name: str, voice: bool) -> list:
-    """Ordered prompt parts for one assistant (text chat, or Realtime session instructions when voice=True)."""
-    parts = [CORE_SECTIONS]
+def persona_block(name: str, lang_name: str, voice: bool, core: str = None) -> list:
+    """Ordered prompt parts for one assistant (text chat, or Realtime session instructions when voice=True).
+    `core` = the persona's chosen character prompt (persona_characters); defaults to the built-in CORE_SECTIONS."""
+    parts = [core or CORE_SECTIONS]
     return [p.replace("{{language}}", lang_name) for p in parts]

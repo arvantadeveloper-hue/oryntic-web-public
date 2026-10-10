@@ -7,6 +7,7 @@ from auth import current_user, require_admin, workspace_id
 from llm import llm_json, generate_image, record_usage, text_credits, MODEL_CATALOG, DEFAULT_MODEL_KEY
 from pricing import rate, TOOL_BY_ID
 from ratelimit import rate_limit
+from persona_characters import public_characters, character_summary, valid_character_id, DEFAULT_ID
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
 _MODEL_IDS = {m["id"] for m in MODEL_CATALOG}
@@ -17,9 +18,10 @@ def _valid_model(key):
 
 
 class GenerateProfileIn(BaseModel):
-    description: str = Field(min_length=1, max_length=4000)
+    description: str = Field(min_length=1, max_length=4000)  # appearance description ("Deskripsikan Penampilan Persona") + optional notes
     method: str = "describe"  # describe | photo | combine
     photo_b64: Optional[str] = None
+    character_id: Optional[str] = None  # "Karakter Persona" preset (persona_characters); default = built-in
 
 
 class PersonaIn(BaseModel):
@@ -29,6 +31,7 @@ class PersonaIn(BaseModel):
     voice_model: Optional[str] = Field(default=None, pattern="^[a-z0-9.-]+$")  # Realtime voice model (gpt-realtime-2.1 / -2.1-mini / -2.0)
     tools: list[str] = Field(default_factory=list, max_length=12)  # provider built-in tools ("openai:web_search", …)
     reference_photo: Optional[str] = None
+    character_id: Optional[str] = None
 
 
 def _valid_tools(ids) -> list:
@@ -65,7 +68,10 @@ PROFILE_SYS = (
 @router.post("/generate-profile")
 async def generate_profile(x: GenerateProfileIn, u: dict = Depends(require_admin)):
     await rate_limit(u, "generation")
-    prompt = f"Create method: {x.method}\nUser request:\n{x.description}"
+    prompt = f"Create method: {x.method}\nAppearance / user request:\n{x.description}"
+    ch = await character_summary(x.character_id)
+    if ch:
+        prompt += f"\n\nCharacter preset chosen by the user (this defines the personality & communication style — align personality/system_instructions with it): {ch['name']} — {ch['description']}"
     if x.photo_b64:
         prompt += "\n\n(The user uploaded a reference photo. Describe only neutral visual appearance cues.)"
     profile = await llm_json(PROFILE_SYS, prompt)
@@ -74,6 +80,12 @@ async def generate_profile(x: GenerateProfileIn, u: dict = Depends(require_admin
     await record_usage(u["id"], "persona_profile", rate("profile"), {"method": x.method})
     bal = (await db.users.find_one({"id": u["id"]}))["credits"]
     return {"profile": profile, "credits_used": rate("profile"), "credits": bal}
+
+
+@router.get("/characters")
+async def list_characters(_: dict = Depends(current_user)):
+    """Options for the "Karakter Persona" combo box (default first)."""
+    return {"items": await public_characters(), "default": DEFAULT_ID}
 
 
 @router.get("")
@@ -97,6 +109,7 @@ async def create_persona(x: PersonaIn, u: dict = Depends(require_admin)):
         "voice": x.voice or "alloy",
         "voice_model": x.voice_model or "gpt-live-1",
         "tools": _valid_tools(x.tools),
+        "character_id": await valid_character_id(x.character_id),
         "portrait": None,
         "reference_photo": x.reference_photo,
         "version": 1,
@@ -176,6 +189,7 @@ async def update_persona(pid: str, body: dict, u: dict = Depends(require_admin))
         "voice": body.get("voice", p.get("voice", "alloy")),
         "voice_model": body.get("voice_model") or p.get("voice_model") or "gpt-live-1",
         "tools": _valid_tools(body["tools"]) if isinstance(body.get("tools"), list) else p.get("tools", []),
+        "character_id": await valid_character_id(body.get("character_id") or p.get("character_id")),
         "version": p.get("version", 1) + 1,
         "versions": versions[-10:],
         "updated_at": now_iso(),

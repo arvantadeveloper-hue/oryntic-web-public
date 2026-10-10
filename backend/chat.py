@@ -480,7 +480,8 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     lang_name = _lang_name(user)
     parts = [f"CRITICAL: You MUST always write every reply in {lang_name}, no matter what language these instructions or the persona profile are written in, and regardless of which AI model is answering or which tool/task mode is active. Never switch to another language unless the user explicitly asks for it."]
     parts.append(f"You are '{persona['name']}', an AI Assistent. {prof.get('system_instructions','')}")
-    parts += persona_block(persona["name"], lang_name, voice_mode)
+    from persona_characters import character_prompt
+    parts += persona_block(persona["name"], lang_name, voice_mode, await character_prompt(persona.get("character_id")))
     if persona.get("builtin"):
         from support_agent import support_prompt_parts
         parts += await support_prompt_parts()
