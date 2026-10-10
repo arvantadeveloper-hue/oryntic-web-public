@@ -294,6 +294,64 @@ async def delete_event_doc(eid: str, uid: str) -> None:
     await db.reminders.delete_many({"$or": [{"event_id": eid}, {"id": ev.get("reminder_id") or "-"}], "user_id": uid})
 
 
+async def move_agenda_doc(uid: str, item: dict, new_start_utc: str) -> dict:
+    """Reschedule an event (end shifts by the same delta) or a standalone reminder; the linked reminder is re-armed at the new time."""
+    from reminders import _parse, _offsets, build_alerts
+    start = _parse(new_start_utc)
+    if item["kind"] == "event":
+        ev = await db.events.find_one({"id": item["id"], "user_id": uid}, {"_id": 0})
+        if not ev:
+            raise HTTPException(404, "Event tidak ditemukan")
+        fields = {"start_at": start.isoformat(), "updated_at": now_iso()}
+        if ev.get("end_at"):
+            fields["end_at"] = (start + (_parse(ev["end_at"]) - _parse(ev["start_at"]))).isoformat()
+        await db.events.update_one({"id": ev["id"]}, {"$set": fields})
+        rid_q = {"$or": [{"event_id": ev["id"]}, {"id": ev.get("reminder_id") or "-"}], "user_id": uid}
+    else:
+        rid_q = {"id": item["id"], "user_id": uid}
+    async for r in db.reminders.find(rid_q, {"_id": 0}):
+        offsets = _offsets(r.get("offsets"), r.get("remind_minutes", 30))
+        await db.reminders.update_one({"id": r["id"]}, {"$set": {"start_at": start.isoformat(), "remind_at": (start - timedelta(minutes=min(offsets))).isoformat(),
+                                                                 "alerts": build_alerts(start, offsets), "status": "scheduled", "snoozed_until": None}})
+    return {**item, "old_start_at": item["start_at"], "start_at": start.isoformat()}
+
+
+class MoveAgendaIn(BaseModel):
+    id: str
+    kind: str = Field(pattern="^(event|reminder)$")
+    start_at: str
+    conversation_id: Optional[str] = None
+
+
+@router.post("/events/move")
+async def events_move(x: MoveAgendaIn, u: dict = Depends(current_user)):
+    """Voice tool `move_calendar_event` (after the user confirmed aloud): reschedule the agenda + reminder and post a card to the chat."""
+    from agenda_flow import upcoming_items, _tz, when_label
+    item = next((i for i in await upcoming_items(u["id"], _tz(u)) if i["id"] == x.id and i["kind"] == x.kind), None)
+    if not item:
+        raise HTTPException(404, "Agenda tidak ditemukan")
+    start = _utc(x.start_at)
+    if not start:
+        raise HTTPException(400, "Waktu baru tidak valid")
+    moved = await move_agenda_doc(u["id"], item, start)
+    moved["when"] = when_label(start, _tz(u))
+    await _agenda_card(x.conversation_id, u, f"Agenda **{item['title']}** dipindahkan dari {item['when']} ke **{moved['when']}**{' — pengingatnya ikut digeser' if item.get('remind_mode') else ''} ✅.",
+                       {"tool": "calendar_moved", "item": moved})
+    return {"ok": True, "item": moved}
+
+
+async def _agenda_card(conversation_id: Optional[str], u: dict, text: str, extra: dict) -> None:
+    if not conversation_id:
+        return
+    conv = await db.conversations.find_one({"id": conversation_id, "participants": u["id"]}, {"_id": 0, "persona_id": 1, "persona_ids": 1})
+    pid = conv and ((conv.get("persona_ids") or [conv.get("persona_id")])[0])
+    persona = pid and await db.personas.find_one({"id": pid}, {"_id": 0})
+    if persona:
+        from chat import notify
+        await _save_ai_msg(conversation_id, persona, text, 0, "voice", {**extra, "cta": {"label": "Buka Kalender", "href": "/calendar"}})
+        await notify(conversation_id, {"type": "message", "role": "assistant"})
+
+
 @router.get("/events/upcoming")
 async def events_upcoming(q: str = "", u: dict = Depends(current_user)):
     """Voice tool `find_calendar_event`: the user's recorded agenda (events + standalone reminders), optionally filtered by title words."""
@@ -315,15 +373,8 @@ async def events_cancel(x: CancelAgendaIn, u: dict = Depends(current_user)):
     if not item:
         raise HTTPException(404, "Agenda tidak ditemukan")
     await delete_item(u["id"], item)
-    if x.conversation_id:
-        conv = await db.conversations.find_one({"id": x.conversation_id, "participants": u["id"]}, {"_id": 0, "persona_id": 1, "persona_ids": 1})
-        pid = conv and ((conv.get("persona_ids") or [conv.get("persona_id")])[0])
-        persona = pid and await db.personas.find_one({"id": pid}, {"_id": 0})
-        if persona:
-            from chat import notify
-            await _save_ai_msg(x.conversation_id, persona, f"Agenda **{item['title']}** ({item['when']}) {'beserta pengingatnya ' if item.get('remind_mode') else ''}sudah dihapus ✅ dari kalender Oryntix.", 0, "voice",
-                               {"tool": "calendar_cancelled", "item": item, "cta": {"label": "Buka Kalender", "href": "/calendar"}})
-            await notify(x.conversation_id, {"type": "message", "role": "assistant"})
+    await _agenda_card(x.conversation_id, u, f"Agenda **{item['title']}** ({item['when']}) {'beserta pengingatnya ' if item.get('remind_mode') else ''}sudah dihapus ✅ dari kalender Oryntix.",
+                       {"tool": "calendar_cancelled", "item": item})
     return {"ok": True, "item": item}
 
 

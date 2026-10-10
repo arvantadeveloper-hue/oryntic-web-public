@@ -155,12 +155,17 @@ CALENDAR_TOOL = {"type": "function", "name": "add_calendar_event",
                      "repeat": {"type": "string", "enum": ["none", "daily", "weekly", "monthly"], "description": "Recurrence when the user says setiap hari/minggu/bulan or tiap <hari>; start_at is then the first occurrence. Default none"}},
                      "required": ["title", "start_at"]}}
 FIND_AGENDA_TOOL = {"type": "function", "name": "find_calendar_event",
-                    "description": "Look up the user's RECORDED agenda (calendar events + reminders) when they say a plan is cancelled/postponed or ask to remove a reminder. Returns the matching items; "
+                    "description": "Look up the user's RECORDED agenda (calendar events + reminders) when they say a plan is cancelled, postponed/moved to another time, or ask to remove a reminder. Returns the matching items; "
                                    "tell the user whether it was recorded in Oryntix (title + day & time) and ASK whether to delete it together with its reminder. If nothing matches, say it was not recorded so there is nothing to delete.",
                     "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Title words and/or time the user mentioned, e.g. 'rapat tim besok'"}}, "required": ["query"]}}
 CANCEL_AGENDA_TOOL = {"type": "function", "name": "cancel_calendar_event",
                       "description": "Delete one recorded agenda item (and its reminder) ONLY after the user explicitly confirmed the title and time aloud. Use the id and kind returned by find_calendar_event.",
                       "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "kind": {"type": "string", "enum": ["event", "reminder"]}}, "required": ["id", "kind"]}}
+MOVE_AGENDA_TOOL = {"type": "function", "name": "move_calendar_event",
+                    "description": "Reschedule one recorded agenda item (its reminder moves with it) ONLY after the user confirmed the title, the current time and the NEW time aloud. "
+                                   "Use id/kind from find_calendar_event; new_start is the new local date-time.",
+                    "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "kind": {"type": "string", "enum": ["event", "reminder"]},
+                                                                    "new_start": {"type": "string", "description": "New local date-time YYYY-MM-DDTHH:MM"}}, "required": ["id", "kind", "new_start"]}}
 SEARCH_TOOL = {"type": "function", "name": "search_workspace",
                "description": "Search the user's Workspace (saved task results, documents, meeting minutes) by keywords and drop clickable links into the chat panel. Use when the user asks to find or look up existing material.",
                "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Keywords to search for"}}, "required": ["query"]}}
@@ -423,7 +428,7 @@ async def negotiate(call_id: str, request: Request, u: dict = Depends(current_us
         call_persona = await db.personas.find_one({"id": call["persona_id"]}, {"_id": 0, "model": 1, "tools": 1}) or {}
         web_on, code_on = bool(web_search_tool(call_persona)), bool(code_tool(call_persona))
         from support_agent import is_support
-        tools = [] if is_support(call["persona_id"]) else [ASSIGN_TOOL, SEARCH_TOOL, CALENDAR_TOOL, FIND_AGENDA_TOOL, CANCEL_AGENDA_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + ([RUN_CODE_TOOL] if code_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
+        tools = [] if is_support(call["persona_id"]) else [ASSIGN_TOOL, SEARCH_TOOL, CALENDAR_TOOL, FIND_AGENDA_TOOL, CANCEL_AGENDA_TOOL, MOVE_AGENDA_TOOL, ARCHIVE_SEARCH_TOOL, ARCHIVE_RESTORE_TOOL, IMAGE_TOOL, VIDEO_TOOL] + ([WEB_SEARCH_TOOL] if web_on else []) + ([RUN_CODE_TOOL] if code_on else []) + (DRIVE_TOOLS if drive_on else []) + (GITHUB_TOOLS if gh_on else []) + (GITLAB_TOOLS if gl_on else []) + ([SOCIAL_TOOL] if social_on else []) + ([UPDATE_TOOL] if conv.get("task_id") else []) + ([delegate_tool([n for n in call.get("roster", [])[1:]])] if role == "moderator" else [])
         session["tools"] = tools
         session["tool_choice"] = "auto"
     if is_live_model(session["model"]):

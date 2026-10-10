@@ -581,7 +581,7 @@ async def _emit_final(ctx, text: str, credits: int, extra: dict):
     """Persist the assistant message for a tool turn and yield its final SSE + credits."""
     msg = await _save_ai_msg(ctx.cid, ctx.persona, text, credits, ctx.via, extra)
     payload = {"message_id": msg["id"], "content": text}
-    for k in ("media", "pending_tool", "task_id", "task_version", "tool", "pending_task", "results", "cta", "event", "item", "pending_calendar"):
+    for k in ("media", "pending_tool", "task_id", "task_version", "tool", "pending_task", "results", "cta", "event", "item", "pending_calendar", "new_start"):
         if k in extra:
             payload[k] = extra[k]
     yield ctx.sse(final=True, **payload)
@@ -1156,7 +1156,7 @@ async def _typed_intercepts(ctx: ReplyCtx):
         async for ev in _search_turn(ctx):
             yield ev
         return
-    if wants_agenda(ctx.user_text) or await db.conversations.count_documents({"id": ctx.cid, "$or": [{"pending_calendar": {"$ne": None}}, {"pending_cancel": {"$ne": None}}]}):
+    if wants_agenda(ctx.user_text) or await db.conversations.count_documents({"id": ctx.cid, "$or": [{"pending_calendar": {"$ne": None}}, {"pending_cancel": {"$ne": None}}, {"pending_reschedule": {"$ne": None}}]}):
         hit = False
         async for ev in _calendar_turn(ctx):
             hit = True

@@ -9,7 +9,8 @@ from tools import plan_calendar, llm_json, CAL_RE
 
 YES_RE = re.compile(r"^\W*(ya|iya|yap|yup|yes|ok|oke|okay|okey|sip|siap|betul|benar|bener|boleh|lanjut|gas|silakan|setuju|mantap|y|hapus( saja| aja)?|catat( saja| aja)?|simpan)\b", re.I)
 NO_RE = re.compile(r"^\W*(tidak|tdk|nggak|ngga|gak|ga|enggak|jangan|batal(kan)?|no|nope|skip|gausah|ga usah|nggak usah|tidak usah|belum|tahan|biarkan)\b", re.I)
-CANCEL_RE = re.compile(r"\b(batal|dibatalkan|batalkan|cancel(l?ed)?|dicancel|(gak|ga|nggak|ngga|tidak|ndak|enggak) jadi|diundur|ditunda|hapus(kan)? (pengingat|agenda|jadwal|event|acara|reminder|rapat|meeting|janji))\b", re.I)
+CANCEL_RE = re.compile(r"\b(batal|dibatalkan|batalkan|cancel(l?ed)?|dicancel|(gak|ga|nggak|ngga|tidak|ndak|enggak) jadi|ditunda|hapus(kan)? (pengingat|agenda|jadwal|event|acara|reminder|rapat|meeting|janji))\b", re.I)
+RESCHEDULE_RE = re.compile(r"\b(diundur|dimundurkan|dimajukan|digeser|geser|pindah(kan)?|dipindah(kan)?|reschedule|ubah (jadwal|jam|waktu|harinya|jamnya)|ganti (jam|hari|waktu|jadwal)|(ditunda|diubah|jadi|mundur|maju) (ke |jam |hari |tanggal |besok|lusa))", re.I)
 HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
 BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
 REPEAT_ID = {"daily": "setiap hari", "weekly": "setiap minggu", "monthly": "setiap bulan"}
@@ -39,22 +40,26 @@ def _remind_line(mode, offsets, repeat) -> str:
     return f"🔔 Pengingat via **{via}**, " + ", ".join(f"{_minutes(m)} sebelum" for m in offsets) + rep
 
 
-def has_pending(conv: dict) -> bool:
-    return bool(conv.get("pending_calendar") or conv.get("pending_cancel"))
+PENDING_KEYS = ("pending_calendar", "pending_cancel", "pending_reschedule")
 
 
 def wants_agenda(text: str) -> bool:
-    return bool(CAL_RE.search(text or "") or CANCEL_RE.search(text or ""))
+    return bool(CAL_RE.search(text or "") or CANCEL_RE.search(text or "") or RESCHEDULE_RE.search(text or ""))
 
 
 async def agenda_turn(ctx):
     """Entry point from the chat intercepts. Yields nothing when the message is not about the user's agenda."""
     from chat import _emit_final
-    conv = await db.conversations.find_one({"id": ctx.cid}, {"_id": 0, "pending_calendar": 1, "pending_cancel": 1}) or {}
-    if conv.get("pending_calendar") or (not conv.get("pending_cancel") and not CANCEL_RE.search(ctx.user_text) and CAL_RE.search(ctx.user_text)):
-        gen = _calendar_turn(ctx, conv.get("pending_calendar"), _emit_final)
-    else:
+    conv = await db.conversations.find_one({"id": ctx.cid}, {"_id": 0, **{k: 1 for k in PENDING_KEYS}}) or {}
+    text = ctx.user_text
+    if conv.get("pending_calendar"):
+        gen = _calendar_turn(ctx, conv["pending_calendar"], _emit_final)
+    elif conv.get("pending_reschedule") or (not conv.get("pending_cancel") and RESCHEDULE_RE.search(text)):
+        gen = _reschedule_turn(ctx, conv.get("pending_reschedule"), _emit_final)
+    elif conv.get("pending_cancel") or CANCEL_RE.search(text):
         gen = _cancel_turn(ctx, conv.get("pending_cancel"), _emit_final)
+    else:
+        gen = _calendar_turn(ctx, None, _emit_final)
     async for ev in gen:
         yield ev
 
@@ -226,4 +231,88 @@ async def _cancel_turn(ctx, pending, emit):
     q = plan.get("question") or f"Saya cek, {named} tidak saya temukan di kalender Oryntix. Apakah dulu pernah dicatat dengan nama atau waktu lain? Sebutkan saja, nanti saya hapuskan."
     await _set_pending(ctx.cid, "pending_cancel", {"stage": "ask", "text": merged[:1500], "question": q[:400], "at": now_iso()})
     async for ev in emit(ctx, q, 0, {"tool": "calendar_cancel_question"}):
+        yield ev
+
+
+# ---------------- reschedule: find the recorded agenda → new time → confirm → move ----------------
+async def plan_reschedule(text: str, tz: str, items: list, history: str = "") -> dict:
+    listing = "\n".join(f"- id={i['id']} | {i['title']} | {i['when']} | {i['kind']}" for i in items) or "(none recorded)"
+    try:
+        now = datetime.now(ZoneInfo(tz))
+    except Exception:
+        now = datetime.now(timezone.utc)
+    try:
+        r = await llm_json(
+            "The user wants to move (postpone/bring forward/reschedule) one of THEIR RECORDED agenda items. Reply JSON only: "
+            "{\"is_reschedule\": bool, \"match_id\": str|null, \"new_start\": str|null, \"title\": str, \"question\": str|null}. "
+            "is_reschedule=false when the message is not about moving an agenda/meeting/appointment/reminder to another time. match_id: id of the ONE recorded item that clearly matches by title "
+            "and/or current time (null if none or ambiguous). new_start: the NEW local date-time as \"YYYY-MM-DDTHH:MM\" resolved against Now (keep the item's current time of day when the user only "
+            "gives a new day, keep the day when they only give a new time); null if the user did not say when. title: short Indonesian name of the agenda. question: ONE short Indonesian "
+            "question only when several recorded items are plausible (list them); else null.",
+            f"Now: {now.strftime('%A %Y-%m-%dT%H:%M')} ({tz}).\nRecorded items:\n{listing}\nRecent context: {history[-500:]}\nUser message: {text}")
+    except Exception:
+        return {}
+    return r if isinstance(r, dict) else {}
+
+
+def _local_to_utc(local: str, tz: str):
+    try:
+        return datetime.fromisoformat(local[:16]).replace(tzinfo=ZoneInfo(tz)).astimezone(timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+async def _reschedule_turn(ctx, pending, emit):
+    from assignments import move_agenda_doc
+    tz = _tz(ctx.user)
+    text = ctx.user_text
+    if pending and pending.get("stage") == "confirm" and (NO_RE.match(text) or YES_RE.match(text)):
+        item = pending["item"]
+        await _set_pending(ctx.cid, "pending_reschedule", None)
+        yield ctx.sse(start=True)
+        if NO_RE.match(text):
+            msg, extra = f"Baik, agenda **{item['title']}** tetap pada **{item['when']}**.", {"tool": "calendar_move_kept"}
+        else:
+            moved = await move_agenda_doc(ctx.user["id"], item, pending["new_start"])
+            moved["when"] = when_label(pending["new_start"], tz)
+            msg = (f"Agenda **{item['title']}** sudah dipindahkan dari {item['when']} ke **{moved['when']}**"
+                   + (" — pengingatnya ikut saya geser" if item.get("remind_mode") else "") + " ✅.")
+            extra = {"tool": "calendar_moved", "item": moved, "cta": {"label": "Buka Kalender", "href": "/calendar"}}
+        async for ev in emit(ctx, msg, 0, extra):
+            yield ev
+        return
+    merged = f"{pending['text']}\nJawaban user atas «{pending['question']}»: {text}" if pending else text
+    items = await upcoming_items(ctx.user["id"], tz)
+    plan = await plan_reschedule(merged, tz, items, ctx.prompt[-500:] if ctx.prompt else "") if items else {"is_reschedule": bool(RESCHEDULE_RE.search(text))}
+    if pending:
+        await _set_pending(ctx.cid, "pending_reschedule", None)
+    if not plan.get("is_reschedule"):
+        return
+    yield ctx.sse(start=True)
+    title = plan.get("title") or ""
+    named = f"agenda «{title}»" if title else "agenda yang Anda maksud"
+    item = next((i for i in items if i["id"] == plan.get("match_id")), None)
+    new_start = _local_to_utc(plan.get("new_start") or "", tz) if plan.get("new_start") else None
+    if item and new_start:
+        if new_start <= datetime.now(timezone.utc).isoformat():
+            q = f"Waktu barunya sudah lewat. **{item['title']}** mau dipindah ke kapan? (mis. \"Rabu jam 14.00\")"
+            await _set_pending(ctx.cid, "pending_reschedule", {"stage": "ask", "text": merged[:1500], "question": q[:400], "at": now_iso()})
+        else:
+            via = " beserta pengingatnya" if item.get("remind_mode") else ""
+            q = f"Agenda **{item['title']}** saat ini tercatat **{item['when']}**. Pindahkan ke **{when_label(new_start, tz)}**{via}?"
+            await _set_pending(ctx.cid, "pending_reschedule", {"stage": "confirm", "item": item, "new_start": new_start, "text": merged[:1500], "question": q[:400], "at": now_iso()})
+        async for ev in emit(ctx, q, 0, {"tool": "calendar_move_confirm", "item": item, "new_start": new_start}):
+            yield ev
+        return
+    if item:
+        q = f"Agenda **{item['title']}** ({item['when']}) mau dipindah ke hari dan jam berapa?"
+    elif not items or pending:
+        msg = f"Saya cek, {named} tidak tercatat di kalender Oryntix — tidak ada yang bisa digeser. Kalau mau, saya bisa catat jadwal barunya."
+        async for ev in emit(ctx, msg, 0, {"tool": "calendar_move_none"}):
+            yield ev
+        return
+    else:
+        q = plan.get("question") or f"Saya cek, {named} tidak saya temukan di kalender Oryntix. Apakah dulu dicatat dengan nama atau waktu lain? Sebutkan saja beserta waktu barunya."
+    await _set_pending(ctx.cid, "pending_reschedule", {"stage": "ask", "text": merged[:1500], "question": q[:400], "at": now_iso()})
+    async for ev in emit(ctx, q, 0, {"tool": "calendar_move_question"}):
         yield ev

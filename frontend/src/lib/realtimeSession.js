@@ -265,6 +265,10 @@ export async function runVoiceTool(name, args, cid, callId = null) {
       const r = await api.post("/events/cancel", { id: args.id, kind: args.kind, conversation_id: cid });
       return { ok: true, item: { title: r.data.item.title, when: r.data.item.when }, note: "confirm briefly that the agenda and its reminder were removed; the card is already in the chat panel" };
     }
+    if (name === "move_calendar_event") {
+      const r = await api.post("/events/move", { id: args.id, kind: args.kind, start_at: args.new_start, conversation_id: cid });
+      return { ok: true, item: { title: r.data.item.title, when: r.data.item.when }, note: "confirm briefly that the agenda (and its reminder) now sits at the new time; the card is already in the chat panel" };
+    }
     const gitProv = name.startsWith("gitlab_") ? "gitlab" : "github";
     const gitLabel = gitProv === "gitlab" ? "GitLab" : "GitHub";
     if (name === "github_repos" || name === "gitlab_repos") {

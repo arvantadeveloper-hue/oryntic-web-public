@@ -717,3 +717,7 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Voice (`realtime_voice.py` + `realtimeSession.js`): deskripsi `add_calendar_event` mewajibkan tanggal+jam+call/chat & konfirmasi lisan; tool baru `find_calendar_event` (→ `GET /api/events/upcoming?q=`) dan `cancel_calendar_event` (→ `POST /api/events/cancel {id, kind, conversation_id}` → hapus + kartu di chat).
 - `assignments.delete_event_doc` dipakai route DELETE & flow; SSE final kini ikut mengirim `event`/`item`/`pending_calendar`.
 - Tests: `backend/tests/test_iter47.py`, probe manual `backend/tests/probe_agenda.py`.
+
+## Update 2026-06 (cd) — Geser jadwal dari chat/voice (diuji manual via probe_agenda.py + curl)
+- `agenda_flow._reschedule_turn`: `RESCHEDULE_RE` (diundur, dimajukan, digeser, pindah, ubah jam/jadwal, "jadi jam…") → `plan_reschedule` (LLM memilih item tercatat + `new_start` lokal; hari saja → jam lama dipertahankan) → `calendar_move_confirm` ("Agenda X saat ini <lama>. Pindahkan ke <baru> beserta pengingatnya?") → "ya" → `assignments.move_agenda_doc` (event start/end digeser, reminder terhubung di-arm ulang: remind_at/alerts/status scheduled) → `calendar_moved`; "tidak" → `calendar_move_kept`; tanpa waktu baru → `calendar_move_question`; tidak tercatat → `calendar_move_none`. "diundur" dipindah dari CANCEL_RE ke RESCHEDULE_RE. State: `conversations.pending_reschedule`.
+- Voice: tool `move_calendar_event {id, kind, new_start}` → `POST /api/events/move` (kartu `calendar_moved` ke chat via `_agenda_card`, dipakai juga oleh `/events/cancel`).
