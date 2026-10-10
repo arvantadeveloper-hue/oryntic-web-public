@@ -138,27 +138,36 @@ async def _own_call(call_id: str, u: dict) -> dict:
     return call
 
 
-@router.post("/realtime/calls/{call_id}/video/start")
-async def video_start(call_id: str, u: dict = Depends(current_user)):
-    call = await _own_call(call_id, u)
-    c = await get_config(fresh=True)
-    if not (c.get("video_enabled") and c.get("avatar_id")):
-        raise HTTPException(503, "Video interaktif belum diaktifkan oleh admin platform")
-    cps = int(c["video_credits_per_sec"])
-    if await _owner_balance(u) < cps * 60:
-        raise HTTPException(402, f"Kredit tidak cukup — video membutuhkan minimal {cps * 60} kredit (1 menit)")
+class VideoStartIn(BaseModel):
+    resume: bool = False  # continue the remaining time of a session that dropped (DISCONNECTED/STALE) in this call
+
+
+RESUMABLE = ("DISCONNECTED", "STALE")
+
+
+async def _close_stale_video(call_id: str):
     live = await db.video_sessions.find_one({"call_id": call_id, "status": "active"}, {"_id": 0})
-    if live:
-        last = datetime.fromisoformat(live.get("updated_at") or live["created_at"])
-        if (datetime.now(timezone.utc) - last).total_seconds() < 45:
-            raise HTTPException(409, "Video sudah aktif di panggilan ini")
-        await db.video_sessions.update_one({"id": live["id"]}, {"$set": {"status": "ended", "ended_at": now_iso(), "end_reason": "STALE"}})
-        await _la_stop(live, "USER_CLOSED")
-    sandbox = bool(c.get("sandbox"))
-    max_sec = 60 if sandbox else int(c["video_max_minutes"]) * 60  # LiveAvatar sandbox sessions are capped at 60 s
-    # Per-SESSION cap: exactly the configured minutes — LiveAvatar rejects any value above the tier limit (the old "+30 s" tripped it).
-    body = {"mode": "LITE", "avatar_id": SANDBOX_AVATAR if sandbox else c["avatar_id"], "is_sandbox": sandbox, "max_session_duration": max_sec,
-            "video_settings": {"quality": "high", "encoding": "H264"}}
+    if not live:
+        return
+    last = datetime.fromisoformat(live.get("updated_at") or live["created_at"])
+    if (datetime.now(timezone.utc) - last).total_seconds() < 45:
+        raise HTTPException(409, "Video sudah aktif di panggilan ini")
+    await db.video_sessions.update_one({"id": live["id"]}, {"$set": {"status": "ended", "ended_at": now_iso(), "end_reason": "STALE"}})
+    await _la_stop(live, "USER_CLOSED")
+
+
+async def _resume_budget(call_id: str, u: dict) -> tuple:
+    """(previous dropped session, seconds it still had) — the resumed session only gets the leftover time."""
+    prev = await db.video_sessions.find_one({"call_id": call_id, "user_id": u["id"], "status": "ended", "end_reason": {"$in": list(RESUMABLE)}}, {"_id": 0}, sort=[("ended_at", -1)])
+    if not prev:
+        raise HTTPException(400, "Tidak ada sesi video yang bisa dilanjutkan")
+    remaining = int(prev["max_seconds"]) - int(prev.get("billed_seconds") or 0)
+    if remaining < 20:
+        raise HTTPException(400, "Sisa waktu video sudah habis")
+    return prev, remaining
+
+
+async def _la_create(body: dict, max_sec: int) -> tuple:
     headers = _la_headers()
     async with httpx.AsyncClient(timeout=40) as client:
         try:
@@ -170,17 +179,42 @@ async def video_start(call_id: str, u: dict = Depends(current_user)):
             body.pop("max_session_duration")
             tok = await _la_post(client, "/sessions/token", headers, body)
         started = await _la_post(client, "/sessions/start", {"authorization": f"Bearer {tok['session_token']}", "accept": "application/json"})
+    return tok, started
+
+
+@router.post("/realtime/calls/{call_id}/video/start")
+async def video_start(call_id: str, x: Optional[VideoStartIn] = None, u: dict = Depends(current_user)):
+    call = await _own_call(call_id, u)
+    c = await get_config(fresh=True)
+    if not (c.get("video_enabled") and c.get("avatar_id")):
+        raise HTTPException(503, "Video interaktif belum diaktifkan oleh admin platform")
+    cps = int(c["video_credits_per_sec"])
+    if await _owner_balance(u) < cps * 60:
+        raise HTTPException(402, f"Kredit tidak cukup — video membutuhkan minimal {cps * 60} kredit (1 menit)")
+    await _close_stale_video(call_id)
+    sandbox = bool(c.get("sandbox"))
+    max_sec = 60 if sandbox else int(c["video_max_minutes"]) * 60  # LiveAvatar sandbox sessions are capped at 60 s
+    prev, prior_credits = None, 0.0
+    if x and x.resume:
+        prev, remaining = await _resume_budget(call_id, u)
+        max_sec = min(max_sec, remaining)
+        prior_credits = round(float(prev.get("credits") or 0) + float(prev.get("prior_credits") or 0), 3)
+    # Per-SESSION cap: exactly the configured minutes — LiveAvatar rejects any value above the tier limit (the old "+30 s" tripped it).
+    body = {"mode": "LITE", "avatar_id": SANDBOX_AVATAR if sandbox else c["avatar_id"], "is_sandbox": sandbox, "max_session_duration": max_sec,
+            "video_settings": {"quality": "high", "encoding": "H264"}}
+    tok, started = await _la_create(body, max_sec)
     vs = {"id": new_id(), "call_id": call_id, "conversation_id": call.get("conversation_id"), "user_id": u["id"], "la_session_id": tok["session_id"],
           "session_token": tok["session_token"], "status": "active", "credits_per_sec": cps, "max_seconds": max_sec, "billed_seconds": 0, "credits": 0,
-          "sandbox": sandbox, "created_at": now_iso(), "ended_at": None}
+          "sandbox": sandbox, "created_at": now_iso(), "ended_at": None, "resumed_from": prev["id"] if prev else None, "prior_credits": prior_credits}
     await db.video_sessions.insert_one(dict(vs))
     return {"video_session_id": vs["id"], "livekit_url": started["livekit_url"], "livekit_client_token": started["livekit_client_token"], "livekit_agent_token": started.get("livekit_agent_token"),
             "ws_url": started.get("ws_url"), "max_seconds": max_sec, "warn_seconds": max(20, max_sec - (15 if sandbox else int(c["video_warn_minutes"]) * 60)),
-            "credits_per_sec": cps, "sandbox": sandbox}
+            "credits_per_sec": cps, "sandbox": sandbox, "resumed": bool(prev), "prior_credits": prior_credits}
 
 
 class VideoTickIn(BaseModel):
     elapsed_seconds: int = Field(ge=0, le=36000)
+    reason: str = Field(default="USER_CLOSED", pattern="^(USER_CLOSED|DISCONNECTED)$")
 
 
 async def _bill(vs: dict, elapsed: int) -> dict:
@@ -229,9 +263,10 @@ async def video_tick(call_id: str, x: VideoTickIn, u: dict = Depends(current_use
 @router.post("/realtime/calls/{call_id}/video/stop")
 async def video_stop(call_id: str, x: VideoTickIn, u: dict = Depends(current_user)):
     vs = await _bill(await _active_session(call_id, u), x.elapsed_seconds)
-    await db.video_sessions.update_one({"id": vs["id"]}, {"$set": {"status": "ended", "ended_at": now_iso(), "end_reason": "USER_CLOSED"}})
-    await _la_stop(vs)
-    return {"ok": True, "credits": vs["credits"], "seconds": vs["billed_seconds"]}
+    await db.video_sessions.update_one({"id": vs["id"]}, {"$set": {"status": "ended", "ended_at": now_iso(), "end_reason": x.reason}})
+    await _la_stop(vs, "USER_CLOSED")
+    remaining = int(vs["max_seconds"]) - int(vs["billed_seconds"])
+    return {"ok": True, "credits": vs["credits"], "seconds": vs["billed_seconds"], "resumable": x.reason in RESUMABLE and remaining >= 20, "remaining": max(0, remaining)}
 
 
 # ---------- platform admin ----------

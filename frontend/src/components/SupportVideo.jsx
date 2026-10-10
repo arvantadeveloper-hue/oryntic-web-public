@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Video, Loader2, Coins, Clock, X, ShieldAlert } from "lucide-react";
+import { Video, Loader2, Coins, Clock, X, ShieldAlert, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { AvatarBridge } from "../lib/avatarVideo";
@@ -40,13 +40,15 @@ export function VideoConfirmModal({ cfg, onConfirm, onClose }) {
 const WARN_TEXT = (mins) => `[System notice — do NOT interrupt the user: wait until they have clearly finished their current turn. Then, at your next natural turn, first apologise warmly for a system limitation, mention in one friendly natural sentence that the video session can only last about ${mins} minutes in total so the video will switch off in roughly two minutes while the voice call simply continues, and then carry on helping with whatever you were discussing. Say this only once.]`;
 const END_TEXT = "[System notice: the video avatar has just been switched off because the video time limit was reached. The voice call continues normally. At your next natural turn, mention this briefly and kindly in one sentence and keep helping — do not interrupt the user.]";
 
-// Lifecycle of the LiveAvatar video inside a Realtime call: start/stop sessions, per-15s billing ticks, cap warning, graceful limit end.
+// Lifecycle of the LiveAvatar video inside a Realtime call: start/stop sessions, per-15s billing ticks, cap warning, graceful limit end,
+// and "Sambung ulang" after a drop (a new LiveAvatar session that only gets the leftover time of the one that broke).
 export function useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject, phaseRef, enabled }) {
   const [cfg, setCfg] = useState(null);
   const [state, setState] = useState("off"); // off|confirm|starting|on|ending
   const [track, setTrack] = useState(null);
   const [remaining, setRemaining] = useState(null);
   const [credits, setCredits] = useState(0);
+  const [resumable, setResumable] = useState(null); // {remaining, credits} after a disconnect → user may continue the leftover time
   const bridgeRef = useRef(null);
   const startedRef = useRef(null);      // wall-clock start of the current CONNECTED stretch (null while disconnected)
   const connectedMsRef = useRef(0);     // connected time accumulated before the current stretch — the limit counts only connected seconds
@@ -55,37 +57,50 @@ export function useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject,
   const warnedRef = useRef(false);
   const sessRef = useRef(null);
   const audioSinkRef = useRef(null);
+  const baseCreditsRef = useRef(0);     // credits of earlier sessions in this call (resume chain) — shown cumulatively
   useEffect(() => { if (enabled) api.get("/support/video-config").then((r) => setCfg(r.data)).catch(() => {}); }, [enabled]);
+  useEffect(() => () => { bridgeRef.current?.endSession(); bridgeRef.current = null; try { audioSinkRef.current?.remove(); } catch (e) {} }, []); // unmount: never leave a LiveAvatar session open
 
   const elapsed = () => Math.round((connectedMsRef.current + (startedRef.current ? Date.now() - startedRef.current : 0)) / 1000);
   const pauseClock = () => { if (startedRef.current) { connectedMsRef.current += Date.now() - startedRef.current; startedRef.current = null; } };
   const resumeClock = () => { if (!startedRef.current) startedRef.current = Date.now(); };
+  const total = (sessionCredits) => Math.round((baseCreditsRef.current + (sessionCredits || 0)) * 100) / 100;
+
+  const releaseMedia = () => { // tear down the LiveAvatar session + every local sink so the old stream can never linger
+    bridgeRef.current?.endSession(); bridgeRef.current = null;
+    try { audioSinkRef.current?.remove(); } catch (e) {} audioSinkRef.current = null;
+    if (audioElRef.current) audioElRef.current.muted = false;
+    setTrack(null);
+  };
 
   const stop = async (reason = "user") => {
     if (!bridgeRef.current && !sessRef.current) return;
     setState("ending");
     if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
     const secs = elapsed();
-    bridgeRef.current?.stop(); bridgeRef.current = null;
-    try { audioSinkRef.current?.remove(); } catch (e) {} audioSinkRef.current = null;
-    if (audioElRef.current) audioElRef.current.muted = false;
-    setTrack(null); setRemaining(null); pauseClock(); startedRef.current = null; connectedMsRef.current = 0; setLink("connected");
+    releaseMedia();
+    setRemaining(null); pauseClock(); startedRef.current = null; connectedMsRef.current = 0; setLink("connected");
+    let res = null;
     if (sessRef.current && callIdRef.current && reason !== "server") {
-      try { const r = await api.post(`/realtime/calls/${callIdRef.current}/video/stop`, { elapsed_seconds: secs }); setCredits(r.data.credits || 0); } catch (e) {}
+      try { const r = await api.post(`/realtime/calls/${callIdRef.current}/video/stop`, { elapsed_seconds: secs, reason: reason === "disconnected" ? "DISCONNECTED" : "USER_CLOSED" }); res = r.data; setCredits(total(res.credits)); } catch (e) {}
     }
     sessRef.current = null;
     setState("off");
     if (reason === "limit") { inject(END_TEXT); toast("Batas waktu video tercapai — panggilan suara tetap berlanjut"); }
-    if (reason === "disconnected") toast.error("Koneksi video terputus — hanya waktu tersambung yang dihitung. Nyalakan video lagi bila perlu.");
-    else if (reason === "credits") toast.error("Kredit tidak cukup untuk melanjutkan video");
+    if (reason === "disconnected") {
+      if (res?.resumable) { setResumable({ remaining: res.remaining, credits: total(res.credits) }); toast.error("Koneksi video terputus — hitung mundur dijeda. Tekan \"Sambung ulang\" untuk melanjutkan sisa waktu."); }
+      else toast.error("Koneksi video terputus — hanya waktu tersambung yang dihitung.");
+    } else if (reason === "credits") toast.error("Kredit tidak cukup untuk melanjutkan video");
   };
 
-  const start = async () => {
+  const start = async ({ resume = false } = {}) => {
     if (!callIdRef.current) return;
-    setState("starting");
+    setState("starting"); setResumable(null);
     try {
-      const r = await api.post(`/realtime/calls/${callIdRef.current}/video/start`);
-      sessRef.current = r.data; warnedRef.current = false;
+      const r = await api.post(`/realtime/calls/${callIdRef.current}/video/start`, { resume });
+      sessRef.current = r.data;
+      if (!resume) warnedRef.current = false; // a resumed session keeps the "two minutes left" notice from before
+      baseCreditsRef.current = resume ? Number(r.data.prior_credits || 0) : 0; setCredits(total(0));
       const bridge = new AvatarBridge({
         onError: (m) => { if (!bridge.closed) toast.error(m); },
         onState: () => {},
@@ -101,6 +116,7 @@ export function useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject,
       connectedMsRef.current = 0; startedRef.current = null;
       await bridge.start(r.data, remoteStreamRef.current);
       resumeClock(); setRemaining(r.data.max_seconds); setState("on");
+      if (resume) toast.success("Video tersambung kembali — melanjutkan sisa waktu");
       if (phaseRef.current === "speaking") bridge.speakStart();
       tickRef.current = setInterval(async () => {
         const s = elapsed(); const rem = (sessRef.current?.max_seconds || 0) - s; setRemaining(Math.max(0, rem));
@@ -109,13 +125,13 @@ export function useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject,
         if (s % 15 === 0 || rem <= 0) {
           try {
             const t = await api.post(`/realtime/calls/${callIdRef.current}/video/tick`, { elapsed_seconds: s });
-            setCredits(t.data.credits || 0);
+            setCredits(total(t.data.credits));
             if (t.data.ended) { sessRef.current = null; stop(t.data.reason === "limit" ? "limit" : "credits"); }
           } catch (e) { if (e?.response?.status === 404) { sessRef.current = null; stop("server"); } }
         }
       }, 1000);
     } catch (e) {
-      bridgeRef.current?.stop(); bridgeRef.current = null; sessRef.current = null; setState("off");
+      releaseMedia(); sessRef.current = null; setState("off");
       toast.error(e?.response?.data?.detail || e?.message || "Gagal memulai video");
     }
   };
@@ -127,7 +143,26 @@ export function useAvatarVideo({ callIdRef, remoteStreamRef, audioElRef, inject,
   const onUserSpeaking = (on) => bridgeRef.current?.listening(on);
   const attachStream = (stream) => bridgeRef.current?.attachAudio(stream);
 
-  return { cfg, state, link, track, remaining, credits, start, stop, setState, onAssistantAudioStart, onAssistantAudioStop, onInterrupt, onUserSpeaking, attachStream };
+  return { cfg, state, link, track, remaining, credits, resumable, start, resume: () => start({ resume: true }), dismissResume: () => setResumable(null), stop, setState, onAssistantAudioStart, onAssistantAudioStop, onInterrupt, onUserSpeaking, attachStream };
+}
+
+const mmss = (s) => `${String(Math.floor((s || 0) / 60)).padStart(2, "0")}:${String((s || 0) % 60).padStart(2, "0")}`;
+
+// Shown in place of the video after a drop: continue the leftover time with one tap (no new confirmation — same price, same cap).
+export function VideoResumeBar({ resumable, state, onResume, onDismiss }) {
+  if (!resumable) return null;
+  const busy = state === "starting";
+  return (
+    <div className="mx-auto mt-3 flex w-full max-w-md flex-wrap items-center gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100" data-testid="rt-video-resume">
+      <RefreshCw size={16} className={`shrink-0 text-amber-300 ${busy ? "animate-spin" : ""}`} />
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold">Video terputus — sisa waktu <span className="font-mono" data-testid="rt-video-resume-remaining">{mmss(resumable.remaining)}</span></p>
+        <p className="text-xs text-amber-100/70">Hitung mundur dijeda. Sambung ulang untuk melanjutkan tanpa menyalakan dari awal.</p>
+      </div>
+      <button onClick={onResume} disabled={busy} className="rounded-xl bg-[#2F6BFF] px-3 py-1.5 text-xs font-bold text-white hover:brightness-110 disabled:opacity-50" data-testid="rt-video-resume-btn">{busy ? "Menyambung…" : "Sambung ulang"}</button>
+      <button onClick={onDismiss} disabled={busy} className="rounded-xl bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/15 disabled:opacity-50" data-testid="rt-video-resume-dismiss">Tutup</button>
+    </div>
+  );
 }
 
 export function AvatarVideoView({ track, remaining, credits, name, onStop, state, link = "connected" }) {

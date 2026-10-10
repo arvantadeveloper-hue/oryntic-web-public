@@ -7,7 +7,7 @@ const dur = (s) => (s >= 3600 ? `${Math.floor(s / 3600)}j ${Math.floor((s % 3600
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-");
 
 // Per-call cost breakdown: assistant tokens, WebRTC data (host pays), screen snapshots.
-export function CallReport() {
+export function CallReport({ embedded = false }) {
   const [items, setItems] = useState(null);
   const [next, setNext] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -20,9 +20,9 @@ export function CallReport() {
 
   return (
     <div data-testid="call-report">
-      <h2 className="mt-10 flex items-center gap-2 text-lg font-bold text-slate-900"><PhoneCall size={18} className="text-[#2F6BFF]" /> Riwayat Panggilan</h2>
-      <p className="text-xs text-slate-500">Rincian biaya tiap panggilan: asisten (token suara), data WebRTC teman ($0,75/GB — ditanggung host), dan cuplikan layar yang ditunjukkan ke asisten.</p>
-      <div className="mt-4 aivora-card overflow-hidden">
+      {!embedded && <h2 className="mt-10 flex items-center gap-2 text-lg font-bold text-slate-900"><PhoneCall size={18} className="text-[#2F6BFF]" /> Riwayat Panggilan</h2>}
+      <p className={`text-xs text-slate-500 ${embedded ? "px-5 pt-4" : ""}`}>Rincian biaya tiap panggilan: asisten (token suara), data WebRTC teman ($0,75/GB — ditanggung host), dan cuplikan layar yang ditunjukkan ke asisten.</p>
+      <div className={embedded ? "mt-2" : "mt-4 aivora-card overflow-hidden"}>
         {items === null ? <p className="flex items-center gap-2 p-6 text-sm text-slate-400"><Loader2 size={14} className="animate-spin" /> Memuat…</p>
           : items.length === 0 ? <p className="p-6 text-sm text-slate-500" data-testid="call-report-empty">Belum ada panggilan.</p> : (
             <div className="overflow-x-auto">

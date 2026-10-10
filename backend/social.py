@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import time
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 import httpx
 import jwt
@@ -293,11 +294,55 @@ def _clean(d: dict) -> dict:
     return {k: v for k, v in d.items() if k != "_id"}
 
 
-async def schedule_post(uid: str, x: PublishIn, when_utc: str, label: str, meta: Optional[dict] = None) -> dict:
+REPEATS = ("none", "daily", "weekly")
+HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+
+
+def user_tz(user: dict):
+    from zoneinfo import ZoneInfo
+    tz = (user.get("settings") or {}).get("timezone") or "Asia/Jakarta"
+    try:
+        return ZoneInfo(tz)
+    except Exception:
+        return ZoneInfo("Asia/Jakarta")
+
+
+def when_label(dt) -> str:
+    """Local datetime → 'Senin, 3 Juni 2026 08:00 (Asia/Jakarta)'."""
+    return f"{HARI[dt.weekday()]}, {dt.day} {BULAN[dt.month - 1]} {dt.year} {dt:%H:%M} ({dt.tzinfo})"
+
+
+def repeat_label(repeat: str, dt) -> str:
+    if repeat == "daily":
+        return f"setiap hari {dt:%H:%M}"
+    if repeat == "weekly":
+        return f"setiap {HARI[dt.weekday()]} {dt:%H:%M}"
+    return ""
+
+
+async def schedule_post(uid: str, x: PublishIn, when_utc: str, label: str, meta: Optional[dict] = None, repeat: str = "none", tz: str = "Asia/Jakarta") -> dict:
+    repeat = repeat if repeat in REPEATS else "none"
     job = {"id": new_id(), "user_id": uid, "status": "scheduled", "scheduled_at": when_utc, "scheduled_label": label, "payload": x.model_dump(),
-           "providers": x.providers, "kind": x.kind, "text": x.text, "media_path": x.media_path, **(meta or {}), "created_at": now_iso()}
+           "providers": x.providers, "kind": x.kind, "text": x.text, "media_path": x.media_path, "repeat": repeat, "tz": tz, **(meta or {}), "created_at": now_iso()}
+    if repeat != "none":
+        job["series_id"] = job.get("series_id") or job["id"]
+        job["repeat_label"] = repeat_label(repeat, datetime.fromisoformat(when_utc).astimezone(user_tz({"settings": {"timezone": tz}})))
     await db.social_schedules.insert_one(dict(job))
     return job
+
+
+async def _schedule_next(job: dict):
+    """Repeating series: the next occurrence is created right after this one ran (same wall-clock time in the user's timezone)."""
+    if job.get("repeat") not in ("daily", "weekly"):
+        return
+    z = user_tz({"settings": {"timezone": job.get("tz") or "Asia/Jakarta"}})
+    nxt = datetime.fromisoformat(job["scheduled_at"]).astimezone(z)
+    step = timedelta(days=1 if job["repeat"] == "daily" else 7)
+    while nxt <= datetime.now(timezone.utc):
+        nxt = (nxt + step).replace(tzinfo=z)
+    meta = {k: job[k] for k in ("conversation_id", "persona_id", "persona_name", "portrait", "series_id") if job.get(k)}
+    await schedule_post(job["user_id"], PublishIn(**job["payload"]), nxt.astimezone(timezone.utc).isoformat(), when_label(nxt), meta, job["repeat"], str(z))
 
 
 def results_text(res: list) -> str:
@@ -313,7 +358,6 @@ def results_text(res: list) -> str:
 
 async def social_tick():
     """Scheduler: publish due jobs once (claim → run → record), then tell the user in the originating chat + notification."""
-    from datetime import datetime, timezone
     now_s = datetime.now(timezone.utc).isoformat()
     async for job in db.social_schedules.find({"status": "scheduled", "scheduled_at": {"$lte": now_s}}, {"_id": 0}):
         claimed = await db.social_schedules.update_one({"id": job["id"], "status": "scheduled"}, {"$set": {"status": "running"}})
@@ -326,8 +370,13 @@ async def social_tick():
         except Exception as e:
             res, status, err = [], "failed", str(getattr(e, "detail", e))[:200]
         await db.social_schedules.update_one({"id": job["id"]}, {"$set": {"status": status, "results": res, "error": err, "ran_at": now_iso()}})
+        try:
+            await _schedule_next(job)
+        except Exception as e:
+            err = (err + f" (jadwal berikutnya gagal dibuat: {e})")[:300]
+        rep = f"\n\n🔁 Jadwal berulang **{job['repeat_label']}** — posting berikutnya sudah disiapkan." if job.get("repeat") in ("daily", "weekly") else ""
         text = (f"Posting terjadwal ({job.get('scheduled_label') or job['scheduled_at']}) sudah dijalankan:\n" + (results_text(res) if res else f"- gagal — {err}")
-                + "\n\nRiwayat lengkap ada di menu [Social Media](/social).")
+                + rep + "\n\nRiwayat lengkap ada di menu [Social Media](/social).")
         if job.get("conversation_id"):
             await db.messages.insert_one({"id": new_id(), "conversation_id": job["conversation_id"], "role": "assistant", "content": text, "persona_id": job.get("persona_id"),
                                           "persona_name": job.get("persona_name"), "portrait": job.get("portrait"), "credits": 0, "tool": "social_publish", "created_at": now_iso()})
@@ -350,6 +399,15 @@ async def cancel_scheduled(jid: str, u: dict = Depends(current_user)):
     r = await db.social_schedules.update_one({"id": jid, "user_id": u["id"], "status": "scheduled"}, {"$set": {"status": "cancelled", "cancelled_at": now_iso()}})
     if not r.modified_count:
         raise HTTPException(404, "Jadwal tidak ditemukan atau sudah dijalankan")
+    return {"ok": True}
+
+
+@router.post("/scheduled/{jid}/stop-repeat")
+async def stop_repeat(jid: str, u: dict = Depends(current_user)):
+    """The pending post still runs once; no further occurrences are created."""
+    r = await db.social_schedules.update_one({"id": jid, "user_id": u["id"], "status": "scheduled", "repeat": {"$in": ["daily", "weekly"]}}, {"$set": {"repeat": "none", "repeat_stopped_at": now_iso()}})
+    if not r.modified_count:
+        raise HTTPException(404, "Jadwal berulang tidak ditemukan")
     return {"ok": True}
 
 

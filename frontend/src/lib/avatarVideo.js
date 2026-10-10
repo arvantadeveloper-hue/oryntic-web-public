@@ -10,13 +10,20 @@ export class AvatarBridge {
   constructor({ onState, onError, onVideoTrack, onAudioTrack, onConnection }) {
     this.onState = onState; this.onError = onError; this.onVideoTrack = onVideoTrack; this.onAudioTrack = onAudioTrack; this.onConnection = onConnection;
     this.ws = null; this.room = null; this.ac = null; this.proc = null; this.src = null;
-    this.ready = false; this.forwarding = false; this.utterance = null; this.pending = []; this.keep = null; this.closed = false;
+    this.ready = false; this.forwarding = false; this.utterance = null; this.pending = []; this.keep = null; this.closed = false; this.tracks = [];
   }
 
   async start({ ws_url, livekit_url, livekit_client_token, livekit_agent_token }, remoteStream) {
     await Promise.all([this._openWs(ws_url), this._joinRoom(livekit_url, livekit_client_token), this._joinAsAgent(livekit_url, livekit_agent_token)]);
     if (remoteStream) this.attachAudio(remoteStream);
     this.keep = setInterval(() => this._send({ type: "session.keep_alive" }), 45000);
+  }
+
+  _track(track) {
+    if (this.closed) return;
+    if (!this.tracks.includes(track)) this.tracks.push(track);
+    if (track.kind === Track.Kind.Video) this.onVideoTrack?.(track);
+    if (track.kind === Track.Kind.Audio) this.onAudioTrack?.(track);
   }
 
   _openWs(url) {
@@ -27,7 +34,7 @@ export class AvatarBridge {
         let ev = {}; try { ev = JSON.parse(e.data); } catch (err) { return; }
         if (ev.type === "session.state_updated") {
           if (ev.state === "connected") { this.ready = true; clearTimeout(timer); resolve(); }
-          if (ev.state === "disconnected" && !this.closed) this.onError?.("Koneksi avatar terputus");
+          if (ev.state === "disconnected" && !this.closed) { this.onError?.("Koneksi avatar terputus"); this.onConnection?.("disconnected", "liveavatar"); }
         } else if (ev.type === "agent.state_updated") this.onState?.(ev.new_state);
         else if (ev.type === "error") this.onError?.(ev.error?.message || "LiveAvatar error");
       };
@@ -38,17 +45,14 @@ export class AvatarBridge {
 
   async _joinRoom(url, token) {
     const room = new Room({ adaptiveStream: false, dynacast: false }); this.room = room;
-    room.on(RoomEvent.TrackSubscribed, (track) => {
-      if (track.kind === Track.Kind.Video) this.onVideoTrack?.(track);
-      if (track.kind === Track.Kind.Audio) this.onAudioTrack?.(track);
-    });
+    room.on(RoomEvent.TrackSubscribed, (track) => this._track(track));
     // connection lifecycle → the hook pauses the countdown/billing while the room is not connected
-    room.on(RoomEvent.Reconnecting, () => this.onConnection?.("reconnecting"));
-    room.on(RoomEvent.Reconnected, () => this.onConnection?.("connected"));
-    room.on(RoomEvent.Disconnected, (reason) => { this.onConnection?.("disconnected", reason); if (!this.closed) this.onError?.("Ruang video avatar terputus"); });
+    room.on(RoomEvent.Reconnecting, () => { if (!this.closed) this.onConnection?.("reconnecting"); });
+    room.on(RoomEvent.Reconnected, () => { if (!this.closed) this.onConnection?.("connected"); });
+    room.on(RoomEvent.Disconnected, (reason) => { if (this.closed) return; this.onConnection?.("disconnected", reason); this.onError?.("Ruang video avatar terputus"); });
     await room.connect(url, token, { autoSubscribe: true });
     this.onConnection?.("connected");
-    room.remoteParticipants.forEach((p) => p.trackPublications.forEach((pub) => { if (pub.track) { if (pub.track.kind === Track.Kind.Video) this.onVideoTrack?.(pub.track); if (pub.track.kind === Track.Kind.Audio) this.onAudioTrack?.(pub.track); } }));
+    room.remoteParticipants.forEach((p) => p.trackPublications.forEach((pub) => { if (pub.track) this._track(pub.track); }));
   }
 
   // LiveAvatar starts rendering once an "agent" participant is present in the room — we hold that seat from the browser.
@@ -91,12 +95,24 @@ export class AvatarBridge {
   listening(on) { this._send({ type: on ? "agent.start_listening" : "agent.stop_listening" }); }
   _send(ev) { try { if (this.ready && this.ws?.readyState === 1) this.ws.send(JSON.stringify(ev)); } catch (e) {} }
 
-  stop() {
-    this.closed = true; this.forwarding = false;
-    if (this.keep) clearInterval(this.keep);
-    try { this.proc?.disconnect(); this.src?.disconnect(); this.ac?.close(); } catch (e) {}
+  // Ends the LiveAvatar session from the browser side: stop forwarding audio, tell the avatar to stop, close the WS, leave both
+  // LiveKit rooms and detach every remote track so no stale video/audio element survives (called on stop, disconnect and unmount).
+  endSession() {
+    if (this.closed) return;
+    this.closed = true; this.ready = false; this.forwarding = false; this.pending = []; this.utterance = null;
+    if (this.keep) { clearInterval(this.keep); this.keep = null; }
+    try { if (this.ws?.readyState === 1) { this.ws.send(JSON.stringify({ type: "agent.interrupt" })); this.ws.send(JSON.stringify({ type: "session.close" })); } } catch (e) {}
+    try { this.proc?.disconnect(); this.src?.disconnect(); } catch (e) {}
+    try { this.ac?.close(); } catch (e) {}
+    this.proc = null; this.src = null; this.ac = null;
     try { this.ws?.close(); } catch (e) {}
-    try { this.room?.disconnect(); } catch (e) {}
+    this.ws = null;
+    for (const t of this.tracks) { try { t.detach().forEach((el) => { el.srcObject = null; el.remove(); }); } catch (e) {} }
+    this.tracks = [];
+    try { this.room?.removeAllListeners(); this.room?.disconnect(); } catch (e) {}
     try { this.agentRoom?.disconnect(); } catch (e) {}
+    this.room = null; this.agentRoom = null;
   }
+
+  stop() { this.endSession(); }
 }

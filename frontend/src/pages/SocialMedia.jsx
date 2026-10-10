@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Share2, Link2, Unplug, Loader2, CheckCircle2, ExternalLink, Image as ImageIcon, Video, Type, XCircle, Plus, CalendarClock, Trash2 } from "lucide-react";
+import { Share2, Link2, Unplug, Loader2, CheckCircle2, ExternalLink, Image as ImageIcon, Video, Type, XCircle, Plus, CalendarClock, Trash2, Repeat } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { fileUrl, openPublish } from "../components/MessageExtras";
@@ -10,13 +10,13 @@ const TABS = [["image", "Gambar", ImageIcon], ["video", "Video", Video], ["text"
 
 const SCHED_STATUS = { scheduled: ["Terjadwal", "bg-[#EEF3FF] text-[#2F6BFF]"], running: ["Sedang diposting", "bg-amber-50 text-amber-700"], sent: ["Terkirim", "bg-emerald-50 text-emerald-600"], partial: ["Sebagian terkirim", "bg-amber-50 text-amber-700"], failed: ["Gagal", "bg-rose-50 text-rose-600"], cancelled: ["Dibatalkan", "bg-slate-100 text-slate-500"] };
 
-function ScheduledList({ items, onCancel }) {
+function ScheduledList({ items, onCancel, onStopRepeat }) {
   const pending = items.filter((j) => j.status === "scheduled");
   const done = items.filter((j) => j.status !== "scheduled").slice(-6).reverse();
   return (
     <div className="mt-8 aivora-card p-5" data-testid="social-scheduled">
       <div className="flex items-center gap-2"><CalendarClock size={16} className="text-[#2F6BFF]" /><p className="text-sm font-bold text-slate-900">Posting terjadwal</p><span className="rounded-full bg-slate-100 px-2 text-[10px] font-bold text-slate-500" data-testid="social-scheduled-count">{pending.length}</span></div>
-      <p className="mt-1 text-xs text-slate-500">Minta lewat chat: "posting gambar ini ke LinkedIn besok jam 9" — asisten akan mengunggahnya tepat waktu dan mengabari Anda di chat.</p>
+      <p className="mt-1 text-xs text-slate-500">Minta lewat chat: "posting gambar ini ke LinkedIn besok jam 9" atau berulang "setiap Senin jam 8" — asisten mengunggahnya tepat waktu dan mengabari Anda di chat.</p>
       {pending.length === 0 && done.length === 0 && <p className="mt-3 text-xs text-slate-400" data-testid="social-scheduled-empty">Belum ada jadwal.</p>}
       <div className="mt-3 space-y-2">
         {[...pending, ...done].map((j) => {
@@ -26,8 +26,10 @@ function ScheduledList({ items, onCancel }) {
               <span className={`rounded-full px-2 py-0.5 font-bold ${cls}`}>{label}</span>
               <span className="font-semibold text-slate-800">{(j.providers || []).map((p) => p.toUpperCase()).join(", ")}</span>
               <span className="text-slate-500">{j.kind === "text" ? "teks" : j.kind} · {j.scheduled_label || new Date(j.scheduled_at).toLocaleString("id-ID")}</span>
+              {j.repeat && j.repeat !== "none" && <span className="flex items-center gap-1 rounded-full bg-[#EEF3FF] px-2 py-0.5 font-bold text-[#2F6BFF]" data-testid={`social-sched-repeat-${j.id}`}><Repeat size={10} /> {j.repeat_label || (j.repeat === "daily" ? "setiap hari" : "setiap minggu")}</span>}
               <span className="min-w-0 flex-1 truncate text-slate-600">{j.text}</span>
               {j.error && <span className="text-rose-600">{j.error}</span>}
+              {j.status === "scheduled" && j.repeat && j.repeat !== "none" && <button onClick={() => onStopRepeat(j.id)} className="flex items-center gap-1 font-semibold text-amber-700 hover:underline" data-testid={`social-sched-stop-repeat-${j.id}`} title="Posting ini tetap tayang sekali, tanpa pengulangan berikutnya"><Repeat size={11} /> Hentikan pengulangan</button>}
               {j.status === "scheduled" && <button onClick={() => onCancel(j.id)} className="flex items-center gap-1 font-semibold text-rose-600 hover:underline" data-testid={`social-sched-cancel-${j.id}`}><Trash2 size={11} /> Batalkan</button>}
             </div>
           );
@@ -51,6 +53,9 @@ export default function SocialMedia() {
   const cancelSched = async (id) => {
     if (!window.confirm("Batalkan posting terjadwal ini?")) return;
     try { await api.delete(`/social/scheduled/${id}`); toast.success("Jadwal dibatalkan"); load(); } catch (e) { toast.error(e?.response?.data?.detail || "Gagal membatalkan"); }
+  };
+  const stopRepeat = async (id) => {
+    try { await api.post(`/social/scheduled/${id}/stop-repeat`); toast.success("Pengulangan dihentikan — posting ini tetap tayang sekali"); load(); } catch (e) { toast.error(e?.response?.data?.detail || "Gagal menghentikan pengulangan"); }
   };
   useEffect(() => { load(); const c = params.get("connected"); if (c) { toast.success(`${c} terhubung`); setParams({}); } /* eslint-disable-next-line */ }, []);
   const connect = async (p) => {
@@ -85,7 +90,7 @@ export default function SocialMedia() {
         ))}
         {accounts === null && <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 size={14} className="animate-spin" /> Memuat…</p>}
       </div>
-      <ScheduledList items={sched} onCancel={cancelSched} />
+      <ScheduledList items={sched} onCancel={cancelSched} onStopRepeat={stopRepeat} />
       <div className="mt-8 flex gap-2 border-b border-[#E7ECF3]" data-testid="social-tabs">
         {TABS.map(([k, l, I]) => <button key={k} onClick={() => setTab(k)} data-testid={`social-tab-${k}`} className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-semibold transition ${tab === k ? "border-[#2F6BFF] text-[#2F6BFF]" : "border-transparent text-slate-500 hover:text-slate-800"}`}><I size={14} /> {l} <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500">{posts.filter((p) => p.kind === k).length}</span></button>)}
       </div>

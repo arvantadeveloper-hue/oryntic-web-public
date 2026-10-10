@@ -11,7 +11,7 @@ import { MeetingChatPanel, ChatToggleButton, useMeetingChat } from "./MeetingCha
 import { MeetingShell, useMeetingLayout } from "./MeetingShell";
 import { InviteDialog } from "./InviteToCall";
 import { useAuth } from "../context/AuthContext";
-import { VideoConfirmModal, useAvatarVideo, AvatarVideoView } from "./SupportVideo";
+import { VideoConfirmModal, useAvatarVideo, AvatarVideoView, VideoResumeBar } from "./SupportVideo";
 
 // ChatGPT-Voice style call: speech-to-speech via OpenAI Realtime (WebRTC), negotiated through our backend.
 export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onConvChange, opening = null, autoVideo = false }) {
@@ -408,6 +408,7 @@ export function RealtimeCall({ conv, cid, messages = [], onClose, onRefresh, onC
       {avatar(260)}
       <h2 className="mt-6 text-2xl font-bold">{persona.name || "Asisten"}</h2>
       <p className={`mt-1 flex items-center gap-2 text-sm ${phase === "reconnecting" ? "font-semibold text-amber-300" : "text-white/70"}`} data-testid="rt-phase">{["connecting", "reconnecting"].includes(phase) && <Loader2 size={14} className="animate-spin" />}{label}</p>
+      {isSupport && <VideoResumeBar resumable={video.resumable} state={video.state} onResume={video.resume} onDismiss={video.dismissResume} />}
     </div>
   );
   const captionEl = layout === "chat" ? <p className={`text-center text-xs ${phase === "reconnecting" ? "font-semibold text-amber-300" : "text-white/60"}`} data-testid="rt-phase-rail">{label}</p> : null;

@@ -1,11 +1,10 @@
-import { LoadMore } from "../components/ConversationTools";
 import React, { useEffect, useState } from "react";
 import { Sparkles, Check, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, Cell } from "recharts";
 import { api } from "../lib/api";
 import { TrialBanner } from "../components/TrialBanner";
-import { CallReport } from "../components/CallReport";
+import { WalletHistoryTabs } from "../components/WalletHistoryTabs";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 
@@ -14,7 +13,6 @@ const COLORS = ["#00D1FF", "#7C3AED", "#06B6D4", "#F59E0B", "#10B981", "#EF4444"
 export default function Wallet() {
   const { user, setCredits, refreshUser } = useAuth();
   const { t } = useI18n();
-  const [shown, setShown] = useState(20);
   const [wallet, setWallet] = useState(null);
   const [packages, setPackages] = useState([]);
   const [busy, setBusy] = useState(null);
@@ -77,22 +75,7 @@ export default function Wallet() {
         ))}
       </div>
 
-      <CallReport />
-
-      <h2 className="mt-10 text-lg font-bold text-slate-900">{t("wallet.history")}</h2>
-      <div className="mt-4 aivora-card divide-y divide-slate-100">
-        {(wallet?.transactions || []).length === 0 ? <p className="p-6 text-sm text-slate-500">Belum ada transaksi.</p> :
-          wallet.transactions.slice(0, shown).map((tx) => (
-            <div key={tx.id} className="flex items-center justify-between px-5 py-3" data-testid={`txn-${tx.id}`}>
-              <div>
-                <p className="text-sm text-slate-700">{tx.description}</p>
-                <p className="text-xs text-slate-500">{new Date(tx.created_at).toLocaleString()}</p>
-              </div>
-              <span className={`text-sm font-semibold ${tx.amount >= 0 ? "text-[#10B981]" : "text-[#EF4444]"}`}>{tx.amount >= 0 ? "+" : ""}{tx.amount}</span>
-            </div>
-          ))}
-          {(wallet?.transactions?.length || 0) > shown && <LoadMore onClick={() => setShown((n) => n + 20)} testid="tx-load-more" />}
-      </div>
+      <WalletHistoryTabs transactions={wallet?.transactions || []} />
     </div>
   );
 }

@@ -726,15 +726,17 @@ async def _social_turn(ctx, plan: dict):
             yield ev
         return
     caption = (plan.get("caption") or "").strip() or (media or {}).get("name") or ""
-    when = _schedule_utc(plan.get("schedule_at"), ctx.user)
+    repeat = plan.get("repeat") if plan.get("repeat") in ("daily", "weekly") else "none"
+    when = _schedule_utc(plan.get("schedule_at"), ctx.user, repeat)
     if plan.get("schedule_at") and not when:
         async for ev in _emit_final(ctx, "Waktunya sudah lewat atau tidak kubaca dengan jelas — sebutkan tanggal & jamnya ya (mis. \"besok jam 09.00\").", 0, {"tool": "social_publish", "error": True}):
             yield ev
         return
     pt = {"kind": "social", "providers": providers, "caption": caption, "content_kind": kind, "credits": 0, "media_path": (media or {}).get("path"), "media_name": (media or {}).get("name"), "media_type": (media or {}).get("type")}
     if when:
-        pt["schedule_at"], pt["schedule_label"] = when
-        text = f"Siap **menjadwalkan** posting {KIND_ID.get(kind, kind)} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** pada **{when[1]}** dengan caption:\n\n> {caption}\n\nLanjutkan?"
+        pt["schedule_at"], pt["schedule_label"], pt["repeat"], pt["repeat_label"] = when
+        rep = f" dan **mengulanginya {when[3]}**" if when[3] else ""
+        text = f"Siap **menjadwalkan** posting {KIND_ID.get(kind, kind)} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** pada **{when[1]}**{rep} dengan caption:\n\n> {caption}\n\nLanjutkan?"
     else:
         text = f"Siap posting {KIND_ID.get(kind, kind)} ke **{', '.join(SOCIAL_LABEL[p] for p in providers)}** dengan caption:\n\n> {caption}\n\nLanjutkan?"
     yield ctx.sse(delta=text)
@@ -742,29 +744,27 @@ async def _social_turn(ctx, plan: dict):
         yield ev
 
 
-def _schedule_utc(local: str | None, user: dict):
-    """'YYYY-MM-DDTHH:MM' in the user's timezone → (UTC ISO, human label) or None when empty/invalid/past."""
+def _schedule_utc(local: str | None, user: dict, repeat: str = "none"):
+    """'YYYY-MM-DDTHH:MM' in the user's timezone → (UTC ISO, label, repeat, repeat label) or None when empty/invalid/past.
+    Repeating schedules whose first occurrence already passed roll forward to the next one."""
     if not local:
         return None
-    from zoneinfo import ZoneInfo
-    tz = (user.get("settings") or {}).get("timezone") or "Asia/Jakarta"
-    try:
-        z = ZoneInfo(tz)
-    except Exception:
-        z = ZoneInfo("Asia/Jakarta")
+    from social import user_tz, when_label, repeat_label
+    z = user_tz(user)
     try:
         dt = datetime.fromisoformat(local[:16]).replace(tzinfo=z)
     except Exception:
         return None
+    step = {"daily": timedelta(days=1), "weekly": timedelta(days=7)}.get(repeat)
+    while step and dt <= datetime.now(timezone.utc) + timedelta(minutes=1):
+        dt = (dt + step).replace(tzinfo=z)
     if dt <= datetime.now(timezone.utc) + timedelta(minutes=1):
         return None
-    hari = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"][dt.weekday()]
-    bulan = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"][dt.month - 1]
-    return dt.astimezone(timezone.utc).isoformat(), f"{hari}, {dt.day} {bulan} {dt.year} {dt:%H:%M} ({tz})"
+    return dt.astimezone(timezone.utc).isoformat(), when_label(dt), repeat if step else "none", repeat_label(repeat, dt) if step else ""
 
 
 async def social_schedule_from_chat(cid: str, u: dict, pt: dict, app_url: str, persona_id, persona_name, portrait) -> dict:
-    from social import publish as _p, PublishIn, schedule_post  # noqa: F401
+    from social import PublishIn, schedule_post, user_tz
     kind = pt.get("content_kind") or "image"
     media = await _latest_media(cid, kind) if kind in ("image", "video") else None
     if kind in ("image", "video") and not media:
@@ -772,9 +772,10 @@ async def social_schedule_from_chat(cid: str, u: dict, pt: dict, app_url: str, p
     x = PublishIn(providers=pt["providers"], kind=kind, text=pt.get("caption") or "", title=pt.get("title") or (media or {}).get("name") or "", media_path=(media or {}).get("path"),
                   drive_id=(media or {}).get("drive_id"), app_url=app_url or "https://oryntix.app", source={"conversation_id": cid, "scheduled": True})
     job = await schedule_post(u["id"], x, pt["schedule_at"], pt.get("schedule_label") or pt["schedule_at"],
-                              {"conversation_id": cid, "persona_id": persona_id, "persona_name": persona_name, "portrait": portrait})
-    return {"job": job, "text": f"Dijadwalkan ✅ — {KIND_ID.get(kind, kind)} akan diposting ke **{', '.join(SOCIAL_LABEL.get(p, p) for p in pt['providers'])}** pada **{job['scheduled_label']}**.\n\n"
-                                f"> {pt.get('caption') or ''}\n\nAku akan mengabari di chat ini setelah terkirim. Lihat atau batalkan jadwal di menu [Social Media](/social)."}
+                              {"conversation_id": cid, "persona_id": persona_id, "persona_name": persona_name, "portrait": portrait}, pt.get("repeat") or "none", str(user_tz(u)))
+    rep = f" dan diulang **{job['repeat_label']}**" if job.get("repeat_label") else ""
+    return {"job": job, "text": f"Dijadwalkan ✅ — {KIND_ID.get(kind, kind)} akan diposting ke **{', '.join(SOCIAL_LABEL.get(p, p) for p in pt['providers'])}** pada **{job['scheduled_label']}**{rep}.\n\n"
+                                f"> {pt.get('caption') or ''}\n\nAku akan mengabari di chat ini setelah terkirim. Lihat, hentikan pengulangan, atau batalkan jadwal di menu [Social Media](/social)."}
 
 
 class SocialChatIn(BaseModel):

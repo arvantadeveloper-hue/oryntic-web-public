@@ -107,6 +107,37 @@ async def call_report(before: str | None = None, limit: int = 20, u: dict = Depe
     return {"items": page, "has_more": has_more, "next_before": page[-1]["started_at"] if has_more and page else None}
 
 
+VIDEO_END = {"USER_CLOSED": "Dimatikan", "DISCONNECTED": "Koneksi terputus", "STALE": "Terputus (basi)", "MAX_DURATION_REACHED": "Batas waktu", "NO_CREDITS": "Kredit habis"}
+
+
+@router.get("/video-sessions")
+async def video_session_report(before: str | None = None, limit: int = 20, u: dict = Depends(current_user)):
+    """Interactive-video sessions grouped per call: connected seconds + credits of every session (resumed ones included)."""
+    q = {"user_id": {"$in": [workspace_id(u), u["id"]]}}
+    if before:
+        q["created_at"] = {"$lt": before}
+    rows = await db.video_sessions.find(q, {"_id": 0, "session_token": 0, "la_session_id": 0}).sort("created_at", -1).to_list(600)
+    calls, order = {}, []
+    for s in rows:
+        c = calls.get(s["call_id"])
+        if not c:
+            c = calls[s["call_id"]] = {"id": s["call_id"], "conversation_id": s.get("conversation_id"), "started_at": s["created_at"], "sessions": [], "seconds": 0, "credits": 0.0}
+            order.append(c)
+        c["sessions"].append({"id": s["id"], "started_at": s["created_at"], "ended_at": s.get("ended_at"), "seconds": int(s.get("billed_seconds") or 0), "credits": round(float(s.get("credits") or 0), 2),
+                              "max_seconds": int(s.get("max_seconds") or 0), "status": s.get("status"), "end_reason": s.get("end_reason"), "end_label": "Berjalan" if s.get("status") == "active" else VIDEO_END.get(s.get("end_reason") or "", s.get("end_reason") or "-"),
+                              "resumed": bool(s.get("resumed_from")), "sandbox": bool(s.get("sandbox"))})
+        c["started_at"] = min(c["started_at"], s["created_at"])
+        c["seconds"] += int(s.get("billed_seconds") or 0)
+        c["credits"] = round(c["credits"] + float(s.get("credits") or 0), 2)
+    page, has_more = order[:max(1, min(limit, 100))], len(order) > limit
+    titles = {c["id"]: c async for c in db.conversations.find({"id": {"$in": list({r["conversation_id"] for r in page if r["conversation_id"]})}}, {"_id": 0, "id": 1, "title": 1, "titles": 1})}
+    for r in page:
+        c = titles.get(r["conversation_id"]) or {}
+        r["title"] = (c.get("titles") or {}).get(u["id"]) or c.get("title") or "Panggilan"
+        r["sessions"].reverse()
+    return {"items": page, "has_more": has_more, "next_before": page[-1]["started_at"] if has_more and page else None}
+
+
 @router.post("/topup")
 async def topup(x: TopupIn, u: dict = Depends(require_admin)):
     pkgs = await get_packages()

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ThumbsUp, MessageCircle, Share2, Heart, Send, Bookmark, Play, AlertTriangle, CalendarClock } from "lucide-react";
+import { ThumbsUp, MessageCircle, Share2, Heart, Send, Bookmark, Play, AlertTriangle, CalendarClock, Repeat } from "lucide-react";
 import { api, API_BASE, getToken } from "../lib/api";
 
 const fileUrl = (path) => `${API_BASE}/files/${path}?auth=${getToken()}`;
@@ -110,6 +110,7 @@ export function SocialPreview({ pt: base, dark = false, draft, onDraft }) {
     <div className="mt-2 w-full space-y-3" data-testid="social-preview">
       <p className={`flex items-center gap-1 text-[11px] font-semibold ${dark ? "text-white/70" : "text-slate-600"}`}>
         {pt.schedule_at ? <CalendarClock size={12} /> : null} Pratinjau {kindLabel}{pt.schedule_label ? ` · tayang ${pt.schedule_label}` : ""}
+        {pt.repeat_label && <span className={`ml-1 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${dark ? "bg-white/15 text-white" : "bg-[#EEF3FF] text-[#2F6BFF]"}`} data-testid="social-preview-repeat"><Repeat size={10} /> {pt.repeat_label}</span>}
       </p>
       {onDraft && (
         <div className="space-y-1.5" data-testid="social-preview-edit">
