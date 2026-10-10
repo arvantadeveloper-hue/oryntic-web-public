@@ -1,0 +1,29 @@
+{
+  "summary": "Iter46 — Platform API (/api/platform/*) & /admin UI. Backend: 35/35 pytest passing. Covered: (1) auth/RBAC on /me, /stats, /pricing (super_admin ok; demo 403; no-token 401/403), (2) console /stats (6-mo pnl, 7-day daily, all fields), /staff, /users?limit=2 (used_30d+personas), /users/{id}/history, /audit, /audit/export.csv (BOM + ';' header), (3) staff lifecycle grant→role flip→self-change 400→revoke→cleanup user doc, (4) users credits delta=0 → 422, delta=5 persisted (verified via GET + decremented back + credit_transactions cleanup), disable with/without reason, (5) finance group=month/day/week=400 + export.csv + ppn?year=2026 + pnl/export.pdf starts with %PDF + pnl/range + range>366→400, (6) expenses: file-less taxable→400 'Lampiran e-faktur', bogus category→400, non-taxable created with dpp=amount & ppn=0, list?q=, csv, delete; recurring create+list+run (created>=1)+from_recurring verified+PUT inactive+DELETE+cleanup generated; budget GET/PUT/restore + bogus category rejection; pending-efaktur fields, (7) pricing: /platform/pricing == /admin/pricing; preview margin_pct+1 → rates differ, no save; PUT unchanged → 200 + audit pricing.update; trial GET/PUT → audit trial.update; rate-limits equals admin; PUT → audit rate_limits.update; chat_per_min=0 → 422; pricing-catalog shape + /quote gpt-luna/text_in → credits, nope→404; realtime-behaviour & model-routing equality; demo PUTs → 403, (8) support-agent config (liveavatar_key_set) + avatars + preview {reply, session_id, model} using Emergent LLM key (succeeded in ~5s), (9) cron recurring-expenses & efaktur-reminder: no auth→401, Bearer WEBHOOK_CRON_SECRET→200 {ok:true, queued:true}; crons.yml valid YAML with 2 entries matching endpoints, (10) openapi.json → 45 /api/platform paths; /api/docs → 200 HTML, (11) regression /api/wallet/video-sessions → 200. Frontend /admin: logged in as admin@aivora.ai, tabs are exactly Ringkasan/Pengguna/Tugas/Pricing/Asisten Oryntix with data-testid admin-tab-overview|users|tasks|catalog|support; no admin-tab-pricing; no 'Tarif & Margin' text; Pricing tab renders admin-catalog-tab with OpenAI + Google Gemini + Model Routing section; all other tabs navigate without console/page errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/platform/expenses/budget", "issue": "bogus category returns 422 (Pydantic) instead of 400 like POST /api/platform/expenses — minor spec inconsistency; test accepts both."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter46.py",
+    "/app/test_reports/pytest/iter46.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Email validator rejects @oryntix.test as reserved TLD — if spec intends .test domain for QA, consider loosening validator or using example.com; tests switched to @oryntix.example.com.",
+    "Budget category validation uses Pydantic (422) while expense category validation uses manual check (400) — align both to the same code for consistency.",
+    "Audit log entries for staff.grant/staff.role/staff.revoke all appear; good coverage."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter46.py"
+  ],
+  "success_rate": {"backend": "100% (35/35)", "frontend": "100%"},
+  "test_credentials": "admin@aivora.ai / Aivora!Admin2026 ; demo@aivora.ai / demo123456",
+  "seed_data_creation": "All test artifacts cleaned up: created staff user hard-deleted from mongo `users`, demo credits +5 compensated via mongo users.$inc:-5 and credit_transactions.delete_many{description:'qa', amount:5}, demo re-enabled, QA expense doc deleted, recurring template + its generated expense deleted (plus belt-and-suspenders mongo cleanup), platform budget restored to {monthly_idr:0, categories:{}}.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter46.py runs with `-o addopts=\"\"` to bypass pytest.ini xdist loadscope since classes share admin fixture + sequential state (staff/credits). Login button on /login has two 'Masuk' instances — use get_by_role('button', name='Masuk').last. /admin requires platform_role, demo gets redirected. Expense POST uses multipart/form-data (all fields in `files=`). Email validator in auth rejects .test TLD."
+}
