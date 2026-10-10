@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { VoiceModelPicker } from "../components/VoiceModelPicker";
 import { ToolsPicker } from "../components/ToolsPicker";
+import { CharacterPicker } from "../components/CharacterPicker";
 import { KnowledgeTab } from "../components/KnowledgeTab";
 import { useAuth } from "../context/AuthContext";
 
@@ -34,6 +35,10 @@ export default function PersonaDetail() {
   useEffect(() => () => { try { previewAudioRef.current?.pause(); } catch (e) {} }, []);
   const modelLabel = (key) => (models.find((m) => m.id === key) || {}).label || key;
   const changeModel = async (key) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, model: key }); setP(r.data); toast.success("Model diperbarui"); };
+  const changeCharacter = async (character_id) => {
+    try { const r = await api.put(`/personas/${id}`, { profile: p.profile, character_id }); setP(r.data); toast.success("Karakter persona diperbarui — berlaku di chat & panggilan berikutnya"); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Gagal mengubah karakter"); }
+  };
   const changeTools = async (tools) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, tools }); setP(r.data); toast.success("Kemampuan tambahan diperbarui"); };
   const changeVoice = async (v) => { const r = await api.put(`/personas/${id}`, { profile: p.profile, voice: v }); setP(r.data); toast.success("Suara diperbarui"); };
   const previewVoice = async (v) => {
@@ -147,6 +152,7 @@ export default function PersonaDetail() {
                 ))}
               </select>
             </div>
+            <CharacterPicker value={p.character_id} onChange={changeCharacter} testid="persona-character-select" />
             <ToolsPicker modelKey={p.model} value={p.tools || []} onChange={changeTools} compact />
             <VoiceModelPicker compact />
           </div>

@@ -727,3 +727,6 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 - Platform API `platform_api/characters.py`: `GET/POST /api/platform/persona-characters`, `PUT/DELETE /{cid}` (+audit). Spec ditambahkan ke `memory/PLATFORM_API_SPEC.md` & `platform-admin/API_SPEC.md`.
 - App utama: `GET /api/personas/characters` (aktif saja, tanpa prompt); `generate-profile` & `POST/PUT /personas` menerima `character_id` (validasi → 400). Profil AI diarahkan ke karakter terpilih.
 - `CreatePersona.jsx`: textarea diganti label **"Deskripsikan Penampilan Persona"** (Describe/Combine; Photo tetap "Catatan tambahan") + combo **"Karakter Persona"** (`persona-character`) dengan deskripsi di bawahnya; dikirim saat generate & simpan.
+
+## Update 2026-06 (cf) — Ganti Karakter Persona dari halaman detail (diuji manual via screenshot: ubah → toast → persist setelah reload)
+- `components/CharacterPicker.jsx` (shared; memuat `GET /personas/characters` sendiri) dipakai di `CreatePersona.jsx` dan tab **Pengaturan** `PersonaDetail.jsx` (`persona-character-select`, di bawah Otak Persona) → `PUT /personas/{pid} {profile, character_id}`; menghapus karakter di platform → persona pemakai otomatis kembali ke bawaan (`personas_reset`).

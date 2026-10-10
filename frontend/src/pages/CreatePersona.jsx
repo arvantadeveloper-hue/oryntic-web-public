@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, API_BASE, getToken } from "../lib/api";
 import { VoiceModelPicker } from "../components/VoiceModelPicker";
 import { ToolsPicker } from "../components/ToolsPicker";
+import { CharacterPicker } from "../components/CharacterPicker";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n";
 
@@ -28,7 +29,6 @@ export default function CreatePersona() {
   const [step, setStep] = useState("method");
   const [method, setMethod] = useState("describe");
   const [desc, setDesc] = useState("");
-  const [characters, setCharacters] = useState([]);
   const [characterId, setCharacterId] = useState("default");
   const [photo, setPhoto] = useState(null);
   const [consent, setConsent] = useState(false);
@@ -44,7 +44,6 @@ export default function CreatePersona() {
   const [previewing, setPreviewing] = useState(null);
   const previewAudioRef = useRef(null);
 
-  useEffect(() => { api.get("/personas/characters").then((r) => { setCharacters(r.data.items || []); setCharacterId(r.data.default || "default"); }).catch(() => {}); }, []);
   useEffect(() => { api.get("/models").then((r) => { setModels(r.data.models); setModelKey(r.data.default); }).catch(() => {}); }, []);
   useEffect(() => { api.get("/voice/voices").then((r) => { setVoices(r.data.voices || []); setVoiceMeta({ info: r.data.info || {}, realtime: r.data.realtime || [] }); }).catch(() => {}); }, []);
   useEffect(() => () => { try { previewAudioRef.current?.pause(); } catch (e) {} }, []);
@@ -154,7 +153,7 @@ export default function CreatePersona() {
               value={desc} onChange={(e) => setDesc(e.target.value)} />
             {method !== "photo" && <p className="mt-1 text-xs text-slate-400">Fokus pada tampilan fisik, pakaian, dan gaya visual — kepribadian diambil dari Karakter Persona di bawah.</p>}
           </div>
-          <CharacterPicker characters={characters} value={characterId} onChange={setCharacterId} />
+          <CharacterPicker value={characterId} onChange={setCharacterId} />
           <button onClick={generate} disabled={busy} data-testid="generate-profile-btn" className="btn-grad flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm">
             <Wand2 size={18} /> {busy ? "Membuat profil..." : "Buat Profil dengan AI"}
           </button>
@@ -248,17 +247,3 @@ function FieldArea({ label, value, onChange, testid }) {
   );
 }
 
-// "Karakter Persona": platform-managed presets; the default is the built-in Oryntix assistant character.
-function CharacterPicker({ characters, value, onChange }) {
-  const current = characters.find((c) => c.id === value);
-  return (
-    <div>
-      <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Karakter Persona</label>
-      <select className="input-dark" value={value} onChange={(e) => onChange(e.target.value)} data-testid="persona-character">
-        {characters.length === 0 && <option value="default">Asisten Oryntix (bawaan)</option>}
-        {characters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-      </select>
-      {current?.description && <p className="mt-1 text-xs text-slate-400" data-testid="persona-character-desc">{current.description}</p>}
-    </div>
-  );
-}
