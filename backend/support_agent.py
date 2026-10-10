@@ -77,13 +77,25 @@ async def support_persona() -> Optional[dict]:
             "created_at": "2026-01-01T00:00:00+00:00", "updated_at": "2026-01-01T00:00:00+00:00"}
 
 
-async def support_prompt_parts() -> list:
+async def support_prompt_parts(query: Optional[str] = None) -> list:
+    """Support persona + knowledge: the admin's knowledge text plus the knowledge DOCUMENTS managed via /api/platform/support-agent/knowledge
+    (relevant excerpts for a text message; a trimmed digest of every enabled document when there is no query, e.g. Realtime voice)."""
+    from knowledge import relevant_knowledge, knowledge_digest
     c = await get_config()
-    return ["SUPPORT AGENT MODE: You are the official Oryntix Customer Support Agent. You have NO media/document/code/web tools in this role — "
-            "never offer to generate images, videos, documents or run code; instead explain how the user can do it with their own assistants. "
-            "Answer from the Oryntix knowledge below; when something is not covered, say so honestly and suggest contacting the workspace admin or support. "
-            "The knowledge base and the admin's persona text may be written in another language — ALWAYS answer in the user's preferred language from their settings (LANGUAGE RULE below), translating as needed.",
-            "ORYNTIX KNOWLEDGE BASE:\n" + (c.get("knowledge") or "")]
+    parts = ["SUPPORT AGENT MODE: You are the official Oryntix Customer Support Agent. You have NO media/document/code/web tools in this role — "
+             "never offer to generate images, videos, documents or run code; instead explain how the user can do it with their own assistants. "
+             "Answer from the Oryntix knowledge below; when something is not covered, say so honestly and suggest contacting the workspace admin or support. "
+             "The knowledge base and the admin's persona text may be written in another language — ALWAYS answer in the user's preferred language from their settings (LANGUAGE RULE below), translating as needed.",
+             "ORYNTIX KNOWLEDGE BASE:\n" + (c.get("knowledge") or "")]
+    if query:
+        kn = await relevant_knowledge(SUPPORT_ID, query, k=4)
+        if kn:
+            parts.append("ORYNTIX KNOWLEDGE DOCUMENTS — excerpts relevant to this message (cite the title when you use it):\n" + "\n".join(f"[{x['title']}] {x['text']}" for x in kn))
+    else:
+        digest = await knowledge_digest(SUPPORT_ID)
+        if digest:
+            parts.append("ORYNTIX KNOWLEDGE DOCUMENTS:\n" + digest)
+    return parts
 
 
 # ---------- public config for the video confirmation modal ----------

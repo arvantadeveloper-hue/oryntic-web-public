@@ -22,6 +22,7 @@ Spesifikasi OpenAPI lengkap (termasuk skema body): **`GET /api/openapi.json`**, 
 | Keuangan | `GET /finance?date_from&date_to&group=day\|month` · `GET /finance/export.csv` · `GET /finance/ppn?year` · `GET /finance/ppn/export.csv` · `GET /finance/pnl?year` · `GET /finance/pnl/export.csv\|pdf?year` · `GET /finance/pnl/range[...]?date_from&date_to&group` | staff |
 | Pengeluaran | `GET /expenses?q&category&start&end` · `POST /expenses` (multipart: date, category, vendor, amount_idr, description, taxable, efaktur_no, file) · `DELETE /expenses/{eid}` · `GET /expenses/export.csv` · `GET /expenses/pending-efaktur` · `PUT /expenses/{eid}/efaktur` (multipart) · `GET /expenses/{eid}/file` · `GET/POST /expenses/recurring` · `PUT/DELETE /expenses/recurring/{rid}` · `POST /expenses/recurring/run` · `GET/PUT /expenses/budget` | staff |
 | Asisten Oryntix | `GET /support-agent` (staff) · `PUT /support-agent` · `GET /support-agent/avatars?page&page_size&mine` (staff) · `POST /support-agent/preview {message, session_id?}` | super_admin |
+| Pengetahuan Asisten Oryntix | `GET/POST /support-agent/knowledge` · `GET/PUT/DELETE /support-agent/knowledge/{kid}` · `POST /support-agent/knowledge/{kid}/refresh` — lihat bagian di bawah | staff baca · super_admin ubah |
 | **Pricing** | lihat bagian di bawah | |
 | **Karakter Persona** | `GET/POST /persona-characters` · `PUT/DELETE /persona-characters/{cid}` — lihat bagian di bawah | staff baca · super_admin ubah |
 | Cron | `POST /cron/recurring-expenses` · `POST /cron/efaktur-reminder` — header `Authorization: Bearer <WEBHOOK_CRON_SECRET>`; dijadwalkan di `.emergent/crons.yml` | cron |
@@ -116,6 +117,29 @@ Respons = objek `calc` (lihat di atas) untuk kuantitas tersebut; `404` jika komp
 ### 10. Pengaturan terkait
 - `GET/PUT /api/platform/realtime-behaviour` — **BehaviourIn**: `turn_detection` `semantic_vad|server_vad`*, `eagerness` `low|medium|high|auto`*, `interrupt_response` (false), `create_response` (true), `threshold` 0–1 (0.5), `prefix_padding_ms` 0–2000 (300), `silence_duration_ms` 100–5000 (500), `barge_confirm_ms` 200–5000 (1300), `backchannel_resume` (true), `backchannel_window_ms` 1000–30000 (8000), `note`.
 - `GET/PUT /api/platform/model-routing` — **RoutingIn**: `enabled` (true), `it_model`* `^[a-z0-9-]+$`, `research_model`*, `confirm_threshold`* 0–1000.
+
+## Pengetahuan Asisten Oryntix API (`/api/platform/support-agent/knowledge`)
+Dokumen pengetahuan untuk Support Agent bawaan — **satu atau lebih** dokumen, pipeline yang sama dengan pengetahuan persona pengguna (`knowledge.py`): teks dipotong menjadi chunk, disinkronkan ke OpenAI vector store (bila `OPENAI_API_KEY` ada), dan saat pengguna chat dengan Asisten Oryntix hanya **kutipan yang relevan** dengan pesan yang disuntikkan ke prompt (maks. 4 chunk; untuk panggilan suara Realtime dipakai ringkasan semua dokumen aktif ≤ 15.000 karakter). Teks "knowledge" tunggal di `PUT /support-agent` tetap berlaku sebagai dasar; dokumen di sini melengkapinya.
+
+| Method & path | Peran | Keterangan |
+|---|---|---|
+| `GET /api/platform/support-agent/knowledge` | staff | `[KnowledgeDoc]` terbaru dulu |
+| `POST /api/platform/support-agent/knowledge` | super_admin | body **KnowledgeIn** (pilih SATU sumber) → `201 KnowledgeDoc`; `400` isi < 20 karakter / judul kosong / `drive_id` (Drive tidak didukung untuk Asisten Oryntix); audit `support_knowledge.add` |
+| `GET /api/platform/support-agent/knowledge/{kid}` | staff | `KnowledgeDoc` + `text` (isi lengkap hasil ekstraksi) |
+| `PUT /api/platform/support-agent/knowledge/{kid}` | super_admin | body **KnowledgeUpdate** `{enabled?, title?, html?}` → `KnowledgeDoc`; `html` menggantikan isi (di-chunk ulang); audit `support_knowledge.update` |
+| `POST /api/platform/support-agent/knowledge/{kid}/refresh` | super_admin | unduh ulang dokumen bersumber `url` → `KnowledgeDoc`; `404` bila bukan dari URL |
+| `DELETE /api/platform/support-agent/knowledge/{kid}` | super_admin | `{ok:true}` (file di vector store ikut dihapus) |
+
+**KnowledgeIn** — isi tepat satu sumber:
+| Field | Tipe | Batas | Arti |
+|---|---|---|---|
+| `title` | string | ≤ 160 | judul; bila kosong diambil dari judul halaman / nama file / URL |
+| `text` | string | ≤ 200.000 | teks polos (editor) |
+| `html` | string | ≤ 400.000 | HTML dari editor kaya (disimpan + diubah ke teks) |
+| `file_name` + `file_data` | string + base64 | — | unggah file: `.pdf`, `.docx`, `.txt`, `.md`, `.csv`, `.html` |
+| `url` | string | ≤ 2000 | halaman publik (http/https, host publik saja) |
+
+**KnowledgeDoc**: `{id, persona_id:"oryntix-support", user_id:"platform", title, source: editor|upload|url, file_name, url, html, chars, chunk_count, enabled, vector_synced, created_at, updated_at}` (tanpa `chunks`).
 
 ## Karakter Persona API (`/api/platform/persona-characters`)
 Preset "Karakter Persona" yang dipilih pengguna saat membuat persona (combo box di langkah *Describe with AI / Combine Both / From Photo*).

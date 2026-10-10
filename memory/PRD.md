@@ -730,3 +730,9 @@ Account/onboarding; Create-Your-Persona studio (describe/photo/combine); streami
 
 ## Update 2026-06 (cf) — Ganti Karakter Persona dari halaman detail (diuji manual via screenshot: ubah → toast → persist setelah reload)
 - `components/CharacterPicker.jsx` (shared; memuat `GET /personas/characters` sendiri) dipakai di `CreatePersona.jsx` dan tab **Pengaturan** `PersonaDetail.jsx` (`persona-character-select`, di bawah Otak Persona) → `PUT /personas/{pid} {profile, character_id}`; menghapus karakter di platform → persona pemakai otomatis kembali ke bawaan (`personas_reset`).
+
+## Update 2026-06 (cg) — Pengetahuan Asisten Oryntix (Support Agent) via Platform API (diuji manual curl + verifikasi prompt)
+- `knowledge.py` direfaktor: helper bersama `add_doc/list_docs/get_doc/update_doc/refresh_doc/delete_doc`, `knowledge_digest`; vector store id untuk persona virtual disimpan di `db.vector_stores` (`_vs_id`). Dokumen support memakai `persona_id="oryntix-support"`, `user_id="platform"`.
+- `platform_api/support.py`: `GET/POST /api/platform/support-agent/knowledge`, `GET/PUT/DELETE /{kid}`, `POST /{kid}/refresh` (+audit; Drive ditolak 400).
+- `support_agent.support_prompt_parts(query)`: menyuntik kutipan relevan (k=4) per pesan teks, atau digest semua dokumen aktif (≤15k) untuk voice/tanpa query; `chat._persona_system` meneruskan `query`.
+- Spec ditambahkan ke `memory/PLATFORM_API_SPEC.md` & `platform-admin/API_SPEC.md`.

@@ -169,15 +169,27 @@ def _vs_client():
     return AsyncOpenAI(api_key=key)
 
 
+async def _vs_id(pid: str) -> Optional[str]:
+    """Vector store of a persona — stored on the persona doc, or in db.vector_stores for virtual personas (support agent)."""
+    p = await db.personas.find_one({"id": pid}, {"_id": 0, "vector_store_id": 1})
+    if p is not None:
+        return p.get("vector_store_id")
+    v = await db.vector_stores.find_one({"persona_id": pid}, {"_id": 0, "vector_store_id": 1}) or {}
+    return v.get("vector_store_id")
+
+
 async def ensure_vector_store(pid: str) -> Optional[str]:
     client = _vs_client()
     if not client:
         return None
-    p = await db.personas.find_one({"id": pid}, {"_id": 0, "vector_store_id": 1}) or {}
-    if p.get("vector_store_id"):
-        return p["vector_store_id"]
+    existing = await _vs_id(pid)
+    if existing:
+        return existing
     vs = await client.vector_stores.create(name=f"oryntix-{pid}"[:64])
-    await db.personas.update_one({"id": pid}, {"$set": {"vector_store_id": vs.id}})
+    if await db.personas.find_one({"id": pid}, {"_id": 0, "id": 1}):
+        await db.personas.update_one({"id": pid}, {"$set": {"vector_store_id": vs.id}})
+    else:
+        await db.vector_stores.update_one({"persona_id": pid}, {"$set": {"vector_store_id": vs.id, "updated_at": now_iso()}}, upsert=True)
     return vs.id
 
 
@@ -186,8 +198,8 @@ async def vs_remove_doc(doc: dict) -> None:
     fid = (doc or {}).get("openai_file_id")
     if not client or not fid:
         return
-    p = await db.personas.find_one({"id": doc["persona_id"]}, {"_id": 0, "vector_store_id": 1}) or {}
-    for coro in ((lambda: client.vector_stores.files.delete(fid, vector_store_id=p["vector_store_id"])) if p.get("vector_store_id") else None,
+    vs_id = await _vs_id(doc["persona_id"])
+    for coro in ((lambda: client.vector_stores.files.delete(fid, vector_store_id=vs_id)) if vs_id else None,
                  lambda: client.files.delete(fid)):
         if coro:
             try:
@@ -232,13 +244,11 @@ def _pub(d: dict) -> dict:
 @router.get("/personas/{pid}/knowledge")
 async def list_knowledge(pid: str, u: dict = Depends(current_user)):
     await _persona_of(pid, u)
-    return [_pub(d) async for d in db.knowledge_docs.find({"persona_id": pid}, {"_id": 0}).sort("created_at", -1)]
+    return await list_docs(pid)
 
 
-@router.post("/personas/{pid}/knowledge")
-async def add_knowledge(pid: str, x: KnowledgeIn, u: dict = Depends(current_user)):
-    """Reference knowledge for an assistant (upload or editor). Never 'priority': only the few chunks relevant to a message are injected."""
-    p = await _persona_of(pid, u)
+async def add_doc(pid: str, owner_id: str, x: KnowledgeIn, u: dict) -> dict:
+    """Ingest one knowledge document (Drive / URL / upload / editor) for persona `pid`; shared by the user API and the platform support-agent API."""
     url, page_title, drive = None, "", {}
     if x.drive_id:
         drive, text = await _drive_text(u["id"], x.drive_id)
@@ -258,7 +268,7 @@ async def add_knowledge(pid: str, x: KnowledgeIn, u: dict = Depends(current_user
         raise HTTPException(400, "Isi judul dokumen")
     if len(text.strip()) < 20:
         raise HTTPException(400, "Isi dokumen terlalu pendek atau tidak terbaca")
-    doc = {"id": new_id(), "user_id": p["user_id"], "persona_id": pid, "title": title, "source": source, "file_name": x.file_name, "url": url, "html": html,
+    doc = {"id": new_id(), "user_id": owner_id, "persona_id": pid, "title": title, "source": source, "file_name": x.file_name, "url": url, "html": html,
            "drive_id": drive.get("id"), "drive_link": drive.get("webViewLink"), "drive_mime": drive.get("mimeType"), "drive_user_id": u["id"] if drive else None,
            "chars": len(text), "chunks": _chunks(text), "enabled": True, "created_at": now_iso(), "updated_at": now_iso()}
     await db.knowledge_docs.insert_one(dict(doc))
@@ -266,10 +276,34 @@ async def add_knowledge(pid: str, x: KnowledgeIn, u: dict = Depends(current_user
     return _pub(await db.knowledge_docs.find_one({"id": doc["id"]}, {"_id": 0}) or doc)
 
 
-@router.post("/personas/{pid}/knowledge/{kid}/refresh")
-async def refresh_knowledge(pid: str, kid: str, u: dict = Depends(current_user)):
+async def list_docs(pid: str) -> list:
+    return [_pub(d) async for d in db.knowledge_docs.find({"persona_id": pid}, {"_id": 0}).sort("created_at", -1)]
+
+
+async def get_doc(pid: str, kid: str) -> dict:
+    d = await db.knowledge_docs.find_one({"id": kid, "persona_id": pid}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Dokumen tidak ditemukan")
+    return {**_pub(d), "text": "\n\n".join(c["text"] for c in d.get("chunks") or [])}
+
+
+async def delete_doc(pid: str, kid: str) -> dict:
+    d = await db.knowledge_docs.find_one({"id": kid, "persona_id": pid}, {"_id": 0})
+    if d:
+        await vs_remove_doc(d)
+    await db.knowledge_docs.delete_one({"id": kid, "persona_id": pid})
+    return {"ok": True}
+
+
+@router.post("/personas/{pid}/knowledge")
+async def add_knowledge(pid: str, x: KnowledgeIn, u: dict = Depends(current_user)):
+    """Reference knowledge for an assistant (upload or editor). Never 'priority': only the few chunks relevant to a message are injected."""
+    p = await _persona_of(pid, u)
+    return await add_doc(pid, p["user_id"], x, u)
+
+
+async def refresh_doc(pid: str, kid: str, u: dict) -> dict:
     """Re-download a URL- or Drive-sourced document so the assistant sees the latest content."""
-    await _persona_of(pid, u)
     d = await db.knowledge_docs.find_one({"id": kid, "persona_id": pid}, {"_id": 0, "url": 1, "drive_id": 1, "drive_user_id": 1})
     if not d or not (d.get("url") or d.get("drive_id")):
         raise HTTPException(404, "Dokumen dari tautan/Drive tidak ditemukan")
@@ -284,15 +318,19 @@ async def refresh_knowledge(pid: str, kid: str, u: dict = Depends(current_user))
     return _pub(await db.knowledge_docs.find_one({"id": kid}, {"_id": 0}) or r)
 
 
+@router.post("/personas/{pid}/knowledge/{kid}/refresh")
+async def refresh_knowledge(pid: str, kid: str, u: dict = Depends(current_user)):
+    await _persona_of(pid, u)
+    return await refresh_doc(pid, kid, u)
+
+
 class KnowledgeUpdate(BaseModel):
     enabled: Optional[bool] = None
     title: Optional[str] = Field(default=None, min_length=1, max_length=160)
     html: Optional[str] = Field(default=None, max_length=400_000)
 
 
-@router.put("/personas/{pid}/knowledge/{kid}")
-async def update_knowledge(pid: str, kid: str, x: KnowledgeUpdate, u: dict = Depends(current_user)):
-    await _persona_of(pid, u)
+async def update_doc(pid: str, kid: str, x: KnowledgeUpdate) -> dict:
     fields = {"updated_at": now_iso()}
     if x.enabled is not None:
         fields["enabled"] = x.enabled
@@ -309,23 +347,22 @@ async def update_knowledge(pid: str, kid: str, x: KnowledgeUpdate, u: dict = Dep
     return _pub(await db.knowledge_docs.find_one({"id": kid}, {"_id": 0}) or r)
 
 
+@router.put("/personas/{pid}/knowledge/{kid}")
+async def update_knowledge(pid: str, kid: str, x: KnowledgeUpdate, u: dict = Depends(current_user)):
+    await _persona_of(pid, u)
+    return await update_doc(pid, kid, x)
+
+
 @router.get("/personas/{pid}/knowledge/{kid}")
 async def get_knowledge(pid: str, kid: str, u: dict = Depends(current_user)):
     await _persona_of(pid, u)
-    d = await db.knowledge_docs.find_one({"id": kid, "persona_id": pid}, {"_id": 0})
-    if not d:
-        raise HTTPException(404, "Dokumen tidak ditemukan")
-    return {**_pub(d), "text": "\n\n".join(c["text"] for c in d.get("chunks") or [])}
+    return await get_doc(pid, kid)
 
 
 @router.delete("/personas/{pid}/knowledge/{kid}")
 async def delete_knowledge(pid: str, kid: str, u: dict = Depends(current_user)):
     await _persona_of(pid, u)
-    d = await db.knowledge_docs.find_one({"id": kid, "persona_id": pid}, {"_id": 0})
-    if d:
-        await vs_remove_doc(d)
-    await db.knowledge_docs.delete_one({"id": kid, "persona_id": pid})
-    return {"ok": True}
+    return await delete_doc(pid, kid)
 
 
 async def relevant_knowledge(persona_id: str, query: str, k: int = 3) -> list:
@@ -341,3 +378,12 @@ async def relevant_knowledge(persona_id: str, query: str, k: int = 3) -> list:
                 scored.append((s, d["title"], c["text"]))
     scored.sort(key=lambda t: -t[0])
     return [{"title": t, "text": x} for _, t, x in scored[:k]]
+
+
+async def knowledge_digest(persona_id: str, max_chars: int = 15000) -> str:
+    """All enabled documents, each trimmed, for static instructions (Realtime voice has no per-message retrieval)."""
+    docs = await db.knowledge_docs.find({"persona_id": persona_id, "enabled": True}, {"_id": 0, "title": 1, "chunks": 1}).sort("created_at", 1).to_list(50)
+    if not docs:
+        return ""
+    per = max(800, max_chars // len(docs))
+    return "\n\n".join(f"[{d['title']}]\n" + "\n".join(c["text"] for c in d.get("chunks") or [])[:per] for d in docs)[:max_chars]

@@ -484,7 +484,7 @@ async def _persona_system(persona, user, roster=None, voice_mode=False, query=No
     parts += persona_block(persona["name"], lang_name, voice_mode, await character_prompt(persona.get("character_id")))
     if persona.get("builtin"):
         from support_agent import support_prompt_parts
-        parts += await support_prompt_parts()
+        parts += await support_prompt_parts(query)
         parts.append(lang_rule(user))
         return "\n".join(parts)
     parts.append(f"VIDEO PRICING (platform credits, from the admin price list): {await video_pricing_text()}; default clip {seedance.DEFAULT_DUR} s at 720p, Seedance 2.0 up to 15 s, Seedance 2.5 up to 30 s; resolution 480p (×{seedance.multipliers()['res'].get('480p')}) / 720p / 1080p (×{seedance.multipliers()['res'].get('1080p')}); real-person mode (Seedance 2.0, image-to-video only, ×{seedance.multipliers()['real_person']}); generated sound/ambience ×{seedance.multipliers()['audio']}. "
