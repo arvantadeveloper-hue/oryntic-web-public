@@ -202,13 +202,14 @@ async def _cancel_turn(ctx, pending, emit):
             return
     merged = f"{pending['text']}\nJawaban user atas «{pending['question']}»: {text}" if pending else text
     items = await upcoming_items(ctx.user["id"], tz)
-    plan = await plan_cancel(merged, tz, items, ctx.prompt[-500:] if ctx.prompt else "")
+    plan = await plan_cancel(merged, tz, items, ctx.prompt[-500:] if ctx.prompt else "") if items else {"is_cancel": bool(CANCEL_RE.search(text))}
     if pending:
         await _set_pending(ctx.cid, "pending_cancel", None)
     if not plan.get("is_cancel"):
         return
     yield ctx.sse(start=True)
-    title = plan.get("title") or "itu"
+    title = plan.get("title") or ""
+    named = f"agenda «{title}»" if title else "agenda yang Anda maksud"
     item = next((i for i in items if i["id"] == plan.get("match_id")), None)
     if item:
         via = {"call": " beserta pengingat via panggilan", "chat": " beserta pengingat via chat"}.get(item.get("remind_mode") or "", "")
@@ -218,11 +219,11 @@ async def _cancel_turn(ctx, pending, emit):
             yield ev
         return
     if not items or pending:
-        msg = f"Saya cek, agenda «{title}» tidak tercatat di kalender Oryntix — jadi tidak ada yang perlu dihapus. Kalau ada jadwal penggantinya, saya bisa bantu catat."
+        msg = f"Saya cek, {named} tidak tercatat di kalender Oryntix — jadi tidak ada yang perlu dihapus. Kalau ada jadwal penggantinya, saya bisa bantu catat."
         async for ev in emit(ctx, msg, 0, {"tool": "calendar_cancel_none"}):
             yield ev
         return
-    q = plan.get("question") or f"Saya cek, agenda «{title}» tidak saya temukan di kalender Oryntix. Apakah dulu pernah dicatat dengan nama atau waktu lain? Sebutkan saja, nanti saya hapuskan."
+    q = plan.get("question") or f"Saya cek, {named} tidak saya temukan di kalender Oryntix. Apakah dulu pernah dicatat dengan nama atau waktu lain? Sebutkan saja, nanti saya hapuskan."
     await _set_pending(ctx.cid, "pending_cancel", {"stage": "ask", "text": merged[:1500], "question": q[:400], "at": now_iso()})
     async for ev in emit(ctx, q, 0, {"tool": "calendar_cancel_question"}):
         yield ev

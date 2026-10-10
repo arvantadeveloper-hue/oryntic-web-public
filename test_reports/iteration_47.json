@@ -1,0 +1,33 @@
+{
+  "summary": "Iter47 — Agenda confirm/cancel chat flow (text SSE) + voice endpoints (/api/events, /api/events/upcoming, /api/events/cancel) + regression. Wrote /app/backend/tests/test_iter47.py (15 tests, all passing, 44s). Covered: (1) CHAT RECORD — 'Ingatkan saya rapat tim besok' → tool calendar_question asking date/jam + panggilan vs chat; 'jam 10 pagi, via telepon aja' → calendar_confirm with 10:00 + 'panggilan telepon'; 'ya' → calendar_event with '📅 **Tercatat di kalender' + 'menelepon Anda otomatis'; mongo verifies events doc (remind.mode='call', reminder_id set) + reminders doc (event_id, mode='call', status='scheduled'); GET /api/events/upcoming returns the event with kind='event'. (2) CHAT CANCEL — 'rapat tim besok batal' → calendar_cancel_confirm mentioning 'Rapat tim' + 'hapus'; 'ya' → calendar_cancelled; event + reminder gone from mongo. (3) EDGE — 'Catat jadwal meeting klien Kamis jam 14.00, ingatkan lewat chat' → calendar_confirm immediately with 'pesan chat' + 14:00; 'ubah jadi jam 15.00' → calendar_confirm with 15:00; 'tidak usah' → calendar_question with 'tidak jadi'; no event persisted; 'bayar listrik tanggal 20 jam 9 pagi, tanpa pengingat' → calendar_confirm '🔕 Tanpa pengingat' then 'ya' → calendar_event with remind=None, DELETE /api/events/{id} 200; 'janji dokter gigi Jumat gak jadi' → calendar_cancel_none|cancel_question (retried once on LLM non-determinism); 'apa kabar?' → no calendar tool. (4) VOICE — POST /api/events {Uji agenda suara, remind_mode:chat, offsets:[15]} 200; GET /upcoming?q=agenda suara returns id/kind/title/start_at/when(Indonesian weekday)/remind_mode:'chat'/repeat:'none'; /upcoming?q=zzzz falls back to all items; POST /events/cancel {id,kind:'event',conversation_id} 200 + assistant msg with tool 'calendar_cancelled' appended to conv (verified via GET /conversations/{cid}/messages meta.tool); second POST → 404; kind:'foo' → 422. (5) REGRESSION — POST /api/reminders ReminderIn → list contains it, DELETE 200; GET /api/calendar?start&end → 200. (6) FRONTEND — demo login (button 'Masuk'), /calendar renders full month grid with Indonesian weekday headers (SEN/SEL/RAB/KAM/JUM/SAB/MIN) and side 'Ringkasan Harian' panel; /home chat page renders without console errors. (7) CLEANUP — module-scope autouse fixture deletes all test-created events + reminders for the demo user (Rapat tim, Meeting klien, bayar listrik, Uji agenda suara) and clears pending_calendar/pending_cancel on the test conversation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "SSE /api/conversations/{cid}/send → final event for tool 'calendar_event'", "issue": "The SSE final payload in _emit_final whitelists only (media, pending_tool, task_id, task_version, tool, pending_task, results, cta). The 'event' object passed into the extra is persisted on the message meta but NOT streamed to the client. Any voice/chat client that expects event.id in the SSE 'final' frame (e.g. to confirm creation without a follow-up fetch) will see tool='calendar_event' with no event payload. If this is intentional, add a comment; otherwise add 'event' and 'item' to the whitelist so calendar_event / calendar_cancelled frames carry the DB doc."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter47.py",
+    "/app/test_reports/pytest/iter47.xml"
+  ],
+  "action_items": [
+    "Decide: should the SSE 'final' frame for tool='calendar_event' and tool='calendar_cancelled' include the event/item payload? Currently _emit_final strips it (chat.py:584). If yes, add 'event' and 'item' to the whitelist so clients don't need an extra round-trip."
+  ],
+  "critical_code_review_comments": [
+    "agenda_flow._cancel_turn: when plan_cancel returns is_cancel=false the flow silently falls through to the regular LLM reply even if the user said 'batal/gak jadi' with CANCEL_RE matching. Occasional LLM mis-classification was observed for 'janji dokter gigi Jumat gak jadi' (first attempt returned no tool; retry with 'batal' succeeded). Consider: when CANCEL_RE matched the user_text and items is empty, deterministically emit calendar_cancel_none rather than depending on the planner.",
+    "assignments.py:294 delete_event_doc: deletes reminders by {$or:[{event_id:eid},{id:reminder_id or '-'}]} with 'or_' id fallback — fine, but relies on reminder_id being present when the linked reminder was created via create_event_doc; events ingested from external sources without reminder_id still work via event_id.",
+    "assignments.py:267 /events POST: when conversation_id is provided it writes an assistant message via _save_ai_msg but imports chat inside the handler (circular-import workaround). Document this.",
+    "chat._emit_final (chat.py:584) whitelist is implicit — easy to miss when adding new tool extras. Consider a per-tool allowlist map so authors don't silently drop payloads (as happened for 'event')."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter47.py"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100%"},
+  "test_credentials": "demo@aivora.ai / demo123456",
+  "seed_data_creation": "Autouse module-scope `cleanup` fixture deletes test events + reminders matching titles ('Rapat tim', 'Meeting klien', 'bayar listrik', 'Uji agenda suara') for demo user, and clears pending_calendar/pending_cancel from conversations.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run with `-o addopts=''` to bypass pytest.ini xdist loadscope — the test file is sequential (pending_calendar state on the single conversation is shared across tests). SSE 'final' for tool='calendar_event' does NOT include the event doc; verify via mongo lookup by (user_id, title regex) sorted by created_at desc. Rate-limit on /conversations/{cid}/send is >=2s between messages; test uses time.sleep(2.2). LLM planner (plan_calendar / plan_cancel) latency 2–6 s per message; module took ~44s wall-clock. CANCEL_RE regex includes 'gak jadi' so the message routes to _cancel_turn even when nothing matches — but final tool depends on the LLM plan_cancel which is occasionally non-deterministic (one retry already baked into test_06c).",
+  "rca of the issue": "N/A (no bugs blocking the spec); SSE whitelist in _emit_final silently drops the 'event'/'item' extra for calendar_event/calendar_cancelled — likely a design choice but worth confirming."
+}

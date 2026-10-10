@@ -581,7 +581,7 @@ async def _emit_final(ctx, text: str, credits: int, extra: dict):
     """Persist the assistant message for a tool turn and yield its final SSE + credits."""
     msg = await _save_ai_msg(ctx.cid, ctx.persona, text, credits, ctx.via, extra)
     payload = {"message_id": msg["id"], "content": text}
-    for k in ("media", "pending_tool", "task_id", "task_version", "tool", "pending_task", "results", "cta"):
+    for k in ("media", "pending_tool", "task_id", "task_version", "tool", "pending_task", "results", "cta", "event", "item", "pending_calendar"):
         if k in extra:
             payload[k] = extra[k]
     yield ctx.sse(final=True, **payload)
